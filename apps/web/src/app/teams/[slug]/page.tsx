@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ReviewsSection } from "@/components/teams/reviews-section";
 import { TeamBuilderControls } from "@/components/teams/team-builder-controls";
-import { fetchTeam } from "@/lib/api";
+import { fetchTeam, fetchTeamReviews } from "@/lib/api";
 
 export default async function TeamDetailsPage({ params }: { params: { slug: string } }) {
   try {
-    const team = await fetchTeam(params.slug);
+    const [team, reviews] = await Promise.all([fetchTeam(params.slug), fetchTeamReviews(params.slug)]);
 
     return (
       <section className="max-w-4xl space-y-6">
@@ -63,6 +64,7 @@ export default async function TeamDetailsPage({ params }: { params: { slug: stri
         </section>
 
         <TeamBuilderControls teamSlug={team.slug} teamStatus={team.status} />
+        <ReviewsSection initialReviews={reviews.items} teamSlug={team.slug} />
       </section>
     );
   } catch {

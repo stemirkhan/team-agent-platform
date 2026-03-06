@@ -326,3 +326,35 @@ export async function createAgentReview(
 
   return json as Review;
 }
+
+export async function fetchTeamReviews(slug: string): Promise<ReviewListResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/teams/${slug}/reviews`, { cache: "no-store" });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch team reviews.");
+  }
+
+  return response.json() as Promise<ReviewListResponse>;
+}
+
+export async function createTeamReview(
+  slug: string,
+  payload: ReviewCreatePayload,
+  token: string
+): Promise<Review> {
+  const response = await fetch(`${getApiBaseUrl()}/teams/${slug}/reviews`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to create review.");
+  }
+
+  return json as Review;
+}

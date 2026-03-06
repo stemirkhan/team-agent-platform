@@ -51,7 +51,7 @@ Foundation:
   - страница агента `/agents/[slug]` с Add To Team и секцией Reviews;
   - страница каталога `/teams`;
   - страница создания команды `/teams/new`;
-  - страница команды `/teams/[slug]` с базовым Team Builder (add item + publish).
+  - страница команды `/teams/[slug]` с Team Builder (add item + publish) и секцией Reviews.
 
 ## Быстрый старт
 
