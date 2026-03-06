@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { LogIn, LogOut, UserPlus } from "lucide-react";
 
 import {
   clearAccessToken,
@@ -64,15 +65,17 @@ export function AuthControls() {
     return (
       <div className="flex items-center gap-2">
         <Link
-          className="rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+          className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
           href="/auth/login"
         >
+          <LogIn className="h-3.5 w-3.5" />
           Login
         </Link>
         <Link
-          className="rounded-md bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700"
+          className="inline-flex items-center gap-1.5 rounded-full bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-800"
           href="/auth/register"
         >
+          <UserPlus className="h-3.5 w-3.5" />
           Register
         </Link>
       </div>
@@ -81,15 +84,18 @@ export function AuthControls() {
 
   return (
     <div className="flex items-center gap-3">
-      <span className="text-xs font-semibold text-slate-600">{state.user.display_name}</span>
+      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+        {state.user.display_name}
+      </span>
       <button
-        className="rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+        className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
         onClick={() => {
           clearAccessToken();
           setState({ loading: false, user: null });
         }}
         type="button"
       >
+        <LogOut className="h-3.5 w-3.5" />
         Logout
       </button>
     </div>

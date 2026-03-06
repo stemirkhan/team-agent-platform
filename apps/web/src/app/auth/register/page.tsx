@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { KeyRound, Mail, UserRound, UserRoundPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { registerWithPassword, setAccessToken } from "@/lib/auth-client";
@@ -39,46 +40,59 @@ export default function RegisterPage() {
   }
 
   return (
-    <section className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="mx-auto max-w-md rounded-3xl border border-slate-200 bg-white/95 p-6 shadow-lg shadow-slate-200/60">
+      <p className="mb-3 inline-flex items-center gap-2 rounded-full bg-brand-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-800">
+        <UserRoundPlus className="h-3.5 w-3.5" />
+        Auth
+      </p>
       <h1 className="mb-2 text-2xl font-black text-slate-900">Register</h1>
       <p className="mb-6 text-sm text-slate-600">Create your account to publish and compose teams.</p>
 
       <form className="space-y-4" onSubmit={onSubmit}>
         <label className="block text-sm font-semibold text-slate-700">
           Display name
-          <input
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            onChange={(event) => setDisplayName(event.target.value)}
-            placeholder="Your name"
-            required
-            type="text"
-            value={displayName}
-          />
+          <div className="relative mt-1">
+            <input
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="Your name"
+              required
+              type="text"
+              value={displayName}
+            />
+            <UserRound className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          </div>
         </label>
 
         <label className="block text-sm font-semibold text-slate-700">
           Email
-          <input
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@example.com"
-            required
-            type="email"
-            value={email}
-          />
+          <div className="relative mt-1">
+            <input
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+              required
+              type="email"
+              value={email}
+            />
+            <Mail className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          </div>
         </label>
 
         <label className="block text-sm font-semibold text-slate-700">
           Password
-          <input
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            minLength={8}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="At least 8 characters"
-            required
-            type="password"
-            value={password}
-          />
+          <div className="relative mt-1">
+            <input
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+              minLength={8}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="At least 8 characters"
+              required
+              type="password"
+              value={password}
+            />
+            <KeyRound className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          </div>
         </label>
 
         {errorMessage ? (

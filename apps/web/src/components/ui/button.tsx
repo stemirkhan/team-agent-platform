@@ -4,12 +4,13 @@ import { type ButtonHTMLAttributes, forwardRef } from "react";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center rounded-lg text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60",
+  "inline-flex items-center justify-center rounded-xl text-sm font-semibold transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60",
   {
     variants: {
       variant: {
-        primary: "bg-brand-600 text-white hover:bg-brand-700",
-        secondary: "bg-slate-200 text-slate-900 hover:bg-slate-300",
+        primary:
+          "bg-gradient-to-r from-brand-700 to-brand-600 text-white shadow-sm shadow-brand-300/60 hover:from-brand-800 hover:to-brand-700",
+        secondary: "bg-white text-slate-800 ring-1 ring-slate-300 hover:bg-slate-50 hover:ring-slate-400",
         ghost: "bg-transparent text-slate-700 hover:bg-slate-100"
       },
       size: {

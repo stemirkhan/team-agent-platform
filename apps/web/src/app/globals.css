@@ -4,13 +4,31 @@
 
 :root {
   color-scheme: light;
+  --page-bg: #f4f8ff;
+  --text-primary: #0f172a;
 }
 
 body {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 10% 0%, rgba(34, 134, 255, 0.1), transparent 45%),
-    radial-gradient(circle at 100% 0%, rgba(0, 82, 210, 0.08), transparent 40%),
-    #f8fbff;
-  color: #0f172a;
+  background-color: var(--page-bg);
+  background-image:
+    radial-gradient(circle at 6% 0%, rgba(0, 102, 245, 0.17), transparent 40%),
+    radial-gradient(circle at 92% 8%, rgba(8, 145, 178, 0.12), transparent 35%),
+    linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
+  color: var(--text-primary);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading), "Space Grotesk", sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.app-noise {
+  background-image: radial-gradient(rgba(15, 23, 42, 0.05) 0.6px, transparent 0.6px);
+  background-size: 4px 4px;
 }
