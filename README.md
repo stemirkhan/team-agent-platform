@@ -1,4 +1,4 @@
-# Agent Marketplace Monorepo
+# Team Agent Platform Monorepo
 
 MVP монорепозиторий маркетплейса для субагентов и команд агентов.
 

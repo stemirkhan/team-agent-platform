@@ -26,7 +26,7 @@ const headingFont = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Agent Marketplace",
+  title: "Team Agent Platform",
   description: "MVP marketplace for subagents and agent teams"
 };
 
@@ -68,7 +68,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 <span className="rounded-lg bg-brand-100 p-1.5 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
                   <Compass className="h-5 w-5" />
                 </span>
-                Agent Marketplace
+                Team Agent Platform
               </Link>
               <div className="flex items-center gap-4">
                 <MainNav />
@@ -79,7 +79,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           </header>
           <main className="flex-1 pb-8">{children}</main>
           <footer className="mt-6 border-t border-slate-200 dark:border-slate-700/80 py-4 text-xs text-slate-500 dark:text-slate-400">
-            Marketplace MVP for subagents and teams
+            Team Agent Platform MVP for subagents and teams
           </footer>
         </div>
       </body>

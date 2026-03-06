@@ -1,4 +1,4 @@
-name: agent-marketplace
+name: team-agent-platform
 
 services:
   postgres:
