@@ -44,8 +44,8 @@ export function MainNav() {
             className={[
               "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold transition",
               active
-                ? "bg-brand-100 text-brand-800 ring-1 ring-brand-300"
-                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                ? "bg-brand-100 text-brand-800 ring-1 ring-brand-300 dark:bg-brand-900/40 dark:text-brand-200 dark:ring-brand-700"
+                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100"
             ].join(" ")}
             href={item.href}
             key={item.href}

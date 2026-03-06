@@ -15,10 +15,10 @@ export default async function TeamDetailsPage({ params }: { params: { slug: stri
           &larr; Back to teams
         </Link>
 
-        <h1 className="mb-2 text-3xl font-black text-slate-900">{team.title}</h1>
-        <p className="mb-6 text-slate-600">{team.description ?? "No description yet."}</p>
+        <h1 className="mb-2 text-3xl font-black text-slate-900 dark:text-slate-50">{team.title}</h1>
+        <p className="mb-6 text-slate-600 dark:text-slate-300">{team.description ?? "No description yet."}</p>
 
-        <div className="mb-6 grid gap-3 rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700 md:grid-cols-2">
+        <div className="mb-6 grid gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-sm text-slate-700 dark:text-slate-200 md:grid-cols-2">
           <p>
             <span className="font-semibold">Slug:</span> {team.slug}
           </p>
@@ -33,16 +33,16 @@ export default async function TeamDetailsPage({ params }: { params: { slug: stri
           </p>
         </div>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="mb-4 text-xl font-bold text-slate-900">Team Items</h2>
+        <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
+          <h2 className="mb-4 text-xl font-bold text-slate-900 dark:text-slate-50">Team Items</h2>
 
           {team.items.length === 0 ? (
-            <p className="text-sm text-slate-500">No items in this team yet.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">No items in this team yet.</p>
           ) : (
             <ul className="space-y-3">
               {team.items.map((item) => (
                 <li
-                  className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700"
+                  className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 p-4 text-sm text-slate-700 dark:text-slate-200"
                   key={item.id}
                 >
                   <p>

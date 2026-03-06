@@ -131,17 +131,17 @@ export function TeamBuilderControls({ teamSlug, teamStatus }: TeamBuilderControl
 
   if (loading) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
-        <p className="text-sm text-slate-500">Checking authorization...</p>
+      <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
+        <p className="text-sm text-slate-500 dark:text-slate-400">Checking authorization...</p>
       </section>
     );
   }
 
   if (!user) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-2 text-lg font-bold text-slate-900">Team Builder</h2>
-        <p className="text-sm text-slate-600">
+      <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
+        <h2 className="mb-2 text-lg font-bold text-slate-900 dark:text-slate-50">Team Builder</h2>
+        <p className="text-sm text-slate-600 dark:text-slate-300">
           Login to manage team items and publish this team.
         </p>
       </section>
@@ -149,11 +149,11 @@ export function TeamBuilderControls({ teamSlug, teamStatus }: TeamBuilderControl
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5">
+    <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Team Builder</h2>
-          <p className="text-sm text-slate-600">Signed in as {user.display_name}</p>
+          <h2 className="text-lg font-bold text-slate-900 dark:text-slate-50">Team Builder</h2>
+          <p className="text-sm text-slate-600 dark:text-slate-300">Signed in as {user.display_name}</p>
         </div>
         <div className="flex items-center gap-2">
           <Link className="text-sm font-semibold text-brand-700 hover:text-brand-900" href="/agents">
@@ -172,10 +172,10 @@ export function TeamBuilderControls({ teamSlug, teamStatus }: TeamBuilderControl
       </div>
 
       <form className="space-y-3" onSubmit={onAddItem}>
-        <label className="block text-sm font-semibold text-slate-700">
+        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Agent slug
           <input
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
             minLength={2}
             onChange={(event) => setAgentSlug(event.target.value)}
             placeholder="api-auditor"
@@ -185,10 +185,10 @@ export function TeamBuilderControls({ teamSlug, teamStatus }: TeamBuilderControl
           />
         </label>
 
-        <label className="block text-sm font-semibold text-slate-700">
+        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Role name
           <input
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
             minLength={2}
             onChange={(event) => setRoleName(event.target.value)}
             placeholder="reviewer"
@@ -198,10 +198,10 @@ export function TeamBuilderControls({ teamSlug, teamStatus }: TeamBuilderControl
           />
         </label>
 
-        <label className="block text-sm font-semibold text-slate-700">
+        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Order index (optional)
           <input
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
             min={0}
             onChange={(event) => setOrderIndex(event.target.value)}
             placeholder="auto"
@@ -210,7 +210,7 @@ export function TeamBuilderControls({ teamSlug, teamStatus }: TeamBuilderControl
           />
         </label>
 
-        <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
           <input
             checked={isRequired}
             onChange={(event) => setIsRequired(event.target.checked)}
@@ -220,13 +220,13 @@ export function TeamBuilderControls({ teamSlug, teamStatus }: TeamBuilderControl
         </label>
 
         {errorMessage ? (
-          <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          <p className="rounded-lg border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
             {errorMessage}
           </p>
         ) : null}
 
         {successMessage ? (
-          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          <p className="rounded-lg border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             {successMessage}
           </p>
         ) : null}

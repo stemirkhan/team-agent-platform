@@ -40,20 +40,20 @@ export default function RegisterPage() {
   }
 
   return (
-    <section className="mx-auto max-w-md rounded-3xl border border-slate-200 bg-white/95 p-6 shadow-lg shadow-slate-200/60">
+    <section className="mx-auto max-w-md rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/95 p-6 shadow-lg shadow-slate-200/60">
       <p className="mb-3 inline-flex items-center gap-2 rounded-full bg-brand-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-800">
         <UserRoundPlus className="h-3.5 w-3.5" />
         Auth
       </p>
-      <h1 className="mb-2 text-2xl font-black text-slate-900">Register</h1>
-      <p className="mb-6 text-sm text-slate-600">Create your account to publish and compose teams.</p>
+      <h1 className="mb-2 text-2xl font-black text-slate-900 dark:text-slate-50">Register</h1>
+      <p className="mb-6 text-sm text-slate-600 dark:text-slate-300">Create your account to publish and compose teams.</p>
 
       <form className="space-y-4" onSubmit={onSubmit}>
-        <label className="block text-sm font-semibold text-slate-700">
+        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Display name
           <div className="relative mt-1">
             <input
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
               onChange={(event) => setDisplayName(event.target.value)}
               placeholder="Your name"
               required
@@ -64,11 +64,11 @@ export default function RegisterPage() {
           </div>
         </label>
 
-        <label className="block text-sm font-semibold text-slate-700">
+        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Email
           <div className="relative mt-1">
             <input
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
               onChange={(event) => setEmail(event.target.value)}
               placeholder="you@example.com"
               required
@@ -79,11 +79,11 @@ export default function RegisterPage() {
           </div>
         </label>
 
-        <label className="block text-sm font-semibold text-slate-700">
+        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Password
           <div className="relative mt-1">
             <input
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
               minLength={8}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="At least 8 characters"
@@ -96,7 +96,7 @@ export default function RegisterPage() {
         </label>
 
         {errorMessage ? (
-          <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          <p className="rounded-lg border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
             {errorMessage}
           </p>
         ) : null}
@@ -106,7 +106,7 @@ export default function RegisterPage() {
         </Button>
       </form>
 
-      <p className="mt-4 text-sm text-slate-600">
+      <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
         Already registered?{" "}
         <Link className="font-semibold text-brand-700 hover:text-brand-900" href="/auth/login">
           Login

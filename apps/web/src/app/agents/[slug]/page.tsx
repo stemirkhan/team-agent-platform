@@ -18,10 +18,10 @@ export default async function AgentDetailsPage({ params }: { params: { slug: str
           &larr; Back to catalog
         </Link>
 
-        <h1 className="mb-2 text-3xl font-black text-slate-900">{agent.title}</h1>
-        <p className="mb-6 text-slate-600">{agent.short_description}</p>
+        <h1 className="mb-2 text-3xl font-black text-slate-900 dark:text-slate-50">{agent.title}</h1>
+        <p className="mb-6 text-slate-600 dark:text-slate-300">{agent.short_description}</p>
 
-        <div className="mb-6 grid gap-3 rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700 md:grid-cols-2">
+        <div className="mb-6 grid gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-sm text-slate-700 dark:text-slate-200 md:grid-cols-2">
           <p>
             <span className="font-semibold">Slug:</span> {agent.slug}
           </p>
@@ -39,7 +39,7 @@ export default async function AgentDetailsPage({ params }: { params: { slug: str
           </p>
         </div>
 
-        <article className="prose prose-slate max-w-none rounded-2xl border border-slate-200 bg-white p-5">
+        <article className="prose-slate max-w-none rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
           <h2>Full Description</h2>
           <p>{agent.full_description ?? "No full description yet."}</p>
         </article>

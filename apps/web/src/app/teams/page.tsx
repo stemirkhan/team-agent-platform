@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PlusCircle, Sparkles, UsersRound } from "lucide-react";
+import { PlusCircle, UsersRound } from "lucide-react";
 
 import { TeamCard } from "@/components/teams/team-card";
 import { Button } from "@/components/ui/button";
@@ -12,15 +12,13 @@ export default async function TeamsCatalogPage() {
     <section>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="mb-2 inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-brand-700 ring-1 ring-brand-200">
-            <Sparkles className="h-3.5 w-3.5" />
-            Team presets
-          </p>
-          <h1 className="mb-2 inline-flex items-center gap-2 text-3xl font-black text-slate-900">
-            <UsersRound className="h-8 w-8 text-brand-700" />
-            Team Catalog
+          <h1 className="mb-2 flex items-center gap-3 text-3xl font-black text-slate-900 dark:text-slate-50">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-brand-100 text-brand-700 ring-1 ring-brand-200 dark:bg-brand-900/40 dark:text-brand-300 dark:ring-brand-700/60">
+              <UsersRound className="h-5 w-5" />
+            </span>
+            <span>Team Catalog</span>
           </h1>
-          <p className="text-sm text-slate-600">Published teams assembled from marketplace agents.</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">Published teams assembled from marketplace agents.</p>
         </div>
         <Link href="/teams/new">
           <Button>
@@ -31,7 +29,7 @@ export default async function TeamsCatalogPage() {
       </div>
 
       {data.items.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500">
+        <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
           No published teams yet. Use `POST /api/v1/teams` and `POST /api/v1/teams/&lt;slug&gt;/publish`
           to add your first team.
         </div>

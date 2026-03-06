@@ -58,21 +58,21 @@ export function AuthControls() {
   }, [pathname]);
 
   if (state.loading) {
-    return <span className="text-xs text-slate-500">auth...</span>;
+    return <span className="text-xs text-slate-500 dark:text-slate-400">auth...</span>;
   }
 
   if (!state.user) {
     return (
       <div className="flex items-center gap-2">
         <Link
-          className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+          className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
           href="/auth/login"
         >
           <LogIn className="h-3.5 w-3.5" />
           Login
         </Link>
         <Link
-          className="inline-flex items-center gap-1.5 rounded-full bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-800"
+          className="inline-flex items-center gap-1.5 rounded-full bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-800 dark:bg-brand-600 dark:hover:bg-brand-500"
           href="/auth/register"
         >
           <UserPlus className="h-3.5 w-3.5" />
@@ -84,11 +84,11 @@ export function AuthControls() {
 
   return (
     <div className="flex items-center gap-3">
-      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
         {state.user.display_name}
       </span>
       <button
-        className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+        className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
         onClick={() => {
           clearAccessToken();
           setState({ loading: false, user: null });

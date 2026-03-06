@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Star } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { clearAccessToken, fetchCurrentUser, getAccessToken, type AuthUser } from "@/lib/auth-client";
@@ -14,6 +15,22 @@ type ReviewsSectionProps = {
 
 function formatDate(isoDate: string): string {
   return new Date(isoDate).toLocaleDateString();
+}
+
+function getRatingLabel(value: number): string {
+  if (value >= 5) {
+    return "excellent";
+  }
+  if (value >= 4) {
+    return "good";
+  }
+  if (value >= 3) {
+    return "okay";
+  }
+  if (value >= 2) {
+    return "weak";
+  }
+  return "poor";
 }
 
 export function ReviewsSection({ agentSlug, initialReviews }: ReviewsSectionProps) {
@@ -108,21 +125,21 @@ export function ReviewsSection({ agentSlug, initialReviews }: ReviewsSectionProp
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5">
-      <h2 className="mb-4 text-xl font-bold text-slate-900">Reviews</h2>
+    <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
+      <h2 className="mb-4 text-xl font-bold text-slate-900 dark:text-slate-50">Reviews</h2>
 
       {reviews.length === 0 ? (
-        <p className="mb-5 text-sm text-slate-500">No reviews yet.</p>
+        <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">No reviews yet.</p>
       ) : (
         <ul className="mb-6 space-y-3">
           {reviews.map((review) => (
-            <li className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700" key={review.id}>
-              <p className="mb-1 font-semibold text-slate-900">
+            <li className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 p-4 text-sm text-slate-700 dark:text-slate-200" key={review.id}>
+              <p className="mb-1 font-semibold text-slate-900 dark:text-slate-50">
                 {review.user_display_name} · {review.rating}/5
               </p>
-              <p className="mb-2 text-xs text-slate-500">{formatDate(review.created_at)}</p>
+              <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">{formatDate(review.created_at)}</p>
               <p className="mb-2">{review.text ?? "No text review provided."}</p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 works: {review.works_as_expected ? "yes" : "no"} · outdated: {review.outdated_flag ? "yes" : "no"} ·
                 unsafe: {review.unsafe_flag ? "yes" : "no"}
               </p>
@@ -132,37 +149,49 @@ export function ReviewsSection({ agentSlug, initialReviews }: ReviewsSectionProp
       )}
 
       {!user ? (
-        <p className="text-sm text-slate-600">Login to leave a review.</p>
+        <p className="text-sm text-slate-600 dark:text-slate-300">Login to leave a review.</p>
       ) : (
         <form className="space-y-3" onSubmit={onSubmit}>
-          <p className="text-sm text-slate-600">Signed in as {user.display_name}</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">Signed in as {user.display_name}</p>
 
-          <label className="block text-sm font-semibold text-slate-700">
-            Rating
-            <select
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-              onChange={(event) => setRating(Number(event.target.value))}
-              value={rating}
-            >
-              <option value={5}>5 - excellent</option>
-              <option value={4}>4 - good</option>
-              <option value={3}>3 - okay</option>
-              <option value={2}>2 - weak</option>
-              <option value={1}>1 - poor</option>
-            </select>
-          </label>
+          <div>
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Rating</p>
+            <div className="mt-1 flex items-center gap-1">
+              {[1, 2, 3, 4, 5].map((starValue) => (
+                <button
+                  aria-label={`Set rating to ${starValue}`}
+                  className="rounded-md p-1 transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                  key={starValue}
+                  onClick={() => setRating(starValue)}
+                  type="button"
+                >
+                  <Star
+                    className={[
+                      "h-5 w-5 transition",
+                      starValue <= rating
+                        ? "fill-amber-400 text-amber-400"
+                        : "fill-transparent text-slate-300 dark:text-slate-600"
+                    ].join(" ")}
+                  />
+                </button>
+              ))}
+              <span className="ml-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                {rating} - {getRatingLabel(rating)}
+              </span>
+            </div>
+          </div>
 
-          <label className="block text-sm font-semibold text-slate-700">
+          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
             Review text (optional)
             <textarea
-              className="mt-1 min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1 min-h-24 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
               onChange={(event) => setText(event.target.value)}
               placeholder="Share what worked and what did not."
               value={text}
             />
           </label>
 
-          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
             <input
               checked={worksAsExpected}
               onChange={(event) => setWorksAsExpected(event.target.checked)}
@@ -171,7 +200,7 @@ export function ReviewsSection({ agentSlug, initialReviews }: ReviewsSectionProp
             Works as expected
           </label>
 
-          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
             <input
               checked={outdatedFlag}
               onChange={(event) => setOutdatedFlag(event.target.checked)}
@@ -180,7 +209,7 @@ export function ReviewsSection({ agentSlug, initialReviews }: ReviewsSectionProp
             Mark as outdated
           </label>
 
-          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
             <input checked={unsafeFlag} onChange={(event) => setUnsafeFlag(event.target.checked)} type="checkbox" />
             Mark as potentially unsafe
           </label>
