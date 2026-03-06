@@ -2,10 +2,12 @@
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.api.deps import get_current_user, get_team_service
+from app.api.deps import get_current_user, get_review_service, get_team_service
 from app.models.team import TeamStatus
 from app.models.user import User
+from app.schemas.review import ReviewCreate, ReviewListResponse, ReviewRead
 from app.schemas.team import TeamCreate, TeamDetailsRead, TeamItemCreate, TeamListResponse, TeamRead
+from app.services.review_service import ReviewService
 from app.services.team_service import TeamService
 
 router = APIRouter(prefix="/teams", tags=["teams"])
@@ -63,3 +65,25 @@ def publish_team(
 ) -> TeamRead:
     """Transition team to published state."""
     return service.publish_team(slug, user)
+
+
+@router.get("/{slug}/reviews", response_model=ReviewListResponse)
+def list_team_reviews(
+    slug: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: ReviewService = Depends(get_review_service),
+) -> ReviewListResponse:
+    """Return paginated reviews for a published team."""
+    return service.list_team_reviews(slug=slug, limit=limit, offset=offset)
+
+
+@router.post("/{slug}/reviews", response_model=ReviewRead, status_code=status.HTTP_201_CREATED)
+def create_team_review(
+    slug: str,
+    payload: ReviewCreate,
+    user: User = Depends(get_current_user),
+    service: ReviewService = Depends(get_review_service),
+) -> ReviewRead:
+    """Create review for a published team."""
+    return service.create_team_review(slug=slug, payload=payload, current_user=user)

@@ -38,6 +38,21 @@ export type TeamDetails = Team & {
   items: TeamItem[];
 };
 
+export type Review = {
+  id: string;
+  user_id: string;
+  user_display_name: string;
+  entity_type: "agent" | "team";
+  entity_id: string;
+  rating: number;
+  text: string | null;
+  works_as_expected: boolean;
+  outdated_flag: boolean;
+  unsafe_flag: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AgentListResponse = {
   items: Agent[];
   total: number;
@@ -47,6 +62,13 @@ export type AgentListResponse = {
 
 export type TeamListResponse = {
   items: Team[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type ReviewListResponse = {
+  items: Review[];
   total: number;
   limit: number;
   offset: number;
@@ -72,6 +94,14 @@ export type TeamItemCreatePayload = {
   order_index?: number;
   config_json?: Record<string, unknown>;
   is_required?: boolean;
+};
+
+export type ReviewCreatePayload = {
+  rating: number;
+  text?: string;
+  works_as_expected?: boolean;
+  outdated_flag?: boolean;
+  unsafe_flag?: boolean;
 };
 
 export type FetchMyTeamsOptions = {
@@ -263,4 +293,36 @@ export async function addTeamItem(
   }
 
   return json as TeamDetails;
+}
+
+export async function fetchAgentReviews(slug: string): Promise<ReviewListResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/reviews`, { cache: "no-store" });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch agent reviews.");
+  }
+
+  return response.json() as Promise<ReviewListResponse>;
+}
+
+export async function createAgentReview(
+  slug: string,
+  payload: ReviewCreatePayload,
+  token: string
+): Promise<Review> {
+  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/reviews`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to create review.");
+  }
+
+  return json as Review;
 }

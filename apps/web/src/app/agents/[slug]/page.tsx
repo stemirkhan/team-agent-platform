@@ -2,11 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AddToTeamControls } from "@/components/agents/add-to-team-controls";
-import { fetchAgent } from "@/lib/api";
+import { ReviewsSection } from "@/components/agents/reviews-section";
+import { fetchAgent, fetchAgentReviews } from "@/lib/api";
 
 export default async function AgentDetailsPage({ params }: { params: { slug: string } }) {
   try {
-    const agent = await fetchAgent(params.slug);
+    const [agent, reviews] = await Promise.all([
+      fetchAgent(params.slug),
+      fetchAgentReviews(params.slug),
+    ]);
 
     return (
       <section className="max-w-3xl space-y-6">
@@ -41,6 +45,7 @@ export default async function AgentDetailsPage({ params }: { params: { slug: str
         </article>
 
         <AddToTeamControls agentSlug={agent.slug} />
+        <ReviewsSection agentSlug={agent.slug} initialReviews={reviews.items} />
       </section>
     );
   } catch {

@@ -33,18 +33,22 @@ Foundation:
   - `GET /api/v1/agents/{slug}`
   - `POST /api/v1/agents` (Bearer token)
   - `POST /api/v1/agents/{slug}/publish` (Bearer token, owner only)
+  - `GET /api/v1/agents/{slug}/reviews`
+  - `POST /api/v1/agents/{slug}/reviews` (Bearer token, one review per user)
 - каталог и конструктор команд API:
   - `GET /api/v1/teams`
   - `GET /api/v1/teams/{slug}`
   - `POST /api/v1/teams` (Bearer token)
   - `POST /api/v1/teams/{slug}/items` (Bearer token, owner only)
   - `POST /api/v1/teams/{slug}/publish` (Bearer token, owner only)
+  - `GET /api/v1/teams/{slug}/reviews`
+  - `POST /api/v1/teams/{slug}/reviews` (Bearer token, one review per user)
 - frontend:
   - главная страница;
   - страницы авторизации `/auth/login` и `/auth/register`;
   - страница каталога `/agents`;
   - страница создания агента `/agents/new`;
-  - страница агента `/agents/[slug]` с Add To Team (выбор из `моих draft-команд` + поиск);
+  - страница агента `/agents/[slug]` с Add To Team и секцией Reviews;
   - страница каталога `/teams`;
   - страница создания команды `/teams/new`;
   - страница команды `/teams/[slug]` с базовым Team Builder (add item + publish).

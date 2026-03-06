@@ -7,10 +7,12 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import decode_access_token
 from app.repositories.agent import AgentRepository
+from app.repositories.review import ReviewRepository
 from app.repositories.team import TeamRepository
 from app.repositories.user import UserRepository
 from app.services.agent_service import AgentService
 from app.services.auth_service import AuthService
+from app.services.review_service import ReviewService
 from app.services.team_service import TeamService
 
 bearer_scheme = HTTPBearer(auto_error=True)
@@ -33,6 +35,14 @@ def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     """Build AuthService with request-scoped DB session."""
     user_repository = UserRepository(db)
     return AuthService(user_repository)
+
+
+def get_review_service(db: Session = Depends(get_db)) -> ReviewService:
+    """Build ReviewService with request-scoped DB session."""
+    review_repository = ReviewRepository(db)
+    agent_repository = AgentRepository(db)
+    team_repository = TeamRepository(db)
+    return ReviewService(review_repository, agent_repository, team_repository)
 
 
 def get_current_user(
