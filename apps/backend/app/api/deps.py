@@ -7,10 +7,12 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import decode_access_token
 from app.repositories.agent import AgentRepository
+from app.repositories.agent_version import AgentVersionRepository
 from app.repositories.review import ReviewRepository
 from app.repositories.team import TeamRepository
 from app.repositories.user import UserRepository
 from app.services.agent_service import AgentService
+from app.services.agent_version_service import AgentVersionService
 from app.services.auth_service import AuthService
 from app.services.review_service import ReviewService
 from app.services.team_service import TeamService
@@ -22,6 +24,13 @@ def get_agent_service(db: Session = Depends(get_db)) -> AgentService:
     """Build AgentService with request-scoped DB session."""
     repository = AgentRepository(db)
     return AgentService(repository)
+
+
+def get_agent_version_service(db: Session = Depends(get_db)) -> AgentVersionService:
+    """Build AgentVersionService with request-scoped DB session."""
+    agent_repository = AgentRepository(db)
+    agent_version_repository = AgentVersionRepository(db)
+    return AgentVersionService(agent_repository, agent_version_repository)
 
 
 def get_team_service(db: Session = Depends(get_db)) -> TeamService:

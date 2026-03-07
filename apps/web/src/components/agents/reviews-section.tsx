@@ -125,7 +125,7 @@ export function ReviewsSection({ agentSlug, initialReviews }: ReviewsSectionProp
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
+    <section className="rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5">
       <h2 className="mb-4 text-xl font-bold text-slate-900 dark:text-slate-50">Reviews</h2>
 
       {reviews.length === 0 ? (
@@ -133,7 +133,7 @@ export function ReviewsSection({ agentSlug, initialReviews }: ReviewsSectionProp
       ) : (
         <ul className="mb-6 space-y-3">
           {reviews.map((review) => (
-            <li className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 p-4 text-sm text-slate-700 dark:text-slate-200" key={review.id}>
+            <li className="rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/70 p-4 text-sm text-slate-700 dark:text-slate-200" key={review.id}>
               <p className="mb-1 font-semibold text-slate-900 dark:text-slate-50">
                 {review.user_display_name} · {review.rating}/5
               </p>
@@ -184,7 +184,7 @@ export function ReviewsSection({ agentSlug, initialReviews }: ReviewsSectionProp
           <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
             Review text (optional)
             <textarea
-              className="mt-1 min-h-24 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
+              className="mt-1 min-h-24 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
               onChange={(event) => setText(event.target.value)}
               placeholder="Share what worked and what did not."
               value={text}

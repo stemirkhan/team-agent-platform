@@ -10,15 +10,15 @@ export default async function TeamDetailsPage({ params }: { params: { slug: stri
     const [team, reviews] = await Promise.all([fetchTeam(params.slug), fetchTeamReviews(params.slug)]);
 
     return (
-      <section className="max-w-4xl space-y-6">
-        <Link className="mb-4 inline-flex text-sm font-semibold text-brand-700 hover:text-brand-900" href="/teams">
+      <section className="w-full space-y-6">
+        <Link className="mb-4 inline-flex text-sm font-semibold text-brand-700 hover:text-brand-900 dark:text-slate-200 dark:hover:text-white" href="/teams">
           &larr; Back to teams
         </Link>
 
         <h1 className="mb-2 text-3xl font-black text-slate-900 dark:text-slate-50">{team.title}</h1>
         <p className="mb-6 text-slate-600 dark:text-slate-300">{team.description ?? "No description yet."}</p>
 
-        <div className="mb-6 grid gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-sm text-slate-700 dark:text-slate-200 md:grid-cols-2">
+        <div className="mb-6 grid gap-3 rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 text-sm text-slate-700 dark:text-slate-200 md:grid-cols-2">
           <p>
             <span className="font-semibold">Slug:</span> {team.slug}
           </p>
@@ -33,7 +33,7 @@ export default async function TeamDetailsPage({ params }: { params: { slug: stri
           </p>
         </div>
 
-        <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
+        <section className="rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5">
           <h2 className="mb-4 text-xl font-bold text-slate-900 dark:text-slate-50">Team Items</h2>
 
           {team.items.length === 0 ? (
@@ -42,7 +42,7 @@ export default async function TeamDetailsPage({ params }: { params: { slug: stri
             <ul className="space-y-3">
               {team.items.map((item) => (
                 <li
-                  className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 p-4 text-sm text-slate-700 dark:text-slate-200"
+                  className="rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/70 p-4 text-sm text-slate-700 dark:text-slate-200"
                   key={item.id}
                 >
                   <p>

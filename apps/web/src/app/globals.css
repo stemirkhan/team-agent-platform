@@ -10,8 +10,8 @@
 
 .dark {
   color-scheme: dark;
-  --page-bg: #020617;
-  --text-primary: #e2e8f0;
+  --page-bg: #0b0b0d;
+  --text-primary: #e6e6e7;
 }
 
 body {
@@ -26,9 +26,7 @@ body {
 
 .dark body {
   background-image:
-    radial-gradient(circle at 6% 0%, rgba(37, 99, 235, 0.2), transparent 40%),
-    radial-gradient(circle at 92% 8%, rgba(14, 116, 144, 0.22), transparent 35%),
-    linear-gradient(180deg, #020617 0%, #0b1120 100%);
+    linear-gradient(180deg, #09090b 0%, #0e1014 58%, #0a0c10 100%);
 }
 
 h1,
@@ -47,5 +45,5 @@ h6 {
 }
 
 .dark .app-noise {
-  background-image: radial-gradient(rgba(148, 163, 184, 0.06) 0.6px, transparent 0.6px);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.035) 0.6px, transparent 0.6px);
 }

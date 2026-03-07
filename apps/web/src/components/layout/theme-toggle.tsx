@@ -46,7 +46,7 @@ export function ThemeToggle() {
   return (
     <button
       aria-label={mounted ? `Switch to ${theme === "dark" ? "light" : "dark"} mode` : "Toggle theme"}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 transition hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100"
+      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-300 dark:border-zinc-600 text-slate-700 dark:text-slate-200 transition hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-slate-100"
       onClick={onToggle}
       title={mounted ? `Current theme: ${theme}` : "Toggle theme"}
       type="button"

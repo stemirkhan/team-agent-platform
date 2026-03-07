@@ -38,7 +38,7 @@ export default function LoginPage() {
   }
 
   return (
-    <section className="mx-auto max-w-md rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/95 p-6 shadow-lg shadow-slate-200/60">
+    <section className="mx-auto max-w-md rounded-3xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/95 p-6 shadow-lg shadow-slate-200/60">
       <p className="mb-3 inline-flex items-center gap-2 rounded-full bg-brand-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-800">
         <LogIn className="h-3.5 w-3.5" />
         Auth
@@ -51,7 +51,7 @@ export default function LoginPage() {
           Email
           <div className="relative mt-1">
             <input
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+              className="w-full rounded-xl border border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
               onChange={(event) => setEmail(event.target.value)}
               placeholder="you@example.com"
               required
@@ -66,7 +66,7 @@ export default function LoginPage() {
           Password
           <div className="relative mt-1">
             <input
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+              className="w-full rounded-xl border border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
               onChange={(event) => setPassword(event.target.value)}
               placeholder="********"
               required
@@ -90,7 +90,7 @@ export default function LoginPage() {
 
       <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
         No account yet?{" "}
-        <Link className="font-semibold text-brand-700 hover:text-brand-900" href="/auth/register">
+        <Link className="font-semibold text-brand-700 hover:text-brand-900 dark:text-slate-200 dark:hover:text-white" href="/auth/register">
           Register
         </Link>
       </p>

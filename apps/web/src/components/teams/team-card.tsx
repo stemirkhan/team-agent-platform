@@ -5,9 +5,9 @@ import type { Team } from "@/lib/api";
 
 export function TeamCard({ team }: { team: Team }) {
   return (
-    <article className="group rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/90 p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-brand-100/70">
+    <article className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-brand-100/70 dark:border-zinc-800 dark:bg-zinc-900/90 dark:hover:shadow-black/45">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
+        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-zinc-800 px-2 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
           <UsersRound className="h-3.5 w-3.5" />
           team
         </span>
@@ -26,7 +26,7 @@ export function TeamCard({ team }: { team: Team }) {
           {team.author_name}
         </span>
         <Link
-          className="inline-flex items-center gap-1 font-semibold text-brand-700 transition group-hover:text-brand-900"
+          className="inline-flex items-center gap-1 font-semibold text-brand-700 transition group-hover:text-brand-900 dark:text-slate-100 dark:group-hover:text-white"
           href={`/teams/${team.slug}`}
         >
           Open

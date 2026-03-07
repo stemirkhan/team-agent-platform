@@ -3,11 +3,15 @@
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.agent_version import AgentVersion
 
 
 class AgentStatus(StrEnum):
@@ -58,4 +62,10 @@ class Agent(Base):
         nullable=False,
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+    versions: Mapped[list["AgentVersion"]] = relationship(
+        back_populates="agent",
+        cascade="all, delete-orphan",
+        lazy="select",
     )

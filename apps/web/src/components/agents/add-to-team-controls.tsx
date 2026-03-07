@@ -147,7 +147,7 @@ export function AddToTeamControls({ agentSlug }: AddToTeamControlsProps) {
 
   if (loading) {
     return (
-      <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
+      <section className="rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5">
         <p className="text-sm text-slate-500 dark:text-slate-400">Checking authorization...</p>
       </section>
     );
@@ -155,7 +155,7 @@ export function AddToTeamControls({ agentSlug }: AddToTeamControlsProps) {
 
   if (!user) {
     return (
-      <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
+      <section className="rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5">
         <h2 className="mb-2 text-xl font-bold text-slate-900 dark:text-slate-50">Add To Team</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300">Login to add this agent to your team.</p>
       </section>
@@ -163,19 +163,19 @@ export function AddToTeamControls({ agentSlug }: AddToTeamControlsProps) {
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
+    <section className="rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50">Add To Team</h2>
           <p className="text-sm text-slate-600 dark:text-slate-300">Signed in as {user.display_name}</p>
         </div>
-        <Link className="text-sm font-semibold text-brand-700 hover:text-brand-900" href="/teams/new">
+        <Link className="text-sm font-semibold text-brand-700 hover:text-brand-900 dark:text-slate-200 dark:hover:text-white" href="/teams/new">
           Create new team
         </Link>
       </div>
 
       {myTeams.length === 0 ? (
-        <p className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 px-3 py-2 text-sm text-slate-600 dark:text-slate-300">
+        <p className="rounded-lg border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/70 px-3 py-2 text-sm text-slate-600 dark:text-slate-300">
           You do not have draft teams yet. Create a team first, then return here.
         </p>
       ) : null}
@@ -184,7 +184,7 @@ export function AddToTeamControls({ agentSlug }: AddToTeamControlsProps) {
         <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Search team
           <input
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
             onChange={(event) => setTeamSearch(event.target.value)}
             placeholder="Find by team title or slug"
             type="text"
@@ -195,7 +195,7 @@ export function AddToTeamControls({ agentSlug }: AddToTeamControlsProps) {
         <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Select team
           <select
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-2 text-sm"
             onChange={(event) => setTeamSlug(event.target.value)}
             required
             value={teamSlug}
@@ -212,7 +212,7 @@ export function AddToTeamControls({ agentSlug }: AddToTeamControlsProps) {
         <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Role name
           <input
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
             minLength={2}
             onChange={(event) => setRoleName(event.target.value)}
             placeholder="reviewer"
@@ -225,7 +225,7 @@ export function AddToTeamControls({ agentSlug }: AddToTeamControlsProps) {
         <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Order index (optional)
           <input
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
             min={0}
             onChange={(event) => setOrderIndex(event.target.value)}
             placeholder="auto"

@@ -54,7 +54,7 @@ export default function CreateTeamPage() {
   }
 
   return (
-    <section className="mx-auto max-w-2xl rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 shadow-sm">
+    <section className="mx-auto max-w-2xl rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-6 shadow-sm">
       <h1 className="mb-2 text-2xl font-black text-slate-900 dark:text-slate-50">Create Team</h1>
       <p className="mb-6 text-sm text-slate-600 dark:text-slate-300">Create a team and optionally publish it.</p>
 
@@ -62,7 +62,7 @@ export default function CreateTeamPage() {
         <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Slug
           <input
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
             minLength={2}
             onChange={(event) => setSlug(event.target.value)}
             placeholder="mvp-backend-team"
@@ -75,7 +75,7 @@ export default function CreateTeamPage() {
         <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Title
           <input
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
             minLength={2}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="MVP Backend Team"
@@ -88,7 +88,7 @@ export default function CreateTeamPage() {
         <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
           Description
           <textarea
-            className="mt-1 min-h-24 w-full rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm"
+            className="mt-1 min-h-24 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
             onChange={(event) => setDescription(event.target.value)}
             placeholder="Team goals and workflow."
             value={description}

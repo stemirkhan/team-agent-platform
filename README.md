@@ -33,6 +33,9 @@ Foundation:
   - `GET /api/v1/agents/{slug}`
   - `POST /api/v1/agents` (Bearer token)
   - `POST /api/v1/agents/{slug}/publish` (Bearer token, owner only)
+  - `POST /api/v1/agents/{slug}/versions` (Bearer token, owner only)
+  - `GET /api/v1/agents/{slug}/versions`
+  - `GET /api/v1/agents/{slug}/versions/{version}`
   - `GET /api/v1/agents/{slug}/reviews`
   - `POST /api/v1/agents/{slug}/reviews` (Bearer token, one review per user)
 - каталог и конструктор команд API:
