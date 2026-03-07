@@ -69,3 +69,13 @@ class AgentVersionRepository:
             AgentVersion.version == version,
         )
         return self.session.scalar(query)
+
+    def get_latest_for_agent(self, *, agent_id: UUID) -> AgentVersion | None:
+        """Return latest version for agent when available."""
+        query = (
+            select(AgentVersion)
+            .where(AgentVersion.agent_id == agent_id)
+            .order_by(AgentVersion.is_latest.desc(), AgentVersion.published_at.desc())
+            .limit(1)
+        )
+        return self.session.scalar(query)

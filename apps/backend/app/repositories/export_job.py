@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.export_job import ExportJob
@@ -43,3 +43,33 @@ class ExportJobRepository:
     def get_by_id(self, export_id: UUID) -> ExportJob | None:
         """Find export job by id."""
         return self.session.scalar(select(ExportJob).where(ExportJob.id == export_id))
+
+    def list_for_creator_entity(
+        self,
+        *,
+        created_by: UUID,
+        entity_type: str,
+        entity_id: UUID,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ExportJob], int]:
+        """Return paginated export jobs for one creator and one entity."""
+        query = (
+            select(ExportJob)
+            .where(ExportJob.created_by == created_by)
+            .where(ExportJob.entity_type == entity_type)
+            .where(ExportJob.entity_id == entity_id)
+            .order_by(ExportJob.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        count_query = (
+            select(func.count(ExportJob.id))
+            .where(ExportJob.created_by == created_by)
+            .where(ExportJob.entity_type == entity_type)
+            .where(ExportJob.entity_id == entity_id)
+        )
+
+        items = list(self.session.scalars(query).all())
+        total = int(self.session.scalar(count_query) or 0)
+        return items, total

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ExportControls } from "@/components/exports/export-controls";
 import { ReviewsSection } from "@/components/agents/reviews-section";
 import { fetchAgent, fetchAgentReviews } from "@/lib/api";
 
@@ -43,6 +44,13 @@ export default async function AgentDetailsPage({ params }: { params: { slug: str
           <p>{agent.full_description ?? "No full description yet."}</p>
         </article>
 
+        <ExportControls
+          agentShortDescription={agent.short_description}
+          agentTitle={agent.title}
+          entityType="agent"
+          slug={agent.slug}
+          status={agent.status}
+        />
         <ReviewsSection agentSlug={agent.slug} initialReviews={reviews.items} />
       </section>
     );

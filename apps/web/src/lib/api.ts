@@ -53,6 +53,53 @@ export type Review = {
   updated_at: string;
 };
 
+export type RuntimeTarget = "codex" | "claude_code" | "opencode";
+export type CodexReasoningEffort = "low" | "medium" | "high";
+export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+export type ClaudeModel = "sonnet" | "opus" | "haiku" | "inherit";
+export type ClaudePermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "dontAsk"
+  | "bypassPermissions"
+  | "plan";
+export type OpenCodePermission = "allow" | "ask" | "deny";
+
+export type CodexExportOptions = {
+  model?: string;
+  model_reasoning_effort?: CodexReasoningEffort;
+  sandbox_mode?: CodexSandboxMode;
+};
+
+export type ClaudeExportOptions = {
+  model?: ClaudeModel;
+  permissionMode?: ClaudePermissionMode;
+};
+
+export type OpenCodeExportOptions = {
+  model?: string;
+  permission?: OpenCodePermission;
+};
+
+export type ExportJob = {
+  id: string;
+  entity_type: "agent" | "team";
+  entity_id: string;
+  runtime_target: RuntimeTarget;
+  status: "pending" | "completed" | "failed";
+  result_url: string | null;
+  error_message: string | null;
+  created_by: string;
+  created_at: string;
+};
+
+export type ExportJobListResponse = {
+  items: ExportJob[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export type AgentListResponse = {
   items: Agent[];
   total: number;
@@ -104,6 +151,22 @@ export type ReviewCreatePayload = {
   unsafe_flag?: boolean;
 };
 
+export type ExportCreatePayload = {
+  runtime_target: RuntimeTarget;
+  codex?: CodexExportOptions;
+  claude?: ClaudeExportOptions;
+  opencode?: OpenCodeExportOptions;
+};
+
+export type AgentVersionCreatePayload = {
+  version: string;
+  changelog?: string;
+  manifest_json?: Record<string, unknown>;
+  compatibility_matrix?: Record<string, unknown>;
+  export_targets?: RuntimeTarget[];
+  install_instructions?: string;
+};
+
 export type FetchMyTeamsOptions = {
   status?: Team["status"];
 };
@@ -114,6 +177,15 @@ function getApiBaseUrl(): string {
     process.env.NEXT_PUBLIC_API_BASE_URL ??
     "http://localhost:8000/api/v1"
   );
+}
+
+export function resolveDownloadUrl(resultUrl: string): string {
+  if (/^https?:\/\//i.test(resultUrl)) {
+    return resultUrl;
+  }
+  const backendOrigin = getApiBaseUrl().replace(/\/api\/v1$/, "");
+  const normalizedPath = resultUrl.startsWith("/") ? resultUrl : `/${resultUrl}`;
+  return `${backendOrigin}${normalizedPath}`;
 }
 
 function extractErrorMessage(payload: unknown): string | null {
@@ -327,6 +399,72 @@ export async function createAgentReview(
   return json as Review;
 }
 
+export async function createAgentExport(
+  slug: string,
+  payload: ExportCreatePayload,
+  token: string
+): Promise<ExportJob> {
+  const response = await fetch(`${getApiBaseUrl()}/exports/agents/${slug}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to export agent.");
+  }
+
+  return json as ExportJob;
+}
+
+export async function createAgentVersion(
+  slug: string,
+  payload: AgentVersionCreatePayload,
+  token: string
+): Promise<void> {
+  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/versions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to create agent version.");
+  }
+}
+
+export async function fetchAgentExports(
+  slug: string,
+  token: string,
+  options: { limit?: number; offset?: number } = {}
+): Promise<ExportJobListResponse> {
+  const params = new URLSearchParams();
+  params.set("limit", String(options.limit ?? 10));
+  params.set("offset", String(options.offset ?? 0));
+
+  const response = await fetch(`${getApiBaseUrl()}/exports/agents/${slug}?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    cache: "no-store"
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to fetch agent exports.");
+  }
+
+  return json as ExportJobListResponse;
+}
+
 export async function fetchTeamReviews(slug: string): Promise<ReviewListResponse> {
   const response = await fetch(`${getApiBaseUrl()}/teams/${slug}/reviews`, { cache: "no-store" });
 
@@ -357,4 +495,66 @@ export async function createTeamReview(
   }
 
   return json as Review;
+}
+
+export async function createTeamExport(
+  slug: string,
+  payload: ExportCreatePayload,
+  token: string
+): Promise<ExportJob> {
+  const response = await fetch(`${getApiBaseUrl()}/exports/teams/${slug}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to export team.");
+  }
+
+  return json as ExportJob;
+}
+
+export async function fetchTeamExports(
+  slug: string,
+  token: string,
+  options: { limit?: number; offset?: number } = {}
+): Promise<ExportJobListResponse> {
+  const params = new URLSearchParams();
+  params.set("limit", String(options.limit ?? 10));
+  params.set("offset", String(options.offset ?? 0));
+
+  const response = await fetch(`${getApiBaseUrl()}/exports/teams/${slug}?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    cache: "no-store"
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to fetch team exports.");
+  }
+
+  return json as ExportJobListResponse;
+}
+
+export async function fetchExportJob(exportId: string, token: string): Promise<ExportJob> {
+  const response = await fetch(`${getApiBaseUrl()}/exports/${exportId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    cache: "no-store"
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to fetch export job.");
+  }
+
+  return json as ExportJob;
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ExportControls } from "@/components/exports/export-controls";
 import { ReviewsSection } from "@/components/teams/reviews-section";
 import { TeamBuilderControls } from "@/components/teams/team-builder-controls";
 import { fetchTeam, fetchTeamReviews } from "@/lib/api";
@@ -63,6 +64,7 @@ export default async function TeamDetailsPage({ params }: { params: { slug: stri
           )}
         </section>
 
+        <ExportControls entityType="team" slug={team.slug} status={team.status} />
         <TeamBuilderControls teamSlug={team.slug} teamStatus={team.status} />
         <ReviewsSection initialReviews={reviews.items} teamSlug={team.slug} />
       </section>

@@ -48,17 +48,29 @@ Foundation:
   - `POST /api/v1/teams/{slug}/reviews` (Bearer token, one review per user)
 - export API:
   - `POST /api/v1/exports/agents/{slug}` (Bearer token)
+  - `GET /api/v1/exports/agents/{slug}` (Bearer token, creator only)
   - `POST /api/v1/exports/teams/{slug}` (Bearer token)
+  - `GET /api/v1/exports/teams/{slug}` (Bearer token, creator only)
   - `GET /api/v1/exports/{id}` (Bearer token, creator only)
+  - `GET /downloads/agent/{slug}/codex.toml` (single-agent Codex config)
+  - `GET /downloads/agent/{slug}/claude_code.md` (single-agent Claude Code sub-agent)
+  - `GET /downloads/agent/{slug}/opencode.md` (single-agent OpenCode sub-agent)
+  - `GET /downloads/team/{slug}/codex.zip` (team Codex bundle with `.codex/config.toml` and `.codex/agents/*.toml`)
+  - `GET /downloads/team/{slug}/claude_code.zip` (team Claude Code bundle with `.claude/agents/*.md`)
+  - `GET /downloads/team/{slug}/opencode.zip` (team OpenCode bundle with `.opencode/agents/*.md`)
+  - download-time overrides:
+    `codex -> model, model_reasoning_effort, sandbox_mode`
+    `claude_code -> model, permissionMode`
+    `opencode -> model, permission`
 - frontend:
   - главная страница;
   - страницы авторизации `/auth/login` и `/auth/register`;
   - страница каталога `/agents`;
   - страница создания агента `/agents/new`;
-  - страница агента `/agents/[slug]` с секцией Reviews;
+  - страница агента `/agents/[slug]` с секциями Export и Reviews;
   - страница каталога `/teams`;
   - страница создания команды `/teams/new`;
-  - страница команды `/teams/[slug]` с Team Builder (add item + publish) и секцией Reviews.
+  - страница команды `/teams/[slug]` с Team Builder, Export и секцией Reviews.
 
 ## Быстрый старт
 

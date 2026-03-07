@@ -46,8 +46,14 @@ def get_export_service(db: Session = Depends(get_db)) -> ExportService:
     """Build ExportService with request-scoped DB session."""
     export_repository = ExportJobRepository(db)
     agent_repository = AgentRepository(db)
+    agent_version_repository = AgentVersionRepository(db)
     team_repository = TeamRepository(db)
-    return ExportService(export_repository, agent_repository, team_repository)
+    return ExportService(
+        export_repository,
+        agent_repository,
+        agent_version_repository,
+        team_repository,
+    )
 
 
 def get_auth_service(db: Session = Depends(get_db)) -> AuthService:

@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.downloads import router as downloads_router
 from app.api.router import router as api_router
 from app.core.config import get_settings
 from app.schemas.health import HealthResponse
@@ -24,6 +25,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+app.include_router(downloads_router)
 
 
 @app.get("/healthz", response_model=HealthResponse, tags=["health"])
