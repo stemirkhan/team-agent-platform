@@ -46,12 +46,16 @@ Foundation:
   - `POST /api/v1/teams/{slug}/publish` (Bearer token, owner only)
   - `GET /api/v1/teams/{slug}/reviews`
   - `POST /api/v1/teams/{slug}/reviews` (Bearer token, one review per user)
+- export API:
+  - `POST /api/v1/exports/agents/{slug}` (Bearer token)
+  - `POST /api/v1/exports/teams/{slug}` (Bearer token)
+  - `GET /api/v1/exports/{id}` (Bearer token, creator only)
 - frontend:
   - главная страница;
   - страницы авторизации `/auth/login` и `/auth/register`;
   - страница каталога `/agents`;
   - страница создания агента `/agents/new`;
-  - страница агента `/agents/[slug]` с Add To Team и секцией Reviews;
+  - страница агента `/agents/[slug]` с секцией Reviews;
   - страница каталога `/teams`;
   - страница создания команды `/teams/new`;
   - страница команды `/teams/[slug]` с Team Builder (add item + publish) и секцией Reviews.

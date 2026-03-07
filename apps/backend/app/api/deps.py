@@ -8,12 +8,14 @@ from app.core.db import get_db
 from app.core.security import decode_access_token
 from app.repositories.agent import AgentRepository
 from app.repositories.agent_version import AgentVersionRepository
+from app.repositories.export_job import ExportJobRepository
 from app.repositories.review import ReviewRepository
 from app.repositories.team import TeamRepository
 from app.repositories.user import UserRepository
 from app.services.agent_service import AgentService
 from app.services.agent_version_service import AgentVersionService
 from app.services.auth_service import AuthService
+from app.services.export_service import ExportService
 from app.services.review_service import ReviewService
 from app.services.team_service import TeamService
 
@@ -38,6 +40,14 @@ def get_team_service(db: Session = Depends(get_db)) -> TeamService:
     team_repository = TeamRepository(db)
     agent_repository = AgentRepository(db)
     return TeamService(team_repository, agent_repository)
+
+
+def get_export_service(db: Session = Depends(get_db)) -> ExportService:
+    """Build ExportService with request-scoped DB session."""
+    export_repository = ExportJobRepository(db)
+    agent_repository = AgentRepository(db)
+    team_repository = TeamRepository(db)
+    return ExportService(export_repository, agent_repository, team_repository)
 
 
 def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
