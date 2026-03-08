@@ -52,6 +52,8 @@ export async function registerWithPassword(payload: {
   email: string;
   password: string;
   display_name: string;
+}, options?: {
+  fallbackMessage?: string;
 }): Promise<AuthTokenResponse> {
   const response = await fetch(`${getApiBaseUrl()}/auth/register`, {
     method: "POST",
@@ -62,7 +64,7 @@ export async function registerWithPassword(payload: {
   const json = (await response.json()) as unknown;
 
   if (!response.ok) {
-    throw new Error(extractErrorMessage(json) ?? "Registration failed.");
+    throw new Error(extractErrorMessage(json) ?? options?.fallbackMessage ?? "Registration failed.");
   }
 
   return json as AuthTokenResponse;
@@ -71,6 +73,8 @@ export async function registerWithPassword(payload: {
 export async function loginWithPassword(payload: {
   email: string;
   password: string;
+}, options?: {
+  fallbackMessage?: string;
 }): Promise<AuthTokenResponse> {
   const response = await fetch(`${getApiBaseUrl()}/auth/login`, {
     method: "POST",
@@ -81,7 +85,7 @@ export async function loginWithPassword(payload: {
   const json = (await response.json()) as unknown;
 
   if (!response.ok) {
-    throw new Error(extractErrorMessage(json) ?? "Login failed.");
+    throw new Error(extractErrorMessage(json) ?? options?.fallbackMessage ?? "Login failed.");
   }
 
   return json as AuthTokenResponse;

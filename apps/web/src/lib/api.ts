@@ -10,7 +10,26 @@ export type Agent = {
   verification_status: "none" | "validated" | "verified";
   created_at: string;
   updated_at: string;
+  manifest_json: Record<string, unknown> | null;
+  source_archive_url: string | null;
+  compatibility_matrix: Record<string, unknown> | null;
+  export_targets: RuntimeTarget[] | null;
+  install_instructions: string | null;
+  skills: AgentSkill[];
+  markdown_files: AgentMarkdownFile[];
 };
+
+export type RuntimeTarget = "codex" | "claude_code" | "opencode";
+export type CodexReasoningEffort = "low" | "medium" | "high";
+export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+export type ClaudeModel = "sonnet" | "opus" | "haiku" | "inherit";
+export type ClaudePermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "dontAsk"
+  | "bypassPermissions"
+  | "plan";
+export type OpenCodePermission = "allow" | "ask" | "deny";
 
 export type Team = {
   id: string;
@@ -26,8 +45,9 @@ export type Team = {
 export type TeamItem = {
   id: string;
   team_id: string;
-  agent_id: string;
   agent_slug: string;
+  agent_title: string;
+  agent_short_description: string;
   role_name: string;
   order_index: number;
   config_json: Record<string, unknown> | null;
@@ -38,32 +58,16 @@ export type TeamDetails = Team & {
   items: TeamItem[];
 };
 
-export type Review = {
-  id: string;
-  user_id: string;
-  user_display_name: string;
-  entity_type: "agent" | "team";
-  entity_id: string;
-  rating: number;
-  text: string | null;
-  works_as_expected: boolean;
-  outdated_flag: boolean;
-  unsafe_flag: boolean;
-  created_at: string;
-  updated_at: string;
+export type AgentSkill = {
+  slug: string;
+  content: string;
+  description?: string | null;
 };
 
-export type RuntimeTarget = "codex" | "claude_code" | "opencode";
-export type CodexReasoningEffort = "low" | "medium" | "high";
-export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
-export type ClaudeModel = "sonnet" | "opus" | "haiku" | "inherit";
-export type ClaudePermissionMode =
-  | "default"
-  | "acceptEdits"
-  | "dontAsk"
-  | "bypassPermissions"
-  | "plan";
-export type OpenCodePermission = "allow" | "ask" | "deny";
+export type AgentMarkdownFile = {
+  path: string;
+  content: string;
+};
 
 export type CodexExportOptions = {
   model?: string;
@@ -114,13 +118,6 @@ export type TeamListResponse = {
   offset: number;
 };
 
-export type ReviewListResponse = {
-  items: Review[];
-  total: number;
-  limit: number;
-  offset: number;
-};
-
 export type AgentCreatePayload = {
   slug: string;
   title: string;
@@ -129,10 +126,29 @@ export type AgentCreatePayload = {
   category?: string;
 };
 
+export type AgentUpdatePayload = {
+  title?: string;
+  short_description?: string;
+  full_description?: string | null;
+  category?: string | null;
+  manifest_json?: Record<string, unknown>;
+  source_archive_url?: string | null;
+  compatibility_matrix?: Record<string, unknown> | null;
+  export_targets?: RuntimeTarget[] | null;
+  install_instructions?: string | null;
+  skills?: AgentSkill[];
+  markdown_files?: AgentMarkdownFile[];
+};
+
 export type TeamCreatePayload = {
   slug: string;
   title: string;
   description?: string;
+};
+
+export type TeamUpdatePayload = {
+  title?: string;
+  description?: string | null;
 };
 
 export type TeamItemCreatePayload = {
@@ -143,12 +159,12 @@ export type TeamItemCreatePayload = {
   is_required?: boolean;
 };
 
-export type ReviewCreatePayload = {
-  rating: number;
-  text?: string;
-  works_as_expected?: boolean;
-  outdated_flag?: boolean;
-  unsafe_flag?: boolean;
+export type TeamItemUpdatePayload = {
+  agent_slug?: string;
+  role_name?: string;
+  order_index?: number;
+  config_json?: Record<string, unknown> | null;
+  is_required?: boolean;
 };
 
 export type ExportCreatePayload = {
@@ -158,17 +174,16 @@ export type ExportCreatePayload = {
   opencode?: OpenCodeExportOptions;
 };
 
-export type AgentVersionCreatePayload = {
-  version: string;
-  changelog?: string;
-  manifest_json?: Record<string, unknown>;
-  compatibility_matrix?: Record<string, unknown>;
-  export_targets?: RuntimeTarget[];
-  install_instructions?: string;
-};
-
 export type FetchMyTeamsOptions = {
   status?: Team["status"];
+};
+
+export type FetchAgentsOptions = {
+  limit?: number;
+  offset?: number;
+  status?: Agent["status"];
+  q?: string;
+  category?: string;
 };
 
 function getApiBaseUrl(): string {
@@ -201,8 +216,28 @@ function extractErrorMessage(payload: unknown): string | null {
   return null;
 }
 
-export async function fetchAgents(): Promise<AgentListResponse> {
-  const response = await fetch(`${getApiBaseUrl()}/agents`, { cache: "no-store" });
+export async function fetchAgents(
+  options: FetchAgentsOptions = {}
+): Promise<AgentListResponse> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+  if (options.offset !== undefined) {
+    params.set("offset", String(options.offset));
+  }
+  if (options.status) {
+    params.set("status", options.status);
+  }
+  if (options.q) {
+    params.set("q", options.q);
+  }
+  if (options.category) {
+    params.set("category", options.category);
+  }
+
+  const query = params.size > 0 ? `?${params.toString()}` : "";
+  const response = await fetch(`${getApiBaseUrl()}/agents${query}`, { cache: "no-store" });
 
   if (!response.ok) {
     throw new Error("Failed to fetch agents list.");
@@ -295,6 +330,28 @@ export async function createAgent(payload: AgentCreatePayload, token: string): P
   return json as Agent;
 }
 
+export async function updateAgent(
+  slug: string,
+  payload: AgentUpdatePayload,
+  token: string
+): Promise<Agent> {
+  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to update agent.");
+  }
+
+  return json as Agent;
+}
+
 export async function publishAgent(slug: string, token: string): Promise<Agent> {
   const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/publish`, {
     method: "POST",
@@ -327,6 +384,28 @@ export async function createTeam(payload: TeamCreatePayload, token: string): Pro
   }
 
   return json as Team;
+}
+
+export async function updateTeam(
+  slug: string,
+  payload: TeamUpdatePayload,
+  token: string
+): Promise<TeamDetails> {
+  const response = await fetch(`${getApiBaseUrl()}/teams/${slug}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to update team.");
+  }
+
+  return json as TeamDetails;
 }
 
 export async function publishTeam(slug: string, token: string): Promise<Team> {
@@ -367,23 +446,14 @@ export async function addTeamItem(
   return json as TeamDetails;
 }
 
-export async function fetchAgentReviews(slug: string): Promise<ReviewListResponse> {
-  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/reviews`, { cache: "no-store" });
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch agent reviews.");
-  }
-
-  return response.json() as Promise<ReviewListResponse>;
-}
-
-export async function createAgentReview(
+export async function updateTeamItem(
   slug: string,
-  payload: ReviewCreatePayload,
+  itemId: string,
+  payload: TeamItemUpdatePayload,
   token: string
-): Promise<Review> {
-  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/reviews`, {
-    method: "POST",
+): Promise<TeamDetails> {
+  const response = await fetch(`${getApiBaseUrl()}/teams/${slug}/items/${itemId}`, {
+    method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`
@@ -393,10 +463,30 @@ export async function createAgentReview(
 
   const json = (await response.json()) as unknown;
   if (!response.ok) {
-    throw new Error(extractErrorMessage(json) ?? "Failed to create review.");
+    throw new Error(extractErrorMessage(json) ?? "Failed to update team item.");
   }
 
-  return json as Review;
+  return json as TeamDetails;
+}
+
+export async function deleteTeamItem(
+  slug: string,
+  itemId: string,
+  token: string
+): Promise<TeamDetails> {
+  const response = await fetch(`${getApiBaseUrl()}/teams/${slug}/items/${itemId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to delete team item.");
+  }
+
+  return json as TeamDetails;
 }
 
 export async function createAgentExport(
@@ -421,26 +511,6 @@ export async function createAgentExport(
   return json as ExportJob;
 }
 
-export async function createAgentVersion(
-  slug: string,
-  payload: AgentVersionCreatePayload,
-  token: string
-): Promise<void> {
-  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/versions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  const json = (await response.json()) as unknown;
-  if (!response.ok) {
-    throw new Error(extractErrorMessage(json) ?? "Failed to create agent version.");
-  }
-}
-
 export async function fetchAgentExports(
   slug: string,
   token: string,
@@ -463,38 +533,6 @@ export async function fetchAgentExports(
   }
 
   return json as ExportJobListResponse;
-}
-
-export async function fetchTeamReviews(slug: string): Promise<ReviewListResponse> {
-  const response = await fetch(`${getApiBaseUrl()}/teams/${slug}/reviews`, { cache: "no-store" });
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch team reviews.");
-  }
-
-  return response.json() as Promise<ReviewListResponse>;
-}
-
-export async function createTeamReview(
-  slug: string,
-  payload: ReviewCreatePayload,
-  token: string
-): Promise<Review> {
-  const response = await fetch(`${getApiBaseUrl()}/teams/${slug}/reviews`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  const json = (await response.json()) as unknown;
-  if (!response.ok) {
-    throw new Error(extractErrorMessage(json) ?? "Failed to create review.");
-  }
-
-  return json as Review;
 }
 
 export async function createTeamExport(

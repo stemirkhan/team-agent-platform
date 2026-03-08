@@ -4,23 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bot, Home, UsersRound } from "lucide-react";
 
-const navItems = [
-  {
-    href: "/",
-    label: "Home",
-    icon: Home
-  },
-  {
-    href: "/agents",
-    label: "Agents",
-    icon: Bot
-  },
-  {
-    href: "/teams",
-    label: "Teams",
-    icon: UsersRound
-  }
-];
+import { t, type Locale } from "@/lib/i18n";
 
 function isItemActive(pathname: string, href: string): boolean {
   if (href === "/") {
@@ -30,8 +14,25 @@ function isItemActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function MainNav() {
+export function MainNav({ locale }: { locale: Locale }) {
   const pathname = usePathname();
+  const navItems = [
+    {
+      href: "/",
+      label: t(locale, { ru: "Главная", en: "Home" }),
+      icon: Home
+    },
+    {
+      href: "/agents",
+      label: t(locale, { ru: "Агенты", en: "Agents" }),
+      icon: Bot
+    },
+    {
+      href: "/teams",
+      label: t(locale, { ru: "Команды", en: "Teams" }),
+      icon: UsersRound
+    }
+  ];
 
   return (
     <nav className="flex items-center gap-2">

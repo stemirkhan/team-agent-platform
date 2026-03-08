@@ -2,71 +2,45 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ExportControls } from "@/components/exports/export-controls";
-import { ReviewsSection } from "@/components/teams/reviews-section";
 import { TeamBuilderControls } from "@/components/teams/team-builder-controls";
-import { fetchTeam, fetchTeamReviews } from "@/lib/api";
+import { fetchTeam } from "@/lib/api";
+import { formatStatus, t } from "@/lib/i18n";
+import { getRequestLocale } from "@/lib/i18n.server";
 
 export default async function TeamDetailsPage({ params }: { params: { slug: string } }) {
+  const locale = getRequestLocale();
+
   try {
-    const [team, reviews] = await Promise.all([fetchTeam(params.slug), fetchTeamReviews(params.slug)]);
+    const team = await fetchTeam(params.slug);
 
     return (
       <section className="w-full space-y-6">
         <Link className="mb-4 inline-flex text-sm font-semibold text-brand-700 hover:text-brand-900 dark:text-slate-200 dark:hover:text-white" href="/teams">
-          &larr; Back to teams
+          &larr; {t(locale, { ru: "Назад к командам", en: "Back to teams" })}
         </Link>
 
         <h1 className="mb-2 text-3xl font-black text-slate-900 dark:text-slate-50">{team.title}</h1>
-        <p className="mb-6 text-slate-600 dark:text-slate-300">{team.description ?? "No description yet."}</p>
+        <p className="mb-6 text-slate-600 dark:text-slate-300">
+          {team.description ?? t(locale, { ru: "Описание пока не добавлено.", en: "No description yet." })}
+        </p>
 
-        <div className="mb-6 grid gap-3 rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 text-sm text-slate-700 dark:text-slate-200 md:grid-cols-2">
+        <div className="mb-6 grid gap-3 rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-slate-200 md:grid-cols-2">
           <p>
-            <span className="font-semibold">Slug:</span> {team.slug}
+            <span className="font-semibold">{t(locale, { ru: "Slug:", en: "Slug:" })}</span> {team.slug}
           </p>
           <p>
-            <span className="font-semibold">Status:</span> {team.status}
+            <span className="font-semibold">{t(locale, { ru: "Статус:", en: "Status:" })}</span> {formatStatus(locale, team.status)}
           </p>
           <p>
-            <span className="font-semibold">Author:</span> {team.author_name}
+            <span className="font-semibold">{t(locale, { ru: "Автор:", en: "Author:" })}</span> {team.author_name}
           </p>
           <p>
-            <span className="font-semibold">Items:</span> {team.items.length}
+            <span className="font-semibold">{t(locale, { ru: "Элементов:", en: "Items:" })}</span> {team.items.length}
           </p>
         </div>
 
-        <section className="rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5">
-          <h2 className="mb-4 text-xl font-bold text-slate-900 dark:text-slate-50">Team Items</h2>
-
-          {team.items.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No items in this team yet.</p>
-          ) : (
-            <ul className="space-y-3">
-              {team.items.map((item) => (
-                <li
-                  className="rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/70 p-4 text-sm text-slate-700 dark:text-slate-200"
-                  key={item.id}
-                >
-                  <p>
-                    <span className="font-semibold">Role:</span> {item.role_name}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Agent:</span> {item.agent_slug}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Order:</span> {item.order_index}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Required:</span> {item.is_required ? "yes" : "no"}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <ExportControls entityType="team" slug={team.slug} status={team.status} />
-        <TeamBuilderControls teamSlug={team.slug} teamStatus={team.status} />
-        <ReviewsSection initialReviews={reviews.items} teamSlug={team.slug} />
+        <ExportControls entityType="team" locale={locale} slug={team.slug} status={team.status} />
+        <TeamBuilderControls locale={locale} team={team} />
       </section>
     );
   } catch {

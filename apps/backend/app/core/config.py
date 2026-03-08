@@ -1,5 +1,6 @@
 """Application settings loaded from environment variables."""
 
+import json
 from functools import lru_cache
 
 from pydantic import field_validator
@@ -22,16 +23,36 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60 * 24
 
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://[::1]:3000",
+    ]
 
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: list[str] | str) -> list[str]:
-        """Accept either a comma-separated string or list format from env."""
+        """Accept JSON arrays, comma-separated strings, or native lists from env."""
         if isinstance(value, list):
             return value
         if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
+            normalized = value.strip()
+            if normalized.startswith("["):
+                try:
+                    parsed = json.loads(normalized)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, list):
+                    return [
+                        str(item).strip()
+                        for item in parsed
+                        if isinstance(item, str) and item.strip()
+                    ]
+            return [
+                item.strip().strip("\"").strip("'")
+                for item in normalized.split(",")
+                if item.strip().strip("\"").strip("'")
+            ]
         return []
 
 

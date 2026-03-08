@@ -1,5 +1,8 @@
 Ниже даю рабочую версию: сначала краткий разбор рынка, потом PRD, потом стартовое ТЗ.
 
+> Актуализация на 8 марта 2026: для текущего MVP публичное версионирование агентов отложено.
+> В продукте остается один текущий профиль агента для экспорта и командной сборки; все упоминания versions/releases ниже считать будущим направлением, а не текущей реализуемой функцией.
+
 Я исхожу из того, что под **CloudCoda / OpenCoda** ты имеешь в виду прежде всего экосистемы **Claude Code / OpenCode / Codex**. Если потом захочешь, расширим это до Copilot Agents, Cursor и Gemini CLI.
 
 ## 1) Что сейчас есть на рынке
@@ -348,13 +351,6 @@ Elasticsearch/OpenSearch не нужен сразу.
 * роли и порядок использования
 * team manifest generation
 
-### Reviews
-
-* рейтинг 1–5
-* текстовый отзыв
-* флаги “works”, “outdated”, “unsafe”
-* one review per user per version
-
 ### Export
 
 * export to Codex
@@ -444,13 +440,6 @@ Elasticsearch/OpenSearch не нужен сразу.
 * `POST /teams/{slug}/items`
 * `POST /teams/{slug}/export`
 
-### Reviews
-
-* `POST /agents/{slug}/reviews`
-* `GET /agents/{slug}/reviews`
-* `PATCH /reviews/{id}`
-* `POST /reviews/{id}/report`
-
 ### Export
 
 * `POST /exports/agent/{slug}`
@@ -474,8 +463,6 @@ Elasticsearch/OpenSearch не нужен сразу.
 * `package_runtime_compatibility`
 * `teams`
 * `team_items`
-* `reviews`
-* `review_reports`
 * `exports`
 * `validation_runs`
 * `moderation_actions`
@@ -487,7 +474,6 @@ Elasticsearch/OpenSearch не нужен сразу.
 
 * slug уникален.
 * новая версия не может дублировать существующую версию пакета.
-* отзыв привязан к версии или latest stable.
 * unpublished package не попадает в public search.
 * verified badge ставится только после validation + mod action.
 * export доступен только для published versions.
@@ -499,7 +485,7 @@ Elasticsearch/OpenSearch не нужен сразу.
 * экспорт пакета < 5 сек
 * validation runs — асинхронно
 * audit log для moderation actions
-* rate limiting на reviews/auth/export
+* rate limiting на auth/export
 * antivirus/static checks для uploaded archives
 * observability: Sentry + metrics + structured logs
 
@@ -512,7 +498,6 @@ Elasticsearch/OpenSearch не нужен сразу.
 * package page
 * publish package
 * versioning
-* ratings/reviews
 * team builder
 * export adapters x3
 * admin moderation

@@ -1,4 +1,4 @@
-"""Agent version ORM model."""
+"""Internal agent export profile ORM model."""
 
 import uuid
 from datetime import UTC, datetime
@@ -11,7 +11,7 @@ from app.models.base import Base
 
 
 class AgentVersion(Base):
-    """Versioned release metadata for an agent."""
+    """Stored export profile metadata for an agent."""
 
     __tablename__ = "agent_versions"
     __table_args__ = (

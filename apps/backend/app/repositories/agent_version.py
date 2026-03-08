@@ -1,77 +1,27 @@
-"""Repository layer for agent version persistence."""
+"""Repository layer for internal agent export profile persistence."""
 
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
 from app.models.agent_version import AgentVersion
-from app.schemas.agent_version import AgentVersionCreate
 
 
 class AgentVersionRepository:
-    """Data access methods for agent versions."""
+    """Data access methods for internal agent export profiles."""
 
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def create(self, *, agent: Agent, payload: AgentVersionCreate) -> AgentVersion:
-        """Insert a new agent version and mark it as latest."""
-        self.session.execute(
-            update(AgentVersion)
-            .where(AgentVersion.agent_id == agent.id)
-            .where(AgentVersion.is_latest.is_(True))
-            .values(is_latest=False)
-        )
-
-        entity = AgentVersion(
-            agent_id=agent.id,
-            version=payload.version,
-            changelog=payload.changelog,
-            manifest_json=payload.manifest_json,
-            source_archive_url=payload.source_archive_url,
-            compatibility_matrix=payload.compatibility_matrix,
-            export_targets=payload.export_targets,
-            install_instructions=payload.install_instructions,
-            is_latest=True,
-        )
-        self.session.add(entity)
-        self.session.commit()
-        self.session.refresh(entity)
-        return entity
-
-    def list_for_agent(
-        self,
-        *,
-        agent_id: UUID,
-        limit: int,
-        offset: int,
-    ) -> tuple[list[AgentVersion], int]:
-        """Return paginated versions for an agent."""
-        query = (
-            select(AgentVersion)
-            .where(AgentVersion.agent_id == agent_id)
-            .order_by(AgentVersion.published_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
-        count_query = select(func.count(AgentVersion.id)).where(AgentVersion.agent_id == agent_id)
-
-        items = list(self.session.scalars(query).all())
-        total = int(self.session.scalar(count_query) or 0)
-        return items, total
-
-    def get_by_agent_version(self, *, agent_id: UUID, version: str) -> AgentVersion | None:
-        """Find specific version by agent id and version string."""
-        query = select(AgentVersion).where(
-            AgentVersion.agent_id == agent_id,
-            AgentVersion.version == version,
-        )
+    def get_by_id(self, *, version_id: UUID) -> AgentVersion | None:
+        """Find internal agent profile row by primary key."""
+        query = select(AgentVersion).where(AgentVersion.id == version_id)
         return self.session.scalar(query)
 
     def get_latest_for_agent(self, *, agent_id: UUID) -> AgentVersion | None:
-        """Return latest version for agent when available."""
+        """Return the current stored export profile for an agent when available."""
         query = (
             select(AgentVersion)
             .where(AgentVersion.agent_id == agent_id)
@@ -79,3 +29,35 @@ class AgentVersionRepository:
             .limit(1)
         )
         return self.session.scalar(query)
+
+    def upsert_current_profile(
+        self,
+        *,
+        agent: Agent,
+        manifest_json: dict | None,
+        source_archive_url: str | None,
+        compatibility_matrix: dict | None,
+        export_targets: list[str] | None,
+        install_instructions: str | None,
+    ) -> AgentVersion:
+        """Create or update the hidden current profile row for an agent."""
+        entity = self.get_latest_for_agent(agent_id=agent.id)
+        if entity is None:
+            entity = AgentVersion(
+                agent_id=agent.id,
+                version="current",
+                is_latest=True,
+            )
+            self.session.add(entity)
+
+        entity.manifest_json = manifest_json
+        entity.source_archive_url = source_archive_url
+        entity.compatibility_matrix = compatibility_matrix
+        entity.export_targets = export_targets
+        entity.install_instructions = install_instructions
+        entity.is_latest = True
+
+        self.session.add(entity)
+        self.session.commit()
+        self.session.refresh(entity)
+        return entity

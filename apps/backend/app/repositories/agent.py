@@ -73,3 +73,12 @@ class AgentRepository:
         self.session.commit()
         self.session.refresh(agent)
         return agent
+
+    def update(self, agent: Agent, *, fields: dict[str, object]) -> Agent:
+        """Persist mutable agent field changes."""
+        for key, value in fields.items():
+            setattr(agent, key, value)
+        self.session.add(agent)
+        self.session.commit()
+        self.session.refresh(agent)
+        return agent

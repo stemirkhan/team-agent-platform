@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { IBM_Plex_Sans, Space_Grotesk } from "next/font/google";
+import { IBM_Plex_Sans, Rubik } from "next/font/google";
 import Script from "next/script";
 import type { ReactNode } from "react";
 import { Compass } from "lucide-react";
 
 import { AuthControls } from "@/components/layout/auth-controls";
+import { LocaleToggle } from "@/components/layout/locale-toggle";
 import { MainNav } from "@/components/layout/main-nav";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { getRequestLocale } from "@/lib/i18n.server";
+import { t } from "@/lib/i18n";
 
 import "./globals.css";
 
@@ -18,8 +21,8 @@ const bodyFont = IBM_Plex_Sans({
   display: "swap"
 });
 
-const headingFont = Space_Grotesk({
-  subsets: ["latin"],
+const headingFont = Rubik({
+  subsets: ["latin", "cyrillic"],
   weight: ["500", "600", "700"],
   variable: "--font-heading",
   display: "swap"
@@ -31,8 +34,10 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const locale = getRequestLocale();
+
   return (
-    <html lang="ru" suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <head>
         <Script id="theme-init" strategy="beforeInteractive">{`(() => {
   try {
@@ -70,16 +75,20 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 </span>
                 Team Agent Platform
               </Link>
-              <div className="flex items-center gap-4">
-                <MainNav />
-                <ThemeToggle />
-                <AuthControls />
+              <div className="flex items-center gap-3">
+                <MainNav locale={locale} />
+                <LocaleToggle locale={locale} />
+                <ThemeToggle locale={locale} />
+                <AuthControls locale={locale} />
               </div>
             </div>
           </header>
           <main className="flex-1 pb-8">{children}</main>
           <footer className="mt-6 border-t border-slate-200 dark:border-zinc-700/80 py-4 text-xs text-slate-500 dark:text-slate-400">
-            Team Agent Platform MVP for subagents and teams
+            {t(locale, {
+              ru: "Team Agent Platform MVP для субагентов и команд агентов",
+              en: "Team Agent Platform MVP for subagents and teams"
+            })}
           </footer>
         </div>
       </body>

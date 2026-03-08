@@ -3,6 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     JSON,
@@ -65,7 +66,7 @@ class Team(Base):
 
 
 class TeamItem(Base):
-    """Agent assignment in a team."""
+    """Stored agent-profile assignment in a team."""
 
     __tablename__ = "team_items"
 
@@ -76,9 +77,9 @@ class TeamItem(Base):
         index=True,
         nullable=False,
     )
-    agent_id: Mapped[uuid.UUID] = mapped_column(
+    agent_version_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("agents.id", ondelete="CASCADE"),
+        ForeignKey("agent_versions.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
@@ -88,3 +89,8 @@ class TeamItem(Base):
     is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     team: Mapped[Team] = relationship(back_populates="items")
+    agent_version: Mapped["AgentVersion"] = relationship(lazy="select")
+
+
+if TYPE_CHECKING:
+    from app.models.agent_version import AgentVersion

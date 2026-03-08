@@ -1,13 +1,21 @@
 """Team catalog and team builder endpoints for MVP."""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, status
 
-from app.api.deps import get_current_user, get_review_service, get_team_service
+from app.api.deps import get_current_user, get_team_service
 from app.models.team import TeamStatus
 from app.models.user import User
-from app.schemas.review import ReviewCreate, ReviewListResponse, ReviewRead
-from app.schemas.team import TeamCreate, TeamDetailsRead, TeamItemCreate, TeamListResponse, TeamRead
-from app.services.review_service import ReviewService
+from app.schemas.team import (
+    TeamCreate,
+    TeamDetailsRead,
+    TeamItemCreate,
+    TeamItemUpdate,
+    TeamListResponse,
+    TeamRead,
+    TeamUpdate,
+)
 from app.services.team_service import TeamService
 
 router = APIRouter(prefix="/teams", tags=["teams"])
@@ -46,6 +54,17 @@ def get_team(slug: str, service: TeamService = Depends(get_team_service)) -> Tea
     return service.get_team(slug)
 
 
+@router.patch("/{slug}", response_model=TeamDetailsRead)
+def update_team(
+    slug: str,
+    payload: TeamUpdate,
+    user: User = Depends(get_current_user),
+    service: TeamService = Depends(get_team_service),
+) -> TeamDetailsRead:
+    """Update mutable draft team fields."""
+    return service.update_team(slug, payload, user)
+
+
 @router.post("/{slug}/items", response_model=TeamDetailsRead)
 def add_team_item(
     slug: str,
@@ -57,6 +76,29 @@ def add_team_item(
     return service.add_item(slug, payload, user)
 
 
+@router.patch("/{slug}/items/{item_id}", response_model=TeamDetailsRead)
+def update_team_item(
+    slug: str,
+    item_id: UUID,
+    payload: TeamItemUpdate,
+    user: User = Depends(get_current_user),
+    service: TeamService = Depends(get_team_service),
+) -> TeamDetailsRead:
+    """Update one draft team item."""
+    return service.update_item(slug, item_id, payload, user)
+
+
+@router.delete("/{slug}/items/{item_id}", response_model=TeamDetailsRead)
+def delete_team_item(
+    slug: str,
+    item_id: UUID,
+    user: User = Depends(get_current_user),
+    service: TeamService = Depends(get_team_service),
+) -> TeamDetailsRead:
+    """Delete one draft team item."""
+    return service.delete_item(slug, item_id, user)
+
+
 @router.post("/{slug}/publish", response_model=TeamRead)
 def publish_team(
     slug: str,
@@ -65,25 +107,3 @@ def publish_team(
 ) -> TeamRead:
     """Transition team to published state."""
     return service.publish_team(slug, user)
-
-
-@router.get("/{slug}/reviews", response_model=ReviewListResponse)
-def list_team_reviews(
-    slug: str,
-    limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
-    service: ReviewService = Depends(get_review_service),
-) -> ReviewListResponse:
-    """Return paginated reviews for a published team."""
-    return service.list_team_reviews(slug=slug, limit=limit, offset=offset)
-
-
-@router.post("/{slug}/reviews", response_model=ReviewRead, status_code=status.HTTP_201_CREATED)
-def create_team_review(
-    slug: str,
-    payload: ReviewCreate,
-    user: User = Depends(get_current_user),
-    service: ReviewService = Depends(get_review_service),
-) -> ReviewRead:
-    """Create review for a published team."""
-    return service.create_team_review(slug=slug, payload=payload, current_user=user)

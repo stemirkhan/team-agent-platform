@@ -1,46 +1,18 @@
-"""Schemas for agent version release API."""
+"""Shared payload schemas for agent markdown assets."""
 
-from datetime import datetime
-from typing import Any
-from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
-class AgentVersionCreate(BaseModel):
-    """Payload for creating a new agent version."""
+class AgentSkillPayload(BaseModel):
+    """Structured agent skill stored inside manifest_json."""
 
-    version: str = Field(min_length=1, max_length=32)
-    changelog: str | None = Field(default=None)
-    manifest_json: dict[str, Any] | None = Field(default=None)
-    source_archive_url: str | None = Field(default=None, max_length=1000)
-    compatibility_matrix: dict[str, Any] | None = Field(default=None)
-    export_targets: list[str] | None = Field(default=None)
-    install_instructions: str | None = Field(default=None)
+    slug: str = Field(min_length=2, max_length=64)
+    content: str = Field(min_length=1)
+    description: str | None = Field(default=None, max_length=300)
 
 
-class AgentVersionRead(BaseModel):
-    """Serialized agent version payload returned by the API."""
+class AgentMarkdownFilePayload(BaseModel):
+    """Structured markdown file stored inside manifest_json."""
 
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    agent_id: UUID
-    version: str
-    changelog: str | None
-    manifest_json: dict[str, Any] | None
-    source_archive_url: str | None
-    compatibility_matrix: dict[str, Any] | None
-    export_targets: list[str] | None
-    install_instructions: str | None
-    published_at: datetime
-    is_latest: bool
-
-
-class AgentVersionListResponse(BaseModel):
-    """Paginated list of agent versions."""
-
-    items: list[AgentVersionRead]
-    total: int
-    limit: int
-    offset: int
+    path: str = Field(min_length=1, max_length=240)
+    content: str = Field(min_length=1)

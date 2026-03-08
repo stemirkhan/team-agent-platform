@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { Bot, PlusCircle } from "lucide-react";
 
-import { AgentCard } from "@/components/agents/agent-card";
+import { CatalogTeamComposer } from "@/components/agents/catalog-team-composer";
 import { Button } from "@/components/ui/button";
 import { fetchAgents } from "@/lib/api";
+import { t } from "@/lib/i18n";
+import { getRequestLocale } from "@/lib/i18n.server";
 
 export default async function AgentsCatalogPage() {
-  const data = await fetchAgents();
+  const locale = getRequestLocale();
+  const data = await fetchAgents({ limit: 100, status: "published" });
 
   return (
     <section>
@@ -16,29 +19,29 @@ export default async function AgentsCatalogPage() {
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-brand-100 text-brand-700 ring-1 ring-brand-200 dark:bg-zinc-800 dark:text-slate-200 dark:ring-zinc-700">
               <Bot className="h-5 w-5" />
             </span>
-            <span>Agent Catalog</span>
+            <span>{t(locale, { ru: "Каталог агентов", en: "Agent Catalog" })}</span>
           </h1>
-          <p className="text-sm text-slate-600 dark:text-slate-300">Published agents available in the marketplace MVP.</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            {t(locale, { ru: "Опубликованные агенты, доступные в marketplace MVP.", en: "Published agents available in the marketplace MVP." })}
+          </p>
         </div>
         <Link href="/agents/new">
           <Button>
             <PlusCircle className="mr-2 h-4 w-4" />
-            Create Agent
+            {t(locale, { ru: "Создать агента", en: "Create Agent" })}
           </Button>
         </Link>
       </div>
 
       {data.items.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-6 text-sm text-slate-500 dark:text-slate-400">
-          No published agents yet. Use `POST /api/v1/agents` and `POST /api/v1/agents/&lt;slug&gt;/publish`
-          to add your first card.
+          {t(locale, {
+            ru: "Пока нет опубликованных агентов. Используйте `POST /api/v1/agents` и `POST /api/v1/agents/<slug>/publish`, чтобы добавить первую карточку.",
+            en: "No published agents yet. Use `POST /api/v1/agents` and `POST /api/v1/agents/<slug>/publish` to add your first card."
+          })}
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {data.items.map((agent) => (
-            <AgentCard agent={agent} key={agent.id} />
-          ))}
-        </div>
+        <CatalogTeamComposer initialAgents={data.items} locale={locale} />
       )}
     </section>
   );

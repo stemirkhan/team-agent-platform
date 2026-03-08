@@ -14,18 +14,17 @@ import {
   type CodexSandboxMode,
   type OpenCodePermission,
   createAgentExport,
-  createAgentVersion,
   createTeamExport,
   resolveDownloadUrl,
   type RuntimeTarget,
 } from "@/lib/api";
+import { formatAuthLoading, t, type Locale } from "@/lib/i18n";
 
 type ExportControlsProps = {
   entityType: "agent" | "team";
   slug: string;
   status: "draft" | "published" | "archived" | "hidden";
-  agentTitle?: string;
-  agentShortDescription?: string;
+  locale: Locale;
 };
 
 const runtimeOptions: Array<{ value: RuntimeTarget; label: string }> = [
@@ -34,20 +33,11 @@ const runtimeOptions: Array<{ value: RuntimeTarget; label: string }> = [
   { value: "opencode", label: "OpenCode" },
 ];
 
-function extractMissingVersionAgentSlug(message: string | null): string | null {
-  if (!message) {
-    return null;
-  }
-  const match = message.match(/Agent '([^']+)' has no versions for export\./);
-  return match ? match[1] : null;
-}
-
 export function ExportControls({
   entityType,
   slug,
   status,
-  agentTitle,
-  agentShortDescription,
+  locale,
 }: ExportControlsProps) {
   const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -56,12 +46,10 @@ export function ExportControls({
 
   const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>("codex");
   const [submitting, setSubmitting] = useState(false);
-  const [creatingVersion, setCreatingVersion] = useState(false);
   const [lastDownloadUrl, setLastDownloadUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const [initialVersion, setInitialVersion] = useState("0.1.0");
   const [codexModel, setCodexModel] = useState("gpt-5.3-codex-spark");
   const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>("medium");
   const [codexSandboxMode, setCodexSandboxMode] = useState<CodexSandboxMode>("read-only");
@@ -69,9 +57,6 @@ export function ExportControls({
   const [claudePermissionMode, setClaudePermissionMode] = useState<ClaudePermissionMode>("default");
   const [opencodeModel, setOpencodeModel] = useState("");
   const [opencodePermission, setOpencodePermission] = useState<OpenCodePermission>("ask");
-  const [agentInstructions, setAgentInstructions] = useState(
-    "Review repository context and execute requested workflow with available tools.",
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -157,12 +142,12 @@ export function ExportControls({
           ? await createAgentExport(slug, finalExportPayload, token)
           : await createTeamExport(slug, finalExportPayload, token);
       if (!created.result_url) {
-        throw new Error("Export completed without artifact URL.");
+        throw new Error(t(locale, { ru: "Экспорт завершился без ссылки на артефакт.", en: "Export completed without artifact URL." }));
       }
 
       const downloadUrl = resolveDownloadUrl(created.result_url);
       setLastDownloadUrl(downloadUrl);
-      setSuccessMessage("Export ready. Download started.");
+      setSuccessMessage(t(locale, { ru: "Экспорт готов. Скачивание началось.", en: "Export ready. Download started." }));
 
       if (typeof window !== "undefined") {
         const anchor = window.document.createElement("a");
@@ -174,100 +159,57 @@ export function ExportControls({
         window.document.body.removeChild(anchor);
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to create export.");
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : t(locale, { ru: "Не удалось создать экспорт.", en: "Failed to create export." })
+      );
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function onCreateInitialVersion() {
-    if (!token) {
-      router.push("/auth/login");
-      return;
-    }
-
-    setCreatingVersion(true);
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    try {
-      await createAgentVersion(
-        slug,
-        {
-          version: initialVersion.trim() || "0.1.0",
-          changelog: "Initial release for runtime export compatibility.",
-          manifest_json: {
-            title: agentTitle ?? slug,
-            description: agentShortDescription ?? "Initial generated version.",
-            instructions: agentInstructions.trim(),
-            codex: {
-              description: agentShortDescription ?? agentTitle ?? slug,
-              developer_instructions: agentInstructions.trim(),
-            },
-            claude: {
-              description: agentShortDescription ?? agentTitle ?? slug,
-              prompt: agentInstructions.trim(),
-            },
-            opencode: {
-              description: agentShortDescription ?? agentTitle ?? slug,
-              prompt: agentInstructions.trim(),
-            },
-          },
-          export_targets: ["codex", "claude_code", "opencode"],
-          compatibility_matrix: { codex: true, claude_code: true, opencode: true },
-          install_instructions: "Use this version for runtime export.",
-        },
-        token,
-      );
-      setSuccessMessage("Initial version created. You can export now.");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to create initial version.");
-    } finally {
-      setCreatingVersion(false);
-    }
-  }
-
-  const missingVersionAgentSlug = extractMissingVersionAgentSlug(errorMessage);
-  const canCreateInitialVersion = entityType === "agent" && missingVersionAgentSlug === slug && status === "published";
-
   if (loadingAuth) {
     return (
-      <section className="rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5">
-        <p className="text-sm text-slate-500 dark:text-slate-400">Checking authorization...</p>
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
+        <p className="text-sm text-slate-500 dark:text-slate-400">{formatAuthLoading(locale)}</p>
       </section>
     );
   }
 
   if (!user) {
     return (
-      <section className="rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5">
-        <h2 className="mb-2 text-xl font-bold text-slate-900 dark:text-slate-50">Export</h2>
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
+        <h2 className="mb-2 text-xl font-bold text-slate-900 dark:text-slate-50">{t(locale, { ru: "Экспорт", en: "Export" })}</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Login to export this {entityType} to Codex, Claude Code, or OpenCode.
+          {t(locale, {
+            ru: `Войдите, чтобы экспортировать ${entityType === "agent" ? "агента" : "команду"} в Codex, Claude Code или OpenCode.`,
+            en: `Login to export this ${entityType} to Codex, Claude Code, or OpenCode.`
+          })}
         </p>
       </section>
     );
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5">
+    <section className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50">Export</h2>
-          <p className="text-sm text-slate-600 dark:text-slate-300">Signed in as {user.display_name}</p>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50">{t(locale, { ru: "Экспорт", en: "Export" })}</h2>
+          <p className="text-sm text-slate-600 dark:text-slate-300">{t(locale, { ru: "Вы вошли как", en: "Signed in as" })} {user.display_name}</p>
         </div>
       </div>
 
       <form className="space-y-3" onSubmit={onExport}>
-        <div className="space-y-3 rounded-lg border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/70 px-3 py-3">
+        <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-zinc-800 dark:bg-zinc-900/70">
           <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-            Download parameters
+            {t(locale, { ru: "Параметры скачивания", en: "Download parameters" })}
           </p>
 
           <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-            Runtime target
+            {t(locale, { ru: "Целевой runtime", en: "Runtime target" })}
             <select
-              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               onChange={(event) => setRuntimeTarget(event.target.value as RuntimeTarget)}
               value={runtimeTarget}
             >
@@ -282,9 +224,9 @@ export function ExportControls({
           {runtimeTarget === "codex" ? (
             <>
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-                Model
+                {t(locale, { ru: "Модель", en: "Model" })}
                 <input
-                  className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                   onChange={(event) => setCodexModel(event.target.value)}
                   placeholder="gpt-5.3-codex-spark"
                   value={codexModel}
@@ -293,9 +235,9 @@ export function ExportControls({
 
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  Reasoning effort
+                  {t(locale, { ru: "Уровень reasoning", en: "Reasoning effort" })}
                   <select
-                    className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                     onChange={(event) => setCodexReasoningEffort(event.target.value as CodexReasoningEffort)}
                     value={codexReasoningEffort}
                   >
@@ -306,9 +248,9 @@ export function ExportControls({
                 </label>
 
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  Sandbox mode
+                  {t(locale, { ru: "Режим sandbox", en: "Sandbox mode" })}
                   <select
-                    className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                     onChange={(event) => setCodexSandboxMode(event.target.value as CodexSandboxMode)}
                     value={codexSandboxMode}
                   >
@@ -322,9 +264,9 @@ export function ExportControls({
           ) : runtimeTarget === "claude_code" ? (
             <div className="grid gap-3 md:grid-cols-2">
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-                Model
+                {t(locale, { ru: "Модель", en: "Model" })}
                 <select
-                  className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                   onChange={(event) => setClaudeModel(event.target.value as ClaudeModel)}
                   value={claudeModel}
                 >
@@ -336,9 +278,9 @@ export function ExportControls({
               </label>
 
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-                Permission mode
+                {t(locale, { ru: "Режим разрешений", en: "Permission mode" })}
                 <select
-                  className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                   onChange={(event) => setClaudePermissionMode(event.target.value as ClaudePermissionMode)}
                   value={claudePermissionMode}
                 >
@@ -353,9 +295,9 @@ export function ExportControls({
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-                Model
+                {t(locale, { ru: "Модель", en: "Model" })}
                 <input
-                  className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                   onChange={(event) => setOpencodeModel(event.target.value)}
                   placeholder="provider/model-id"
                   value={opencodeModel}
@@ -363,9 +305,9 @@ export function ExportControls({
               </label>
 
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-                Permission
+                {t(locale, { ru: "Разрешение", en: "Permission" })}
                 <select
-                  className="mt-1 w-full rounded-lg border border-slate-300 dark:border-zinc-600 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                   onChange={(event) => setOpencodePermission(event.target.value as OpenCodePermission)}
                   value={opencodePermission}
                 >
@@ -380,54 +322,17 @@ export function ExportControls({
 
         {status !== "published" ? (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-            Only published {entityType}s can be exported.
+            {t(locale, {
+              ru: `Экспортировать можно только опубликованные ${entityType === "agent" ? "агенты" : "команды"}.`,
+              en: `Only published ${entityType}s can be exported.`
+            })}
           </p>
         ) : null}
 
         {errorMessage ? (
-          <div className="space-y-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-            <p>{errorMessage}</p>
-
-            {canCreateInitialVersion ? (
-              <div className="space-y-3 rounded-lg border border-slate-200 bg-white/80 px-3 py-3 text-slate-800">
-                <p className="text-sm font-semibold">Create initial export version</p>
-
-                <label className="block text-sm font-semibold text-slate-700">
-                  Version
-                  <input
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    onChange={(event) => setInitialVersion(event.target.value)}
-                    placeholder="0.1.0"
-                    value={initialVersion}
-                  />
-                </label>
-
-                <label className="block text-sm font-semibold text-slate-700">
-                  Instructions
-                  <textarea
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    onChange={(event) => setAgentInstructions(event.target.value)}
-                    placeholder="Instructions for exported agent behavior"
-                    rows={4}
-                    value={agentInstructions}
-                  />
-                </label>
-
-                <Button disabled={creatingVersion} onClick={onCreateInitialVersion} type="button" variant="secondary">
-                  {creatingVersion ? "Creating version..." : "Create initial version"}
-                </Button>
-              </div>
-            ) : null}
-
-            {entityType === "team" && missingVersionAgentSlug ? (
-              <p>
-                Open agent page and create version:{" "}
-                <Link className="font-semibold underline" href={`/agents/${missingVersionAgentSlug}`}>
-                  /agents/{missingVersionAgentSlug}
-                </Link>
-              </p>
-            ) : null}
-          </div>
+          <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {errorMessage}
+          </p>
         ) : null}
 
         {successMessage ? (
@@ -437,15 +342,15 @@ export function ExportControls({
         ) : null}
 
         {lastDownloadUrl ? (
-          <p className="rounded-lg border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/70 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 break-all">
-            If download did not start, use this link:{" "}
+          <p className="break-all rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-slate-200">
+            {t(locale, { ru: "Если скачивание не началось, используйте эту ссылку:", en: "If download did not start, use this link:" })}{" "}
             <a
               className="font-semibold text-brand-700 hover:text-brand-900 dark:text-slate-200 dark:hover:text-white"
               href={lastDownloadUrl}
               rel="noreferrer"
               target="_blank"
             >
-              Download artifact
+              {t(locale, { ru: "Скачать артефакт", en: "Download artifact" })}
             </a>
           </p>
         ) : null}
@@ -453,7 +358,9 @@ export function ExportControls({
         <div className="flex flex-wrap items-center gap-2">
           <Button disabled={submitting || status !== "published"} type="submit">
             <Download className="mr-2 h-4 w-4" />
-            {submitting ? "Exporting..." : "Export & Download"}
+            {submitting
+              ? t(locale, { ru: "Экспортируем...", en: "Exporting..." })
+              : t(locale, { ru: "Экспортировать и скачать", en: "Export & Download" })}
           </Button>
         </div>
       </form>

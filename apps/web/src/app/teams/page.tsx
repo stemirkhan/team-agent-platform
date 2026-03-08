@@ -4,8 +4,11 @@ import { PlusCircle, UsersRound } from "lucide-react";
 import { TeamCard } from "@/components/teams/team-card";
 import { Button } from "@/components/ui/button";
 import { fetchTeams } from "@/lib/api";
+import { t } from "@/lib/i18n";
+import { getRequestLocale } from "@/lib/i18n.server";
 
 export default async function TeamsCatalogPage() {
+  const locale = getRequestLocale();
   const data = await fetchTeams();
 
   return (
@@ -16,27 +19,31 @@ export default async function TeamsCatalogPage() {
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-brand-100 text-brand-700 ring-1 ring-brand-200 dark:bg-zinc-800 dark:text-slate-200 dark:ring-zinc-700">
               <UsersRound className="h-5 w-5" />
             </span>
-            <span>Team Catalog</span>
+            <span>{t(locale, { ru: "Каталог команд", en: "Team Catalog" })}</span>
           </h1>
-          <p className="text-sm text-slate-600 dark:text-slate-300">Published teams assembled from marketplace agents.</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            {t(locale, { ru: "Опубликованные команды, собранные из агентов маркетплейса.", en: "Published teams assembled from marketplace agents." })}
+          </p>
         </div>
         <Link href="/teams/new">
           <Button>
             <PlusCircle className="mr-2 h-4 w-4" />
-            Create Team
+            {t(locale, { ru: "Создать команду", en: "Create Team" })}
           </Button>
         </Link>
       </div>
 
       {data.items.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-6 text-sm text-slate-500 dark:text-slate-400">
-          No published teams yet. Use `POST /api/v1/teams` and `POST /api/v1/teams/&lt;slug&gt;/publish`
-          to add your first team.
+          {t(locale, {
+            ru: "Пока нет опубликованных команд. Используйте `POST /api/v1/teams` и `POST /api/v1/teams/<slug>/publish`, чтобы добавить первую команду.",
+            en: "No published teams yet. Use `POST /api/v1/teams` and `POST /api/v1/teams/<slug>/publish` to add your first team."
+          })}
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {data.items.map((team) => (
-            <TeamCard key={team.id} team={team} />
+            <TeamCard key={team.id} locale={locale} team={team} />
           ))}
         </div>
       )}

@@ -36,16 +36,12 @@ Foundation:
   - `POST /api/v1/agents/{slug}/versions` (Bearer token, owner only)
   - `GET /api/v1/agents/{slug}/versions`
   - `GET /api/v1/agents/{slug}/versions/{version}`
-  - `GET /api/v1/agents/{slug}/reviews`
-  - `POST /api/v1/agents/{slug}/reviews` (Bearer token, one review per user)
 - каталог и конструктор команд API:
   - `GET /api/v1/teams`
   - `GET /api/v1/teams/{slug}`
   - `POST /api/v1/teams` (Bearer token)
   - `POST /api/v1/teams/{slug}/items` (Bearer token, owner only)
   - `POST /api/v1/teams/{slug}/publish` (Bearer token, owner only)
-  - `GET /api/v1/teams/{slug}/reviews`
-  - `POST /api/v1/teams/{slug}/reviews` (Bearer token, one review per user)
 - export API:
   - `POST /api/v1/exports/agents/{slug}` (Bearer token)
   - `GET /api/v1/exports/agents/{slug}` (Bearer token, creator only)
@@ -67,10 +63,10 @@ Foundation:
   - страницы авторизации `/auth/login` и `/auth/register`;
   - страница каталога `/agents`;
   - страница создания агента `/agents/new`;
-  - страница агента `/agents/[slug]` с секциями Export и Reviews;
+  - страница агента `/agents/[slug]` с секцией Export;
   - страница каталога `/teams`;
   - страница создания команды `/teams/new`;
-  - страница команды `/teams/[slug]` с Team Builder, Export и секцией Reviews.
+  - страница команды `/teams/[slug]` с Team Builder и Export.
 
 ## Быстрый старт
 

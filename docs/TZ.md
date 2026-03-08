@@ -18,6 +18,10 @@
 
 # ТЗ на MVP
 
+> Актуализация на 8 марта 2026: публичный функционал версий агентов временно убран из MVP.
+> Текущая модель продукта: у агента есть один текущий редактируемый профиль для экспорта, а команды собираются из опубликованных агентов без выбора отдельных версий.
+> Все упоминания `AgentVersion`, version editor и version API ниже считать отложенным дизайном, а не текущим контрактом реализации.
+
 ## Проект: маркетплейс субагентов и команд агентов
 
 ## 1. Цель проекта
@@ -357,7 +361,7 @@
 * Система должна поддерживать пагинацию.
 * Загрузка файлов должна быть ограничена по типу и размеру.
 * Все действия модерации должны логироваться.
-* Должен быть rate limit на auth, reviews, exports.
+* Должен быть rate limit на auth и exports.
 * Ошибки должны быть стандартизированы.
 * Критические действия должны покрываться audit log.
 
@@ -378,7 +382,6 @@ backend/
         agents.py
         agent_versions.py
         teams.py
-        reviews.py
         exports.py
         favorites.py
         admin.py
@@ -395,7 +398,6 @@ backend/
       agent_version.py
       team.py
       team_item.py
-      review.py
       favorite.py
       export_job.py
       validation_run.py
@@ -407,7 +409,6 @@ backend/
       agent.py
       agent_version.py
       team.py
-      review.py
       export.py
       common.py
     repositories/
@@ -415,7 +416,6 @@ backend/
       agent.py
       agent_version.py
       team.py
-      review.py
       export.py
     services/
       auth_service.py
@@ -423,7 +423,6 @@ backend/
       team_service.py
       export_service.py
       validation_service.py
-      review_service.py
       moderation_service.py
     tasks/
       exports.py
@@ -498,7 +497,6 @@ frontend/
       layout/
       agents/
       teams/
-      reviews/
       forms/
       shared/
     features/
@@ -506,7 +504,6 @@ frontend/
       agents/
       teams/
       exports/
-      reviews/
       favorites/
       admin/
     lib/
@@ -625,16 +622,6 @@ DELETE /api/v1/teams/{slug}/items/{item_id}
 POST   /api/v1/teams/{slug}/export
 ```
 
-## Reviews
-
-```http
-GET    /api/v1/agents/{slug}/reviews
-POST   /api/v1/agents/{slug}/reviews
-GET    /api/v1/teams/{slug}/reviews
-POST   /api/v1/teams/{slug}/reviews
-POST   /api/v1/reviews/{id}/report
-```
-
 ## Favorites
 
 ```http
@@ -674,7 +661,7 @@ id: fastapi-reviewer
 title: FastAPI Reviewer
 type: subagent
 version: 1.2.0
-description: Reviews FastAPI architecture and API design
+description: Inspects FastAPI architecture and API design
 author:
   name: temirkhan
 category: backend

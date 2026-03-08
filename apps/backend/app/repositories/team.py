@@ -6,8 +6,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
+from app.models.agent_version import AgentVersion
 from app.models.team import Team, TeamItem
-from app.schemas.team import TeamCreate, TeamItemCreate, TeamItemRead
+from app.schemas.team import TeamCreate, TeamItemCreate, TeamItemRead, TeamUpdate
 
 
 class TeamRepository:
@@ -27,6 +28,15 @@ class TeamRepository:
         self.session.commit()
         self.session.refresh(entity)
         return entity
+
+    def update(self, team: Team, payload: TeamUpdate) -> Team:
+        """Persist mutable team field changes."""
+        for field, value in payload.model_dump(exclude_unset=True).items():
+            setattr(team, field, value)
+        self.session.add(team)
+        self.session.commit()
+        self.session.refresh(team)
+        return team
 
     def list_teams(
         self,
@@ -91,15 +101,18 @@ class TeamRepository:
         self.session.refresh(team)
         return team
 
-    def create_item(self, *, team: Team, agent: Agent, payload: TeamItemCreate) -> TeamItem:
-        """Add an agent item into the given team."""
-        order_index = payload.order_index
-        if order_index is None:
-            order_index = self._next_order_index(team.id)
-
+    def create_item(
+        self,
+        *,
+        team: Team,
+        agent_version: AgentVersion,
+        payload: TeamItemCreate,
+        order_index: int,
+    ) -> TeamItem:
+        """Add the current agent export profile to the given team."""
         entity = TeamItem(
             team_id=team.id,
-            agent_id=agent.id,
+            agent_version_id=agent_version.id,
             role_name=payload.role_name,
             order_index=order_index,
             config_json=payload.config_json,
@@ -110,13 +123,47 @@ class TeamRepository:
         self.session.refresh(entity)
         return entity
 
-    def list_items(self, team_id: UUID) -> list[TeamItemRead]:
-        """Return ordered team items with agent slugs for UI."""
+    def get_item_by_id(self, *, team_id: UUID, item_id: UUID) -> TeamItem | None:
+        """Find one team item scoped to the parent team."""
+        query = select(TeamItem).where(
+            TeamItem.team_id == team_id,
+            TeamItem.id == item_id,
+        )
+        return self.session.scalar(query)
+
+    def list_item_entities(self, team_id: UUID) -> list[TeamItem]:
+        """Return mutable team item ORM entities in display order."""
         query = (
-            select(TeamItem, Agent.slug)
-            .join(Agent, Agent.id == TeamItem.agent_id)
+            select(TeamItem)
             .where(TeamItem.team_id == team_id)
-            .order_by(TeamItem.order_index.asc())
+            .order_by(TeamItem.order_index.asc(), TeamItem.id.asc())
+        )
+        return list(self.session.scalars(query).all())
+
+    def save_items(self, items: list[TeamItem]) -> None:
+        """Persist item updates in one transaction."""
+        for item in items:
+            self.session.add(item)
+        self.session.commit()
+
+    def delete_item(self, item: TeamItem) -> None:
+        """Delete one team item."""
+        self.session.delete(item)
+        self.session.commit()
+
+    def list_items(self, team_id: UUID) -> list[TeamItemRead]:
+        """Return ordered team items with agent metadata for UI."""
+        query = (
+            select(
+                TeamItem,
+                Agent.slug,
+                Agent.title,
+                Agent.short_description,
+            )
+            .join(AgentVersion, AgentVersion.id == TeamItem.agent_version_id)
+            .join(Agent, Agent.id == AgentVersion.agent_id)
+            .where(TeamItem.team_id == team_id)
+            .order_by(TeamItem.order_index.asc(), TeamItem.id.asc())
         )
 
         rows = self.session.execute(query).all()
@@ -124,19 +171,13 @@ class TeamRepository:
             TeamItemRead(
                 id=item.id,
                 team_id=item.team_id,
-                agent_id=item.agent_id,
                 agent_slug=agent_slug,
+                agent_title=agent_title,
+                agent_short_description=agent_short_description,
                 role_name=item.role_name,
                 order_index=item.order_index,
                 config_json=item.config_json,
                 is_required=item.is_required,
             )
-            for item, agent_slug in rows
+            for item, agent_slug, agent_title, agent_short_description in rows
         ]
-
-    def _next_order_index(self, team_id: UUID) -> int:
-        """Return next sequential index for team item ordering."""
-        max_order = self.session.scalar(
-            select(func.max(TeamItem.order_index)).where(TeamItem.team_id == team_id)
-        )
-        return 0 if max_order is None else int(max_order) + 1

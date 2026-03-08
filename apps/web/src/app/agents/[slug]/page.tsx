@@ -1,57 +1,58 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AgentProfileForm } from "@/components/agents/agent-profile-form";
 import { ExportControls } from "@/components/exports/export-controls";
-import { ReviewsSection } from "@/components/agents/reviews-section";
-import { fetchAgent, fetchAgentReviews } from "@/lib/api";
+import { fetchAgent } from "@/lib/api";
+import { formatGeneralCategory, formatStatus, formatVerificationStatus, t } from "@/lib/i18n";
+import { getRequestLocale } from "@/lib/i18n.server";
 
 export default async function AgentDetailsPage({ params }: { params: { slug: string } }) {
+  const locale = getRequestLocale();
+
   try {
-    const [agent, reviews] = await Promise.all([
-      fetchAgent(params.slug),
-      fetchAgentReviews(params.slug),
-    ]);
+    const agent = await fetchAgent(params.slug);
 
     return (
       <section className="w-full space-y-6">
         <Link className="mb-4 inline-flex text-sm font-semibold text-brand-700 hover:text-brand-900 dark:text-slate-200 dark:hover:text-white" href="/agents">
-          &larr; Back to catalog
+          &larr; {t(locale, { ru: "Назад к каталогу", en: "Back to catalog" })}
         </Link>
 
         <h1 className="mb-2 text-3xl font-black text-slate-900 dark:text-slate-50">{agent.title}</h1>
         <p className="mb-6 text-slate-600 dark:text-slate-300">{agent.short_description}</p>
 
-        <div className="mb-6 grid gap-3 rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 text-sm text-slate-700 dark:text-slate-200 md:grid-cols-2">
+        <div className="mb-6 grid gap-3 rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-slate-200 md:grid-cols-2">
           <p>
-            <span className="font-semibold">Slug:</span> {agent.slug}
+            <span className="font-semibold">{t(locale, { ru: "Slug:", en: "Slug:" })}</span> {agent.slug}
           </p>
           <p>
-            <span className="font-semibold">Category:</span> {agent.category ?? "general"}
+            <span className="font-semibold">{t(locale, { ru: "Категория:", en: "Category:" })}</span> {agent.category ?? formatGeneralCategory(locale)}
           </p>
           <p>
-            <span className="font-semibold">Status:</span> {agent.status}
+            <span className="font-semibold">{t(locale, { ru: "Статус:", en: "Status:" })}</span> {formatStatus(locale, agent.status)}
           </p>
           <p>
-            <span className="font-semibold">Verification:</span> {agent.verification_status}
+            <span className="font-semibold">{t(locale, { ru: "Верификация:", en: "Verification:" })}</span> {formatVerificationStatus(locale, agent.verification_status)}
           </p>
           <p>
-            <span className="font-semibold">Author:</span> {agent.author_name}
+            <span className="font-semibold">{t(locale, { ru: "Автор:", en: "Author:" })}</span> {agent.author_name}
           </p>
         </div>
 
-        <article className="prose-slate max-w-none rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5">
-          <h2>Full Description</h2>
-          <p>{agent.full_description ?? "No full description yet."}</p>
+        <article className="prose-slate max-w-none rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
+          <h2>{t(locale, { ru: "Полное описание", en: "Full Description" })}</h2>
+          <p>{agent.full_description ?? t(locale, { ru: "Полное описание пока не добавлено.", en: "No full description yet." })}</p>
         </article>
 
+        <AgentProfileForm agent={agent} locale={locale} />
+
         <ExportControls
-          agentShortDescription={agent.short_description}
-          agentTitle={agent.title}
           entityType="agent"
+          locale={locale}
           slug={agent.slug}
           status={agent.status}
         />
-        <ReviewsSection agentSlug={agent.slug} initialReviews={reviews.items} />
       </section>
     );
   } catch {

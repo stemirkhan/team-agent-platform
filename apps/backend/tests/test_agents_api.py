@@ -29,7 +29,7 @@ def test_create_publish_and_list_agent(client: TestClient) -> None:
         "slug": "fastapi-reviewer",
         "title": "FastAPI Reviewer",
         "short_description": (
-            "Reviews backend architecture and endpoint quality for FastAPI services."
+            "Inspects backend architecture and endpoint quality for FastAPI services."
         ),
         "full_description": (
             "Looks for router/service/repository boundaries and common API pitfalls."
@@ -105,3 +105,62 @@ def test_only_owner_can_publish_agent(client: TestClient) -> None:
     publish_response = client.post("/api/v1/agents/owner-agent/publish", headers=owner_headers)
     assert publish_response.status_code == 200
     assert publish_response.json()["status"] == "published"
+
+
+def test_update_agent_profile_returns_skills_and_markdown_files(client: TestClient) -> None:
+    """Agent profile response should expose structured asset attachments."""
+    headers = _auth_headers(
+        client,
+        email="profile-assets@example.com",
+        display_name="Profile Assets",
+    )
+
+    create_response = client.post(
+        "/api/v1/agents",
+        headers=headers,
+        json={
+            "slug": "asset-agent",
+            "title": "Asset Agent",
+            "short_description": "Agent profile with structured assets.",
+            "category": "backend",
+        },
+    )
+    assert create_response.status_code == 201
+
+    profile_response = client.patch(
+        "/api/v1/agents/asset-agent",
+        headers=headers,
+        json={
+            "manifest_json": {
+                "instructions": "Inspect the repository.",
+            },
+            "skills": [
+                {
+                    "slug": "repo-audit",
+                    "description": "Repository audit skill.",
+                    "content": "# Repo audit\n\nInspect the repository.",
+                }
+            ],
+            "markdown_files": [
+                {
+                    "path": "AGENTS.md",
+                    "content": "# Project instructions\n\nFollow repository rules.",
+                }
+            ],
+        },
+    )
+    assert profile_response.status_code == 200
+    payload = profile_response.json()
+    assert payload["skills"] == [
+        {
+            "slug": "repo-audit",
+            "description": "Repository audit skill.",
+            "content": "# Repo audit\n\nInspect the repository.",
+        }
+    ]
+    assert payload["markdown_files"] == [
+        {
+            "path": "AGENTS.md",
+            "content": "# Project instructions\n\nFollow repository rules.",
+        }
+    ]

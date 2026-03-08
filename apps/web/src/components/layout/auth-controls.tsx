@@ -11,13 +11,14 @@ import {
   getAccessToken,
   type AuthUser
 } from "@/lib/auth-client";
+import { t, type Locale } from "@/lib/i18n";
 
 type AuthState = {
   loading: boolean;
   user: AuthUser | null;
 };
 
-export function AuthControls() {
+export function AuthControls({ locale }: { locale: Locale }) {
   const pathname = usePathname();
   const [state, setState] = useState<AuthState>({ loading: false, user: null });
 
@@ -58,7 +59,7 @@ export function AuthControls() {
   }, [pathname]);
 
   if (state.loading) {
-    return <span className="text-xs text-slate-500 dark:text-slate-400">auth...</span>;
+    return <span className="text-xs text-slate-500 dark:text-slate-400">{t(locale, { ru: "авторизация...", en: "auth..." })}</span>;
   }
 
   if (!state.user) {
@@ -69,14 +70,14 @@ export function AuthControls() {
           href="/auth/login"
         >
           <LogIn className="h-3.5 w-3.5" />
-          Login
+          {t(locale, { ru: "Войти", en: "Login" })}
         </Link>
         <Link
           className="inline-flex items-center gap-1.5 rounded-full bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
           href="/auth/register"
         >
           <UserPlus className="h-3.5 w-3.5" />
-          Register
+          {t(locale, { ru: "Регистрация", en: "Register" })}
         </Link>
       </div>
     );
@@ -96,7 +97,7 @@ export function AuthControls() {
         type="button"
       >
         <LogOut className="h-3.5 w-3.5" />
-        Logout
+        {t(locale, { ru: "Выйти", en: "Logout" })}
       </button>
     </div>
   );
