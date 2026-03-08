@@ -128,3 +128,7 @@ npm run lint
 ```bash
 make compose-config
 ```
+
+## Smoke Run Validation
+
+- Host executor can create draft pull requests.
