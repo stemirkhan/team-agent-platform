@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://agent_marketplace:agent_marketplace@localhost:5432/agent_marketplace"
     redis_url: str = "redis://localhost:6379/0"
+    host_executor_base_url: str | None = None
+    host_executor_timeout_seconds: float = 2.5
+    host_executor_api_timeout_seconds: float = 15.0
     jwt_secret_key: str = "dev-secret-key-change-me-at-least-32-chars"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60 * 24

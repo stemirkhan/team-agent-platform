@@ -54,3 +54,49 @@ export function formatGeneralCategory(locale: Locale): string {
 export function formatAuthLoading(locale: Locale): string {
   return t(locale, { ru: "проверка авторизации...", en: "checking authorization..." });
 }
+
+export function formatRunStatus(
+  locale: Locale,
+  status:
+    | "queued"
+    | "preparing"
+    | "cloning_repo"
+    | "materializing_team"
+    | "starting_codex"
+    | "running"
+    | "committing"
+    | "pushing"
+    | "creating_pr"
+    | "completed"
+    | "failed"
+    | "cancelled"
+): string {
+  switch (status) {
+    case "queued":
+      return t(locale, { ru: "в очереди", en: "queued" });
+    case "preparing":
+      return t(locale, { ru: "подготовка", en: "preparing" });
+    case "cloning_repo":
+      return t(locale, { ru: "клонирование", en: "cloning repo" });
+    case "materializing_team":
+      return t(locale, { ru: "материализация команды", en: "materializing team" });
+    case "starting_codex":
+      return t(locale, { ru: "старт Codex", en: "starting Codex" });
+    case "running":
+      return t(locale, { ru: "выполняется", en: "running" });
+    case "committing":
+      return t(locale, { ru: "коммит", en: "committing" });
+    case "pushing":
+      return t(locale, { ru: "пуш", en: "pushing" });
+    case "creating_pr":
+      return t(locale, { ru: "создание PR", en: "creating PR" });
+    case "completed":
+      return t(locale, { ru: "завершен", en: "completed" });
+    case "failed":
+      return t(locale, { ru: "ошибка", en: "failed" });
+    case "cancelled":
+      return t(locale, { ru: "отменен", en: "cancelled" });
+    default:
+      return status;
+  }
+}

@@ -231,6 +231,8 @@ def test_export_agent_with_skills_and_markdown_files_returns_zip_bundle(client: 
         assert "AGENTS.md" in names
         assert ".codex/skills/backend-audit/SKILL.md" in names
         skill_content = archive.read(".codex/skills/backend-audit/SKILL.md").decode("utf-8")
+        assert 'name: "backend-audit"' in skill_content
+        assert 'description: "Repository audit skill."' in skill_content
         assert "# Backend audit" in skill_content
 
 
@@ -391,6 +393,11 @@ def test_team_export_includes_namespaced_agent_assets(client: TestClient) -> Non
         names = set(archive.namelist())
         assert "agents/team-assets-agent/docs/architecture.md" in names
         assert ".codex/skills/team-assets-agent-api-check/SKILL.md" in names
+        skill_content = archive.read(
+            ".codex/skills/team-assets-agent-api-check/SKILL.md"
+        ).decode("utf-8")
+        assert skill_content.startswith("---\n")
+        assert 'name: "api-check"' in skill_content
 
 
 def test_team_export_uses_current_agent_profile(client: TestClient) -> None:

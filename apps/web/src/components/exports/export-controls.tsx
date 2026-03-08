@@ -50,7 +50,7 @@ export function ExportControls({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const [codexModel, setCodexModel] = useState("gpt-5.3-codex-spark");
+  const [codexModel, setCodexModel] = useState("");
   const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>("medium");
   const [codexSandboxMode, setCodexSandboxMode] = useState<CodexSandboxMode>("read-only");
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>("inherit");
@@ -228,9 +228,18 @@ export function ExportControls({
                 <input
                   className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                   onChange={(event) => setCodexModel(event.target.value)}
-                  placeholder="gpt-5.3-codex-spark"
+                  placeholder={t(locale, {
+                    ru: "Оставь пустым для модели аккаунта",
+                    en: "Leave empty to use the account default"
+                  })}
                   value={codexModel}
                 />
+                <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
+                  {t(locale, {
+                    ru: "Если модель не указана, Codex CLI сам выберет поддерживаемую модель из локального аккаунта.",
+                    en: "If model is omitted, Codex CLI will use a supported model from the local account."
+                  })}
+                </span>
               </label>
 
               <div className="grid gap-3 md:grid-cols-2">

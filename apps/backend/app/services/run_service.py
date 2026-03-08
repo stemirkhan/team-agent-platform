@@ -1,0 +1,757 @@
+"""Use-case orchestration for run preparation and materialization."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from io import BytesIO
+from pathlib import PurePosixPath
+from zipfile import ZipFile
+
+from fastapi import HTTPException, status
+
+from app.models.export_job import ExportEntityType, RuntimeTarget
+from app.models.run import RunEventType, RunStatus
+from app.models.team import TeamStatus
+from app.models.user import User
+from app.repositories.run import RunRepository
+from app.repositories.team import TeamRepository
+from app.schemas.codex import CodexSessionEventsResponse, CodexSessionRead, CodexSessionStart
+from app.schemas.export import CodexExportOptions
+from app.schemas.run import RunCreate, RunEventListResponse, RunListResponse
+from app.schemas.workspace import (
+    WorkspaceCommit,
+    WorkspaceFileWrite,
+    WorkspaceMaterialize,
+    WorkspacePrepare,
+    WorkspacePullRequestCreate,
+)
+from app.services.codex_proxy_service import CodexProxyService, CodexProxyServiceError
+from app.services.export_service import ExportService
+from app.services.github_proxy_service import GitHubProxyService, GitHubProxyServiceError
+from app.services.host_execution_service import HostExecutionReadinessService
+from app.services.workspace_proxy_service import WorkspaceProxyService, WorkspaceProxyServiceError
+
+
+class RunService:
+    """Create and inspect local-first Codex runs."""
+
+    _READY_MESSAGE = (
+        "Workspace is prepared and `.codex` plus `TASK.md` are materialized. "
+        "Codex PTY execution is the next layer."
+    )
+
+    def __init__(
+        self,
+        run_repository: RunRepository,
+        team_repository: TeamRepository,
+        export_service: ExportService,
+        workspace_proxy_service: WorkspaceProxyService,
+        codex_proxy_service: CodexProxyService,
+        github_proxy_service: GitHubProxyService,
+        readiness_service: HostExecutionReadinessService,
+    ) -> None:
+        self.run_repository = run_repository
+        self.team_repository = team_repository
+        self.export_service = export_service
+        self.workspace_proxy_service = workspace_proxy_service
+        self.codex_proxy_service = codex_proxy_service
+        self.github_proxy_service = github_proxy_service
+        self.readiness_service = readiness_service
+
+    def create_run(self, payload: RunCreate, current_user: User):
+        """Create a run, prepare its workspace, and materialize Codex inputs."""
+        readiness = self.readiness_service.build_readiness()
+        if not readiness.effective_ready:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Local execution is not ready. Open diagnostics, fix `git`/`gh`/`codex`, "
+                    "and retry the run."
+                ),
+            )
+
+        team = self.team_repository.get_by_slug(payload.team_slug)
+        if team is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found.")
+        if team.status != TeamStatus.PUBLISHED.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only published teams can be run right now.",
+            )
+
+        try:
+            repo = self.github_proxy_service.get_repo(payload.repo_owner, payload.repo_name)
+            issue = None
+            if payload.issue_number is not None:
+                issue = self.github_proxy_service.get_issue(
+                    payload.repo_owner,
+                    payload.repo_name,
+                    payload.issue_number,
+                )
+        except GitHubProxyServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+        base_branch = payload.base_branch or repo.default_branch or "main"
+        run = self.run_repository.create(
+            team_id=team.id,
+            created_by=current_user.id,
+            team_slug=team.slug,
+            team_title=team.title,
+            runtime_target=RuntimeTarget.CODEX.value,
+            repo_owner=repo.owner,
+            repo_name=repo.name,
+            repo_full_name=repo.full_name,
+            base_branch=base_branch,
+            issue_number=issue.number if issue is not None else None,
+            issue_title=issue.title if issue is not None else None,
+            issue_url=issue.url if issue is not None else None,
+            title=self._derive_title(
+                payload=payload,
+                team_title=team.title,
+                repo_full_name=repo.full_name,
+                issue_title=issue.title if issue else None,
+            ),
+            summary=self._derive_summary(
+                payload=payload,
+                issue_title=issue.title if issue else None,
+            ),
+            task_text=payload.task_text,
+            runtime_config_json=self._build_runtime_config(payload.codex),
+        )
+        self._append_event(
+            run_id=run.id,
+            event_type=RunEventType.STATUS,
+            payload={
+                "status": RunStatus.QUEUED.value,
+                "message": "Run created.",
+            },
+        )
+
+        try:
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.PREPARING,
+                message="Validating inputs and preparing workspace.",
+            )
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.CLONING_REPO,
+                message=f"Cloning {repo.full_name} and creating a working branch.",
+            )
+            workspace = self.workspace_proxy_service.prepare_workspace(
+                WorkspacePrepare(
+                    owner=repo.owner,
+                    repo=repo.name,
+                    base_branch=base_branch,
+                )
+            )
+            run = self.run_repository.update(
+                run,
+                fields={
+                    "base_branch": workspace.base_branch,
+                    "working_branch": workspace.working_branch,
+                    "workspace_id": workspace.id,
+                    "workspace_path": workspace.workspace_path,
+                    "repo_path": workspace.repo_path,
+                },
+            )
+
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.MATERIALIZING_TEAM,
+                message="Writing `.codex` bundle and `TASK.md` into the workspace.",
+            )
+            workspace = self.workspace_proxy_service.materialize_workspace(
+                workspace.id,
+                WorkspaceMaterialize(
+                    files=self._build_workspace_files(
+                        team_slug=team.slug,
+                        payload=payload,
+                        repo_full_name=repo.full_name,
+                        base_branch=workspace.base_branch,
+                        working_branch=workspace.working_branch,
+                        issue_title=issue.title if issue else None,
+                        issue_number=issue.number if issue else None,
+                        issue_url=issue.url if issue else None,
+                        issue_body=issue.body if issue else None,
+                    )
+                ),
+            )
+            run = self.run_repository.update(
+                run,
+                fields={
+                    "workspace_path": workspace.workspace_path,
+                    "repo_path": workspace.repo_path,
+                },
+            )
+            task_markdown = self._build_task_markdown(
+                payload=payload,
+                repo_full_name=repo.full_name,
+                base_branch=workspace.base_branch,
+                working_branch=workspace.working_branch,
+                issue_title=issue.title if issue else None,
+                issue_number=issue.number if issue else None,
+                issue_url=issue.url if issue else None,
+                issue_body=issue.body if issue else None,
+            )
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.STARTING_CODEX,
+                message="Starting host-side Codex session.",
+            )
+            self.codex_proxy_service.start_session(
+                payload=self._build_codex_session_payload(
+                    run_id=str(run.id),
+                    workspace_id=workspace.id,
+                    task_markdown=task_markdown,
+                    codex_options=payload.codex,
+                )
+            )
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.RUNNING,
+                message="Codex session is running in the prepared workspace.",
+            )
+            return run
+        except (WorkspaceProxyServiceError, GitHubProxyServiceError, CodexProxyServiceError) as exc:
+            return self._fail_run(run, detail=exc.detail)
+        except HTTPException as exc:
+            return self._fail_run(run, detail=str(exc.detail))
+        except Exception as exc:  # noqa: BLE001
+            return self._fail_run(run, detail=f"Run preparation failed: {exc}")
+
+    def list_runs(
+        self,
+        *,
+        current_user: User,
+        limit: int,
+        offset: int,
+        status_filter: RunStatus | None,
+    ) -> RunListResponse:
+        """Return paginated runs owned by the current user."""
+        status_value = status_filter.value if status_filter else None
+        items, total = self.run_repository.list_for_creator(
+            created_by=current_user.id,
+            limit=limit,
+            offset=offset,
+            status=status_value,
+        )
+        items = [self._sync_run_with_codex_session(item) for item in items]
+        return RunListResponse(items=items, total=total, limit=limit, offset=offset)
+
+    def get_run(self, run_id, current_user: User):
+        """Return one run owned by the current user."""
+        run = self.run_repository.get_by_id(run_id)
+        if run is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+        self._ensure_owner(run.created_by, current_user.id)
+        return self._sync_run_with_codex_session(run)
+
+    def list_run_events(self, run_id, current_user: User) -> RunEventListResponse:
+        """Return ordered run events for one run owned by the current user."""
+        run = self.get_run(run_id, current_user)
+        items = self.run_repository.list_events(run_id=run.id)
+        return RunEventListResponse(items=items, total=len(items))
+
+    def cancel_run(self, run_id, current_user: User):
+        """Cancel one running host-side Codex session."""
+        run = self.get_run(run_id, current_user)
+        if run.status in {
+            RunStatus.COMPLETED.value,
+            RunStatus.FAILED.value,
+            RunStatus.CANCELLED.value,
+        }:
+            return run
+        try:
+            session = self.codex_proxy_service.cancel_session(str(run.id))
+        except CodexProxyServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+        if session.status in {"running", "cancelled"}:
+            run = self.run_repository.update(
+                run,
+                fields={
+                    "status": RunStatus.CANCELLED.value,
+                    "error_message": None,
+                    "finished_at": datetime.now(UTC),
+                },
+            )
+            self._append_event(
+                run_id=run.id,
+                event_type=RunEventType.STATUS,
+                payload={
+                    "status": RunStatus.CANCELLED.value,
+                    "message": "Run cancellation was requested.",
+                },
+            )
+        return run
+
+    def get_terminal_session(self, run_id, current_user: User) -> CodexSessionRead:
+        """Return current host-side terminal session for one run."""
+        run = self.get_run(run_id, current_user)
+        try:
+            return self.codex_proxy_service.get_session(str(run.id))
+        except CodexProxyServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    def get_terminal_events(
+        self,
+        run_id,
+        *,
+        offset: int,
+        current_user: User,
+    ) -> CodexSessionEventsResponse:
+        """Return incremental terminal output for one run."""
+        run = self.get_run(run_id, current_user)
+        try:
+            return self.codex_proxy_service.get_events(str(run.id), offset=offset)
+        except CodexProxyServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    def _fail_run(self, run, *, detail: str):
+        """Persist failed run state and expose the updated run object."""
+        failed_run = self.run_repository.update(
+            run,
+            fields={
+                "status": RunStatus.FAILED.value,
+                "error_message": detail,
+                "finished_at": datetime.now(UTC),
+            },
+        )
+        self._append_event(
+            run_id=failed_run.id,
+            event_type=RunEventType.STATUS,
+            payload={
+                "status": RunStatus.FAILED.value,
+                "message": detail,
+            },
+        )
+        self._append_event(
+            run_id=failed_run.id,
+            event_type=RunEventType.ERROR,
+            payload={"detail": detail},
+        )
+        return failed_run
+
+    def _transition_run(self, run, *, status_value: RunStatus, message: str):
+        """Persist one run status transition and emit a matching event."""
+        fields: dict[str, object] = {
+            "status": status_value.value,
+            "error_message": None,
+        }
+        if status_value != RunStatus.QUEUED and run.started_at is None:
+            fields["started_at"] = run.created_at
+        updated_run = self.run_repository.update(run, fields=fields)
+        self._append_event(
+            run_id=updated_run.id,
+            event_type=RunEventType.STATUS,
+            payload={"status": status_value.value, "message": message},
+        )
+        return updated_run
+
+    def _build_workspace_files(
+        self,
+        *,
+        team_slug: str,
+        payload: RunCreate,
+        repo_full_name: str,
+        base_branch: str,
+        working_branch: str,
+        issue_title: str | None,
+        issue_number: int | None,
+        issue_url: str | None,
+        issue_body: str | None,
+    ) -> list[WorkspaceFileWrite]:
+        """Return text files that should be written into the prepared workspace."""
+        _, bundle_bytes, _ = self.export_service.build_download_artifact(
+            entity_type=ExportEntityType.TEAM,
+            slug=team_slug,
+            runtime_target=RuntimeTarget.CODEX.value,
+            codex_options=payload.codex,
+        )
+        files = self._extract_text_files_from_zip(bundle_bytes)
+        files["TASK.md"] = self._build_task_markdown(
+            payload=payload,
+            repo_full_name=repo_full_name,
+            base_branch=base_branch,
+            working_branch=working_branch,
+            issue_title=issue_title,
+            issue_number=issue_number,
+            issue_url=issue_url,
+            issue_body=issue_body,
+        )
+        return [
+            WorkspaceFileWrite(path=path, content=content)
+            for path, content in sorted(files.items())
+        ]
+
+    @staticmethod
+    def _extract_text_files_from_zip(content: bytes) -> dict[str, str]:
+        """Extract UTF-8 text files from a generated bundle zip."""
+        files: dict[str, str] = {}
+        with ZipFile(BytesIO(content)) as archive:
+            for member in archive.infolist():
+                if member.is_dir():
+                    continue
+                normalized = PurePosixPath(member.filename)
+                if normalized.is_absolute() or any(
+                    part in {"", ".", ".."} for part in normalized.parts
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="Generated export bundle contains an invalid file path.",
+                    )
+                files[str(normalized)] = archive.read(member).decode("utf-8")
+        return files
+
+    @classmethod
+    def _build_task_markdown(
+        cls,
+        *,
+        payload: RunCreate,
+        repo_full_name: str,
+        base_branch: str,
+        working_branch: str,
+        issue_title: str | None,
+        issue_number: int | None,
+        issue_url: str | None,
+        issue_body: str | None,
+    ) -> str:
+        """Render the task handoff file materialized into the repo workspace."""
+        lines = [
+            f"# {payload.title or issue_title or 'Execution Task'}",
+            "",
+            "## Context",
+            f"- Repository: `{repo_full_name}`",
+            f"- Base branch: `{base_branch}`",
+            f"- Working branch: `{working_branch}`",
+            f"- Team: `{payload.team_slug}`",
+        ]
+        if payload.summary:
+            lines.extend(["", "## Goal Summary", payload.summary.strip()])
+        if issue_number is not None:
+            lines.extend(
+                [
+                    "",
+                    "## GitHub Issue",
+                    f"- Number: `#{issue_number}`",
+                ]
+            )
+            if issue_title:
+                lines.append(f"- Title: {issue_title}")
+            if issue_url:
+                lines.append(f"- URL: {issue_url}")
+            if issue_body:
+                lines.extend(["", "### Issue Body", issue_body.strip()])
+        if payload.task_text:
+            lines.extend(["", "## Task Instructions", payload.task_text.strip()])
+        lines.extend(
+            [
+                "",
+                "## Constraints",
+                "- Keep changes scoped to the requested task.",
+                "- Prefer minimal, reviewable edits over broad rewrites.",
+                "- Run relevant checks before finishing work.",
+                "- Avoid modifying unrelated files.",
+            ]
+        )
+        return "\n".join(lines).strip() + "\n"
+
+    @staticmethod
+    def _build_runtime_config(codex: CodexExportOptions | None) -> dict[str, object]:
+        """Persist selected runtime parameters for future execution steps."""
+        config: dict[str, object] = {"runtime_target": RuntimeTarget.CODEX.value}
+        if codex is not None:
+            config["codex"] = codex.model_dump(exclude_none=True)
+        return config
+
+    @staticmethod
+    def _build_codex_session_payload(
+        *,
+        run_id: str,
+        workspace_id: str,
+        task_markdown: str,
+        codex_options: CodexExportOptions | None,
+    ) -> CodexSessionStart:
+        """Build payload sent to the host executor for Codex session startup."""
+        return CodexSessionStart(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            prompt_text=task_markdown,
+            model=codex_options.model if codex_options is not None else None,
+            model_reasoning_effort=(
+                codex_options.model_reasoning_effort if codex_options is not None else None
+            ),
+            sandbox_mode=(
+                codex_options.sandbox_mode if codex_options is not None else "workspace-write"
+            ),
+        )
+
+    @staticmethod
+    def _derive_title(
+        *,
+        payload: RunCreate,
+        team_title: str,
+        repo_full_name: str,
+        issue_title: str | None,
+    ) -> str:
+        """Return stable run title."""
+        if payload.title:
+            return payload.title
+        if issue_title:
+            return issue_title
+        if payload.task_text:
+            return payload.task_text.strip().splitlines()[0][:255]
+        return f"{team_title} on {repo_full_name}"
+
+    @staticmethod
+    def _derive_summary(*, payload: RunCreate, issue_title: str | None) -> str | None:
+        """Return short summary when available."""
+        if payload.summary:
+            return payload.summary
+        if issue_title:
+            return issue_title
+        if payload.task_text:
+            first_line = payload.task_text.strip().splitlines()[0]
+            return first_line[:4000]
+        return None
+
+    def _append_event(
+        self,
+        *,
+        run_id,
+        event_type: RunEventType,
+        payload: dict[str, object] | None,
+    ) -> None:
+        """Persist one run event."""
+        self.run_repository.create_event(
+            run_id=run_id,
+            event_type=event_type.value,
+            payload_json=payload,
+        )
+
+    def _sync_run_with_codex_session(self, run):
+        """Reconcile DB run state with host-side Codex session state when needed."""
+        if run.status not in {RunStatus.STARTING_CODEX.value, RunStatus.RUNNING.value}:
+            return run
+
+        try:
+            session = self.codex_proxy_service.get_session(str(run.id))
+        except CodexProxyServiceError as exc:
+            if exc.status_code == 404:
+                return self._fail_run(
+                    run,
+                    detail=(
+                        "Host-side Codex session state was lost. "
+                        "This usually means the host executor restarted during the run. "
+                        "Relaunch the run."
+                    ),
+                )
+            return self._fail_run(run, detail=exc.detail)
+
+        if session.status == "running":
+            return run
+
+        if session.status == "completed":
+            return self._finalize_completed_run(run, session)
+
+        if session.status == "cancelled":
+            updated = self.run_repository.update(
+                run,
+                fields={
+                    "status": RunStatus.CANCELLED.value,
+                    "error_message": None,
+                    "finished_at": datetime.now(UTC),
+                },
+            )
+            self._append_event(
+                run_id=updated.id,
+                event_type=RunEventType.STATUS,
+                payload={
+                    "status": RunStatus.CANCELLED.value,
+                    "message": "Codex session was cancelled.",
+                },
+            )
+            return updated
+
+        updated = self.run_repository.update(
+            run,
+            fields={
+                "status": RunStatus.FAILED.value,
+                "error_message": session.error_message or "Codex session failed.",
+                "finished_at": datetime.now(UTC),
+            },
+        )
+        self._append_event(
+            run_id=updated.id,
+            event_type=RunEventType.STATUS,
+            payload={
+                "status": RunStatus.FAILED.value,
+                "message": updated.error_message,
+            },
+        )
+        self._append_event(
+            run_id=updated.id,
+            event_type=RunEventType.ERROR,
+            payload={"detail": updated.error_message},
+        )
+        return updated
+
+    def _finalize_completed_run(self, run, session: CodexSessionRead):
+        """Convert a completed Codex session into commit, push, and draft-PR artifacts."""
+        if run.workspace_id is None:
+            return self._fail_run(
+                run,
+                detail="Run is missing workspace metadata required for post-Codex finalization.",
+            )
+
+        try:
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.COMMITTING,
+                message="Cleaning temporary `.codex` files and preparing a git commit.",
+            )
+            workspace = self.workspace_proxy_service.cleanup_workspace(run.workspace_id)
+
+            if not workspace.has_changes:
+                return self._complete_run(
+                    run,
+                    summary_text=session.summary_text,
+                    message="Codex session completed with no repository changes to commit.",
+                )
+
+            workspace = self.workspace_proxy_service.commit_workspace(
+                run.workspace_id,
+                WorkspaceCommit(message=self._build_commit_message(run)),
+            )
+            run = self.run_repository.update(
+                run,
+                fields={
+                    "working_branch": workspace.working_branch,
+                    "workspace_path": workspace.workspace_path,
+                    "repo_path": workspace.repo_path,
+                },
+            )
+
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.PUSHING,
+                message="Pushing the working branch to origin.",
+            )
+            workspace = self.workspace_proxy_service.push_workspace(run.workspace_id)
+
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.CREATING_PR,
+                message="Creating a draft pull request for the Codex changes.",
+            )
+            workspace = self.workspace_proxy_service.create_pull_request(
+                run.workspace_id,
+                WorkspacePullRequestCreate(
+                    title=self._build_pr_title(run),
+                    body=self._build_pr_body(run),
+                    draft=True,
+                ),
+            )
+            return self._complete_run(
+                run,
+                summary_text=session.summary_text,
+                message="Draft pull request created from the working branch.",
+                pr_url=workspace.pull_request_url,
+            )
+        except WorkspaceProxyServiceError as exc:
+            return self._fail_run(run, detail=exc.detail)
+        except Exception as exc:  # noqa: BLE001
+            return self._fail_run(run, detail=f"Run finalization failed: {exc}")
+
+    def _complete_run(
+        self,
+        run,
+        *,
+        summary_text: str | None,
+        message: str,
+        pr_url: str | None = None,
+    ):
+        """Persist final completed state after Codex and optional SCM post-processing."""
+        fields: dict[str, object] = {
+            "status": RunStatus.COMPLETED.value,
+            "error_message": None,
+            "finished_at": datetime.now(UTC),
+        }
+        if pr_url:
+            fields["pr_url"] = pr_url
+        if not run.summary and summary_text:
+            fields["summary"] = summary_text
+        updated = self.run_repository.update(run, fields=fields)
+        self._append_event(
+            run_id=updated.id,
+            event_type=RunEventType.STATUS,
+            payload={
+                "status": RunStatus.COMPLETED.value,
+                "message": message,
+            },
+        )
+        if pr_url:
+            self._append_event(
+                run_id=updated.id,
+                event_type=RunEventType.NOTE,
+                payload={
+                    "message": "Draft pull request is ready.",
+                    "pr_url": pr_url,
+                },
+            )
+        return updated
+
+    @staticmethod
+    def _build_commit_message(run) -> str:
+        """Return a deterministic git commit message for one finalized run."""
+        title = run.title.strip()
+        if run.issue_number is not None:
+            return f"chore(run): address #{run.issue_number} {title[:140]}".strip()
+        return f"chore(run): apply codex changes for {title[:160]}".strip()
+
+    @staticmethod
+    def _build_pr_title(run) -> str:
+        """Return a stable draft PR title for one run."""
+        if run.issue_number is not None:
+            return f"[tap] #{run.issue_number} {run.title}".strip()
+        return f"[tap] {run.title}".strip()
+
+    @staticmethod
+    def _build_pr_body(run) -> str:
+        """Return a concise PR body describing the automated run context."""
+        lines = [
+            "## Team Agent Platform run",
+            "",
+            f"- Team: `{run.team_title}`",
+            f"- Repository: `{run.repo_full_name}`",
+            f"- Base branch: `{run.base_branch}`",
+            f"- Working branch: `{run.working_branch or '-'}`",
+        ]
+        if run.issue_number is not None:
+            lines.append(f"- Issue: #{run.issue_number}")
+        if run.issue_url:
+            lines.append(f"- Issue URL: {run.issue_url}")
+        if run.summary:
+            lines.extend(["", "## Summary", run.summary.strip()])
+        if run.task_text:
+            lines.extend(["", "## Task", run.task_text.strip()])
+        lines.extend(
+            [
+                "",
+                "## Notes",
+                "- This draft PR was created by the local host-execution flow.",
+                "- Review the diff and run project-specific checks before merging.",
+            ]
+        )
+        body = "\n".join(lines).strip()
+        return body[:19_500]
+
+    @staticmethod
+    def _ensure_owner(owner_id, current_user_id) -> None:
+        """Require current user to own the requested run."""
+        if owner_id != current_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the run creator can access this run.",
+            )

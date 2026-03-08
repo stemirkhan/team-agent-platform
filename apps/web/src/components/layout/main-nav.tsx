@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, Home, UsersRound } from "lucide-react";
+import { Activity, Bot, FolderGit2, Home, PlaySquare, UsersRound } from "lucide-react";
 
 import { t, type Locale } from "@/lib/i18n";
 
@@ -31,11 +31,26 @@ export function MainNav({ locale }: { locale: Locale }) {
       href: "/teams",
       label: t(locale, { ru: "Команды", en: "Teams" }),
       icon: UsersRound
+    },
+    {
+      href: "/diagnostics",
+      label: t(locale, { ru: "Диагностика", en: "Diagnostics" }),
+      icon: Activity
+    },
+    {
+      href: "/repos",
+      label: t(locale, { ru: "Репозитории", en: "Repos" }),
+      icon: FolderGit2
+    },
+    {
+      href: "/runs",
+      label: t(locale, { ru: "Запуски", en: "Runs" }),
+      icon: PlaySquare
     }
   ];
 
   return (
-    <nav className="flex items-center gap-2">
+    <nav className="flex shrink-0 items-center gap-2">
       {navItems.map((item) => {
         const active = isItemActive(pathname, item.href);
         const Icon = item.icon;

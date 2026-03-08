@@ -64,9 +64,9 @@ export function AuthControls({ locale }: { locale: Locale }) {
 
   if (!state.user) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <Link
-          className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 dark:border-zinc-600 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-zinc-800"
+          className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-zinc-600 dark:text-slate-200 dark:hover:bg-zinc-800"
           href="/auth/login"
         >
           <LogIn className="h-3.5 w-3.5" />
@@ -84,12 +84,12 @@ export function AuthControls({ locale }: { locale: Locale }) {
   }
 
   return (
-    <div className="flex items-center gap-3">
-      <span className="rounded-full bg-slate-100 dark:bg-zinc-800 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
+    <div className="flex shrink-0 items-center gap-2">
+      <span className="hidden max-w-40 truncate rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:bg-zinc-800 dark:text-slate-200 lg:inline-flex">
         {state.user.display_name}
       </span>
       <button
-        className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 dark:border-zinc-600 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-zinc-800"
+        className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-zinc-600 dark:text-slate-200 dark:hover:bg-zinc-800"
         onClick={() => {
           clearAccessToken();
           setState({ loading: false, user: null });

@@ -1,555 +1,319 @@
-Ниже даю рабочую версию: сначала краткий разбор рынка, потом PRD, потом стартовое ТЗ.
+# PRD
 
-> Актуализация на 8 марта 2026: для текущего MVP публичное версионирование агентов отложено.
-> В продукте остается один текущий профиль агента для экспорта и командной сборки; все упоминания versions/releases ниже считать будущим направлением, а не текущей реализуемой функцией.
+## Статус
 
-Я исхожу из того, что под **CloudCoda / OpenCoda** ты имеешь в виду прежде всего экосистемы **Claude Code / OpenCode / Codex**. Если потом захочешь, расширим это до Copilot Agents, Cursor и Gemini CLI.
+Дата обновления: 8 марта 2026.
 
-## 1) Что сейчас есть на рынке
+Этот документ фиксирует новый продуктовый вектор.
+Старый вектор "marketplace агентов и команд" больше не является целевой моделью MVP.
 
-Рынок уже явно движется в сторону **агентов, сабагентов, skills/plugins и команд агентов**, а не просто “чатов для кода”.
-OpenAI продвигает Codex как coding agent, у него есть `AGENTS.md`, multi-agent режим и Agent Skills как переносимый формат расширения. Anthropic развивает Claude Code с кастомными subagents, skills, plugins и поддержкой marketplace-источников. OpenCode тоже уже имеет primary agents и subagents как часть базовой модели работы. ([OpenAI Developers][1])
+Теперь продукт — это local-first платформа для запуска команд Codex над реальными GitHub-репозиториями пользователя.
 
-Параллельно появляются **горизонтальные каталоги**. Например, LobeHub позиционирует себя как marketplace skills, совместимый с Claude Code, Codex CLI и ChatGPT. Есть и крупные community-каталоги вроде SkillsMP, а в экосистеме Claude Code уже существуют как официальный marketplace/plugins-репозиторий, так и community-marketplaces на GitHub. ([lobehub.com][2])
+## Название
 
-Сильный сигнал рынка еще и в том, что GitHub в феврале 2026 года вывел **Claude и Codex в Agent HQ** и прямо делает ставку на выбор между агентами разных провайдеров внутри одного рабочего контура. Это подтверждает, что рынок идет к **multi-agent / multi-provider orchestration**, а не к одному монолитному ассистенту. ([The GitHub Blog][3])
+Рабочее название остается: `Team Agent Platform`.
 
-При этом рынок грязный и рискованный. У открытых маркетплейсов agent extensions уже всплывают проблемы с качеством, копипастой, мусорными пакетами и безопасностью. Это значит, что победит не просто “каталог”, а **доверенный каталог с валидацией, репутацией, sandbox-проверками и понятной совместимостью**. ([Hugging Face][4])
+Название можно сохранить, но смысл продукта теперь другой:
+- не маркетплейс;
+- не discovery-платформа;
+- не публичный каталог пользовательских пакетов;
+- а control plane для agent teams, repo tasks и Codex execution.
 
-### Вывод по рынку
+## Product Vision
 
-Ниша **не пустая**, но еще **не закрыта нормальным продуктом**.
+Дать разработчику интерфейс, в котором он может:
+- собрать команду агентов под свой workflow;
+- выбрать GitHub-репозиторий и задачу;
+- запустить Codex над проектом в локально контролируемом окружении;
+- наблюдать live terminal и progress;
+- получить branch, diff и draft PR без ручной рутины.
 
-Что уже есть:
+## Problem Statement
 
-* каталоги skills/plugins;
-* community-репозитории сабагентов;
-* платформы, где можно подключать разных агентов;
-* отдельные plugin marketplaces для Claude Code. ([GitHub][5])
+Сегодня у power-user, который хочет применять multi-agent workflow к реальному репозиторию, есть несколько проблем:
 
-Чего пока явно не хватает:
+- команды агентов существуют разрозненно и слабо структурированы;
+- нет удобной оболочки над `codex` CLI для запуска повторяемых командных сценариев;
+- нет единого UX для:
+  - выбора команды,
+  - выбора repo,
+  - постановки задачи,
+  - live terminal,
+  - итогового PR;
+- подключение к GitHub обычно завязано либо на ручную работу в терминале, либо на тяжелую интеграцию через GitHub App/OAuth;
+- пользователю нужен быстрый, self-hosted и понятный путь, а не сразу облачная платформа с runner fleet.
 
-* нейтрального **marketplace именно для coding subagents и agent teams**;
-* нормального **экспорта/импорта между рантаймами**;
-* рейтингов, отзывов, verifications и тестовых прогонов;
-* удобной сборки **команд из нескольких сабагентов** с профилями ролей и совместимостью;
-* “App Store логики” для инженерных агентов: версии, changelog, зависимости, trust badges, quality gates.
+## Product Thesis
 
-Это уже не факт из одного источника, а моя **рыночная интерпретация** на основе того, как сейчас устроены Codex, Claude Code, OpenCode и существующие skills/plugin directories. ([OpenAI Developers][6])
+Первый продуктовый удар должен быть не в публичный каталог, а в execution workflow:
 
----
+- пользователь уже имеет доступ к своим repo;
+- пользователь уже может быть авторизован в `gh`;
+- пользователь уже может быть авторизован в `codex`;
+- пользователь уже может использовать `codex` через browser login без отдельного `OPENAI_API_KEY`;
+- значит можно построить тонкий orchestration layer поверх этих host tools и быстро получить рабочий end-to-end flow.
 
-# 2) PRD
+## Target User
 
-## Название рабочее
+### 1. Solo developer
 
-**AgentForge Market**
-Нормальное имя для MVP. Потом можно переименовать.
+Хочет запускать подготовленную команду агентов над своей задачей и не переключаться между CLI, GitHub и ручным менеджментом веток.
 
-## Product vision
+### 2. Founder / small team lead
 
-Платформа, где разработчики публикуют, находят, оценивают, экспортируют и собирают в команды **subagents / skills / agent bundles** для coding-агентов: Codex, Claude Code, OpenCode и далее других совместимых runtimes.
+Хочет иметь повторяемый workflow:
+- backend specialist
+- frontend specialist
+- orchestrator
 
-## Problem statement
+и гонять его по issue или product task.
 
-Сегодня экосистема фрагментирована:
+### 3. AI-native engineer
 
-* агенты живут в GitHub-репах, gists, директориях и маркетплейсах;
-* нет единого trust layer;
-* нет унифицированной карточки совместимости;
-* трудно собрать не одного агента, а **команду агентов**;
-* экспорт между платформами либо отсутствует, либо ручной;
-* качество пакетов непрозрачно.
+Хочет строить свои команды агентов и использовать их как стандартный рабочий контур поверх разных репозиториев.
 
-## Target audience
+## What The Product Is Not
 
-1. **Solo developer**
-   Хочет быстро ставить готовых сабагентов: reviewer, debugger, architect, test-writer.
-
-2. **Tech lead / team lead**
-   Хочет собирать стандартные команды агентов для своей команды и делиться ими.
-
-3. **AI power users / agent builders**
-   Хочет публиковать своих агентов, набивать репутацию, получать фидбек.
-
-4. **Small dev teams / agencies**
-   Хочет использовать curated bundles под типовые workflow: backend team, frontend team, QA team, startup MVP team.
+Продукт на текущем этапе не является:
+- marketplace публичных агентов;
+- social catalog с рейтингами и отзывами;
+- hosted cloud runner platform;
+- multi-tenant SaaS с выделенными sandbox workers;
+- GitHub App-based enterprise automation layer.
 
 ## JTBD
 
-* Найти подходящего сабагента под задачу.
-* Проверить, совместим ли он с моим рантаймом.
-* Установить или экспортировать его в один клик.
-* Собрать несколько агентов в команду.
-* Оценить качество по отзывам, верификации и тестам.
-* Опубликовать своего агента и получать usage/reputation.
+Когда у меня есть задача в GitHub или просто текстовая engineering task, я хочу:
+- выбрать подготовленную команду агентов;
+- выбрать репозиторий и базовую ветку;
+- запустить Codex над проектом;
+- видеть, что именно происходит в live terminal;
+- получить предсказуемый branch и draft PR;
+- не настраивать заново auth, если у меня уже работают `gh` и `codex` на хосте.
 
-## Product principles
+## Product Principles
 
-* **Cross-runtime first**
-* **Trust before growth**
-* **Teams, not only single agents**
-* **Portable packaging**
-* **Developer-native UX**
-* **Open-ish standard with adapters**
+- `Codex-first`
+- `Local-first`
+- `Single-user first`
+- `Host tools before cloud infrastructure`
+- `Observable execution over black-box automation`
+- `Small reliable workflow over big platform promises`
 
-## Scope v1
+## Core User Flows
 
-### Входит
+### 1. Diagnostics flow
 
-* каталог subagents/skills/bundles;
-* карточка агента;
-* публикация;
-* версионирование;
-* рейтинги и отзывы;
-* теги, поиск, фильтры;
-* сборка команды из нескольких агентов;
-* экспорт в форматы для Codex / Claude Code / OpenCode;
-* trust signals: verified, tested, safe, popular;
-* страница автора;
-* базовая moderation/admin panel.
+Пользователь открывает страницу диагностики и сразу видит:
+- найден ли `git`;
+- найден ли `gh`;
+- найден ли `codex`;
+- подходит ли версия `gh`;
+- подходит ли версия `codex`;
+- авторизован ли `gh`;
+- авторизован ли `codex`;
+- может ли система работать в текущем host-context.
 
-### Не входит в MVP
+### 2. Team definition flow
 
-* встроенный запуск агентов в облаке;
-* биллинг для pay-per-run;
-* сложная enterprise RBAC-модель;
-* marketplace для MCP servers как отдельный вертикальный продукт;
-* revenue share и платные агенты;
-* полноценный visual workflow builder.
+Пользователь создает agent profiles и собирает их в team:
+- backend specialist
+- frontend specialist
+- orchestrator
 
-## Core entities
+Команда хранит роли, инструкции и composition metadata.
 
-* **Agent** — единица публикации: сабагент / skill / plugin-like package.
-* **Bundle / Team** — набор агентов с ролями и рекомендованным сценарием использования.
-* **Runtime Adapter** — экспорт в конкретный формат платформы.
-* **Author** — создатель агента/команды.
-* **Review / Rating**
-* **Version / Release**
-* **Verification Report**
-* **Compatibility Matrix**
+### 3. Repo task flow
 
-## User flows
+Пользователь:
+- выбирает GitHub repo;
+- выбирает base branch;
+- опционально выбирает issue;
+- или вручную вводит task;
+- выбирает команду;
+- нажимает `Run`.
 
-### 1. Discovery
+### 4. Execution flow
 
-Пользователь открывает каталог → ищет “fastapi reviewer” → фильтрует по runtime=Codex, language=Python, verified=true → открывает карточку.
+Система:
+- создает workspace;
+- клонирует repo;
+- создает branch;
+- материализует `.codex/` под выбранную команду;
+- создает `TASK.md`;
+- запускает `codex` в отдельной PTY-сессии;
+- стримит вывод в браузер;
+- завершает run;
+- пушит branch;
+- создает draft PR.
 
-### 2. Install / Export
+### 5. Review flow
 
-На карточке выбирает runtime:
+Пользователь видит:
+- live terminal;
+- статус run;
+- итоговую summary;
+- branch name;
+- PR URL;
+- ошибки диагностики или выполнения.
 
-* Export to Codex
-* Export to Claude Code
-* Export to OpenCode
-  Скачивает bundle/archive или получает CLI-команду / git-based install snippet.
+## MVP Scope
 
-### 3. Team building
+### In scope
 
-Пользователь выбирает 3–6 агентов → “Create Team” → задает название и описание → платформа собирает team manifest → экспортирует team bundle.
+- local-first execution mode;
+- single-user host execution;
+- agent profiles и teams;
+- Codex-only execution;
+- browser-based Codex auth через уже существующий `codex login`, без API key flow внутри приложения;
+- GitHub integration через установленный у пользователя `gh` CLI;
+- Git operations через `git` subprocess;
+- live terminal через `PTY + WebSocket`;
+- diagnostics UI;
+- run history;
+- draft PR creation.
 
-### 4. Publish
+### Out of scope
 
-Автор заполняет форму → загружает manifest + инструкцию + иконку + примеры → проходит validation → публикует версию.
+- hosted cloud runner;
+- GitHub OAuth в приложении;
+- GitHub App installation flow;
+- multi-user tenancy;
+- billing;
+- moderation;
+- публичный marketplace;
+- рейтинги, отзывы, social discovery;
+- Claude/OpenCode execution;
+- auto-merge и auto-deploy.
 
-### 5. Review & trust
+## Core Product Objects
 
-Пользователь ставит оценку, пишет отзыв, отмечает “works as advertised / broken / unsafe / outdated”.
+### Agent Profile
 
-## Key features MVP
+Описание одной роли для выполнения задач в Codex team.
 
-### Каталог
+Содержит:
+- title;
+- short description;
+- full instructions;
+- runtime-specific Codex instructions;
+- skills;
+- markdown attachments.
 
-* поиск;
-* фильтры по runtime, языку, категории, уровню зрелости;
-* сортировка по rating, installs, recent, verified.
+### Team
 
-### Карточка агента
+Набор agent profiles с ролями и порядком использования.
 
-* описание;
-* use cases;
-* поддерживаемые runtimes;
-* формат экспорта;
-* версия;
-* changelog;
-* автор;
-* отзывы;
-* trust badges;
-* dependencies;
-* required tools / MCP / permissions.
+### Repo Target
 
-### Публикация
+Нормализованное представление GitHub-репозитория, выбранного пользователем через `gh`.
 
-* web form и manifest upload;
-* semantic versioning;
-* draft / published / archived;
-* automated lint/validation.
+### Run
 
-### Команды агентов
+Одна execution-сессия над repo и task.
 
-* конструктор команды;
-* роли внутри команды;
-* team manifest;
-* рекомендации по порядку запуска;
-* экспорт команды как bundle.
+### Run Event / Terminal Stream
 
-### Экспорт
+События статуса и live terminal output.
 
-* Codex package/export
-* Claude Code package/export
-* OpenCode package/export
-* базовый neutral manifest как внутренний canonical format
+### Diagnostics Snapshot
 
-### Репутация и доверие
-
-* verified author;
-* verified package;
-* automated validation passed;
-* community rating;
-* usage/install counters;
-* report abuse / report unsafe.
+Слепок состояния host tools и readiness окружения.
 
 ## Differentiation
 
-Твой шанс не в том, чтобы сделать “еще один каталог”.
-Твой шанс в четырех вещах:
+Продукт отличается не каталогом, а execution UX:
 
-1. **Команды агентов как first-class entity**
-   Почти все начинают с одиночных agents/skills. Ты можешь строить рынок вокруг **agent teams**.
+1. команды агентов как first-class entity;
+2. локальный запуск через уже настроенный `codex` и `gh`;
+3. живой terminal UX в браузере;
+4. branch + draft PR flow из одной точки;
+5. минимальный операционный порог входа без GitHub App и облачного runner-а.
 
-2. **Cross-runtime adapters**
-   Один canonical manifest → экспорт в Claude Code / Codex / OpenCode.
-
-3. **Trust layer**
-   Sandbox checks, permission manifests, deterministic validation, signatures.
-
-4. **Developer reputation graph**
-   У автора есть профиль, история версий, adoption, качество релизов.
-
-## Success metrics
+## Success Metrics
 
 ### North Star
 
-Количество **успешных экспортов / установок** агентов и команд в неделю.
+Количество успешных run-сессий, завершившихся branch или draft PR.
 
 ### Product metrics
 
-* MAU каталога
-* количество опубликованных агентов
-* количество опубликованных команд
-* conversion: page view → export
-* review rate
-* share of verified packages
-* retention авторов
-* % broken/flagged packages
-* median time to first export
+- diagnostics pass rate;
+- run start -> run complete conversion;
+- % runs with successful branch push;
+- % runs with successful draft PR creation;
+- median time from task start to PR;
+- % runs aborted by tooling issues (`gh/codex missing`, auth missing, bad repo state);
+- repeat run rate per user.
 
 ## Risks
 
-1. **Зоопарк форматов**
-   У разных платформ быстро меняются требования.
-   Решение: canonical internal schema + adapters layer.
+### 1. Host dependency risk
 
-2. **Плохое качество user-generated agents**
-   Решение: validation, quality score, verification tiers.
+Продукт зависит от состояния локального окружения пользователя.
 
-3. **Безопасность**
-   Решение: permission manifest, static scan, sandbox test, manual moderation for promoted listings.
+Снижение риска:
+- сильная diagnostics page;
+- понятные remediation steps;
+- жесткая проверка версий и auth до старта run.
 
-4. **Хрупкость дистрибуции**
-   Если платформа меняет API/формат, экспорт ломается.
-   Решение: versioned exporters и compatibility tests.
+### 2. CLI contract risk
 
-5. **Слабая ликвидность маркетплейса на старте**
-   Решение: начать с curated seed catalog и 20–50 собственных качественных агентов/команд.
+`gh` и `codex` — это CLI, а не стабильный backend API продукта.
 
-## Rollout plan
+Снижение риска:
+- thin adapters;
+- version checks;
+- нормализация JSON output;
+- graceful fallback с понятной диагностикой.
+
+### 3. Security and trust risk
+
+Продукт работает через уже авторизованные host tools.
+
+Снижение риска:
+- single-user local-first model;
+- не хранить токены в БД;
+- запускать только в host user context;
+- не обещать multi-user SaaS semantics в MVP.
+
+### 4. Architecture transition risk
+
+Текущая кодовая база частично унаследована от marketplace-идеи.
+
+Снижение риска:
+- принять документацию как новый source of truth;
+- поэтапно убирать legacy catalog-first UX;
+- не тащить старые product assumptions в новые решения.
+
+## Product Rollout Plan
 
 ### Phase 1
 
-Curated catalog + publish + export + ratings
+- обновить документацию и требования;
+- добавить diagnostics layer;
+- подготовить GitHub adapters;
+- подготовить PTY execution layer для Codex.
 
 ### Phase 2
 
-Teams/bundles + verification + author profiles
+- сделать first usable local run;
+- materialize `.codex/` из команды;
+- stream terminal в браузер;
+- сохранять run status и summary;
+- создавать draft PR.
 
 ### Phase 3
 
-Usage analytics + paid placement + premium verified packs
+- добавить issue-driven launch;
+- добавить отмену, retry и run history UX;
+- добавить repo-level config file;
+- улучшить policy/scoping по ролям команды.
 
----
+## Product Decision
 
-# 3) Черновое ТЗ
+На данном этапе продукт официально переопределен как:
 
-## 3.1 Архитектура MVP
+`Local-first Codex Team Execution Platform for GitHub repositories`
 
-### Frontend
-
-* Next.js / React
-* Tailwind
-* shadcn/ui
-* SSR для SEO каталога
-* клиентский search/filter UI
-
-### Backend
-
-* FastAPI
-* PostgreSQL
-* Redis
-* SQLAlchemy
-* Alembic
-* Celery / Dramatiq / RQ для фоновых проверок
-* S3-compatible storage для артефактов
-
-### Search
-
-На MVP можно начать с PostgreSQL full-text + trigram.
-Elasticsearch/OpenSearch не нужен сразу.
-
-### Auth
-
-* email/password
-* GitHub OAuth
-* позже Google OAuth
-
-### Infra
-
-* Docker Compose для dev
-* Kubernetes не нужен на первом этапе
-* object storage для manifests/icons/archives
-
-## 3.2 Модули системы
-
-### Auth & Users
-
-* регистрация
-* логин
-* OAuth
-* профиль пользователя
-* роль admin/moderator/user
-
-### Authors
-
-* публичный профиль
-* список published agents/bundles
-* reputation counters
-
-### Agents
-
-* CRUD агентов
-* загрузка manifest
-* загрузка icon/assets
-* release management
-* совместимость
-* зависимости
-* permissions metadata
-
-### Bundles / Teams
-
-* CRUD команды
-* привязка нескольких агентов
-* роли и порядок использования
-* team manifest generation
-
-### Export
-
-* export to Codex
-* export to Claude Code
-* export to OpenCode
-* archive generation
-* install snippet generation
-
-### Validation
-
-* schema validation
-* lint
-* compatibility checks
-* safety checks
-* file integrity
-* optional test-run in sandbox
-
-### Moderation
-
-* reports
-* hide/unpublish
-* mark verified
-* featured listings
-
-## 3.3 Канонический внутренний формат
-
-Нужен свой **canonical manifest**, например `agentforge.yaml`.
-
-Пример полей:
-
-* id
-* slug
-* title
-* description
-* author
-* type: subagent | skill | team
-* category
-* runtimes_supported
-* source_format
-* version
-* entrypoints
-* instructions
-* tools_required
-* permissions_required
-* dependencies
-* tags
-* examples
-* export_targets
-* license
-* repository_url
-* verification_status
-
-Идея правильная: **не хранить платформо-зависимый формат как главную сущность**.
-Главная сущность — твой neutral schema. Экспорт — это производная.
-
-## 3.4 Основные API endpoints
-
-### Auth
-
-* `POST /auth/register`
-* `POST /auth/login`
-* `POST /auth/oauth/github`
-* `GET /me`
-
-### Users / Authors
-
-* `GET /authors/{slug}`
-* `PATCH /me/profile`
-* `GET /me/packages`
-
-### Agents
-
-* `GET /agents`
-* `POST /agents`
-* `GET /agents/{slug}`
-* `PATCH /agents/{slug}`
-* `POST /agents/{slug}/releases`
-* `GET /agents/{slug}/versions/{version}`
-* `POST /agents/{slug}/submit-for-validation`
-
-### Teams
-
-* `GET /teams`
-* `POST /teams`
-* `GET /teams/{slug}`
-* `PATCH /teams/{slug}`
-* `POST /teams/{slug}/items`
-* `POST /teams/{slug}/export`
-
-### Export
-
-* `POST /exports/agent/{slug}`
-* `POST /exports/team/{slug}`
-* `GET /exports/{id}`
-
-### Moderation
-
-* `GET /admin/reports`
-* `POST /admin/packages/{id}/verify`
-* `POST /admin/packages/{id}/feature`
-* `POST /admin/packages/{id}/hide`
-
-## 3.5 База данных: основные таблицы
-
-* `users`
-* `author_profiles`
-* `packages`
-* `package_versions`
-* `package_assets`
-* `package_runtime_compatibility`
-* `teams`
-* `team_items`
-* `exports`
-* `validation_runs`
-* `moderation_actions`
-* `tags`
-* `package_tags`
-* `favorites`
-
-## 3.6 Бизнес-правила
-
-* slug уникален.
-* новая версия не может дублировать существующую версию пакета.
-* unpublished package не попадает в public search.
-* verified badge ставится только после validation + mod action.
-* export доступен только для published versions.
-* team export падает, если один из агентов несовместим с выбранным runtime.
-
-## 3.7 Non-functional requirements
-
-* API p95 < 300 ms для каталога без тяжелых фильтров
-* экспорт пакета < 5 сек
-* validation runs — асинхронно
-* audit log для moderation actions
-* rate limiting на auth/export
-* antivirus/static checks для uploaded archives
-* observability: Sentry + metrics + structured logs
-
-## 3.8 MVP backlog
-
-### Must have
-
-* auth
-* public catalog
-* package page
-* publish package
-* versioning
-* team builder
-* export adapters x3
-* admin moderation
-* validation pipeline basic
-
-### Should have
-
-* favorites
-* featured collections
-* author verification
-* download/install analytics
-
-### Could have
-
-* comments/discussions
-* follow authors
-* curated starter packs
-* API tokens
-* private organization catalog
-
----
-
-# 4) Жесткая оценка идеи
-
-Идея **жизнеспособная**, но только если ты не будешь строить это как “еще один каталог json/yaml-файлов”.
-
-Если делать правильно, твое ядро продукта должно быть таким:
-
-**Marketplace = catalog + trust + portability + teams**
-
-Если убрать хотя бы два из этих четырех, получится слабый проект.
-
-Самый сильный MVP-путь:
-
-1. сделать **neutral package format**;
-2. сделать **экспорт в 3 рантайма**;
-3. сделать **команды агентов**;
-4. сверху накинуть **рейтинги + verification**.
-
-Именно это отличит тебя от просто “GitHub-списка useful agents”.
-
----
-
-# 5) Что я бы рекомендовал как MVP-рамку
-
-Первая версия:
-
-* только developer audience;
-* только coding agents;
-* только 3 runtime: Codex, Claude Code, OpenCode;
-* только free public packages;
-* только curated moderation;
-* seed-каталог из 30–50 пакетов и 10–15 команд.
-
-Потому что двусторонний маркетплейс без стартовой ликвидности умирает очень быстро.
+Все дальнейшие архитектурные и продуктовые решения должны приниматься из этой рамки.

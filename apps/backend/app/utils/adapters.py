@@ -4,7 +4,6 @@ import json
 import re
 from typing import Any
 
-_DEFAULT_CODEX_MODEL = "gpt-5.3-codex-spark"
 _DEFAULT_CODEX_REASONING = "medium"
 _DEFAULT_CODEX_SANDBOX = "workspace-write"
 _DEFAULT_CODEX_INSTRUCTIONS = "Follow task instructions and use available tools."
@@ -18,11 +17,12 @@ def render_codex_agent_toml(codex_profile: dict[str, Any]) -> str:
     normalized = _normalize_codex_profile(codex_profile)
     lines = [
         f"description = {_toml_string(normalized['description'])}",
-        f"model = {_toml_string(normalized['model'])}",
         f"model_reasoning_effort = {_toml_string(normalized['model_reasoning_effort'])}",
         f"sandbox_mode = {_toml_string(normalized['sandbox_mode'])}",
         f"developer_instructions = {_toml_string(normalized['developer_instructions'])}",
     ]
+    if normalized["model"]:
+        lines.insert(1, f"model = {_toml_string(normalized['model'])}")
     return "\n".join(lines).strip() + "\n"
 
 
@@ -146,10 +146,10 @@ def build_opencode_team_files(team_items: list[dict[str, Any]]) -> dict[str, str
     return files
 
 
-def _normalize_codex_profile(codex_profile: dict[str, Any]) -> dict[str, str]:
+def _normalize_codex_profile(codex_profile: dict[str, Any]) -> dict[str, str | None]:
     """Return stable codex config values used in TOML generation."""
     description = _normalize_str(codex_profile.get("description")) or "Agent role"
-    model = _normalize_str(codex_profile.get("model")) or _DEFAULT_CODEX_MODEL
+    model = _normalize_str(codex_profile.get("model"))
     reasoning = (
         _normalize_str(codex_profile.get("model_reasoning_effort"))
         or _DEFAULT_CODEX_REASONING

@@ -1,72 +1,86 @@
 # Team Agent Platform Monorepo
 
-MVP монорепозиторий маркетплейса для субагентов и команд агентов.
+Монорепозиторий local-first платформы для запуска команд Codex над пользовательскими GitHub-репозиториями.
 
-Главные требования и продуктовый контекст:
+Текущий продуктовый фокус:
+- не marketplace агентов;
+- не публичный каталог и не social/discovery платформа;
+- а рабочая среда, где пользователь:
+  - собирает свои agent profiles и teams;
+  - выбирает GitHub-репозиторий и задачу;
+  - запускает Codex над проектом через локально установленный `codex` CLI;
+  - использует локально настроенный `gh` CLI для веток, PR, issues и комментариев.
+
+Главные документы:
 - `docs/TZ.md`
 - `docs/PRD.md`
 
-## Текущая структура
+Если код и документация расходятся, ориентироваться нужно на текущие `docs/TZ.md` и `docs/PRD.md`. Кодовая база сейчас находится в переходном состоянии после изначального marketplace-направления.
+
+## Текущая продуктовая рамка
+
+Целевой MVP:
+- `Codex-first`
+- `local-first`
+- `single-user / self-hosted`
+- `host tools driven`
+
+Ключевая идея:
+- backend и frontend дают control plane;
+- выполнение задачи идет через host `codex`, `gh` и `git`;
+- пользовательские креды не хранятся в приложении, а берутся из уже настроенных CLI-сессий пользователя;
+- для Codex в первой итерации не используется `OPENAI_API_KEY`: ожидается уже выполненный browser login / ChatGPT subscription login в `codex`;
+- в браузере пользователь видит диагностику окружения, живой терминал run-сессии, статус шагов и итоговый PR.
+
+## Структура монорепозитория
 
 - `apps/backend` — FastAPI + SQLAlchemy + Alembic
 - `apps/web` — Next.js + TypeScript + Tailwind + shadcn/ui base
 - `docs` — продуктовая и техническая документация
 - `infra` — Docker Compose и инфраструктурные заготовки
-- `scripts` — скрипты локальной разработки
+- `scripts` — локальные dev-скрипты и сиды
 
-## Что уже реализовано
+## Что уже есть в кодовой базе
 
-Foundation:
-- монорепо-каркас с backend/frontend приложениями;
-- локальный стек в `docker-compose`: PostgreSQL, Redis, backend, web;
-- базовая конфигурация окружения через `.env`.
+Фундамент:
+- backend/frontend приложения в одной монорепе;
+- локальный стек `PostgreSQL + Redis + backend + web` через Compose;
+- auth, health checks, базовые CRUD-сценарии;
+- модели agent profiles и teams;
+- экспорт в `codex / claude_code / opencode`;
+- UI для редактирования agent profiles и сборки команд;
+- diagnostics для `git`, `gh`, `codex`;
+- GitHub browser и tracker actions через host `gh`:
+  - список репозиториев;
+  - просмотр repo metadata;
+  - список issues;
+  - просмотр отдельного issue;
+  - добавление комментариев в issue;
+  - добавление и удаление labels;
+  - список pull requests;
+  - просмотр pull request metadata;
+  - просмотр normalized checks summary.
+- workspace lifecycle foundation через host `git` + `gh`:
+  - prepare workspace (`clone + checkout base + create branch`);
+  - inspect git status;
+  - local commit;
+  - push branch;
+  - create draft PR.
 
-Первый MVP-срез:
-- backend health-check: `GET /healthz` и `GET /api/v1/health`;
-- auth API:
-  - `POST /api/v1/auth/register`
-  - `POST /api/v1/auth/login`
-  - `GET /api/v1/me` (Bearer token)
-  - `GET /api/v1/me/teams` (Bearer token)
-- каталог агентов API:
-  - `GET /api/v1/agents`
-  - `GET /api/v1/agents/{slug}`
-  - `POST /api/v1/agents` (Bearer token)
-  - `POST /api/v1/agents/{slug}/publish` (Bearer token, owner only)
-  - `POST /api/v1/agents/{slug}/versions` (Bearer token, owner only)
-  - `GET /api/v1/agents/{slug}/versions`
-  - `GET /api/v1/agents/{slug}/versions/{version}`
-- каталог и конструктор команд API:
-  - `GET /api/v1/teams`
-  - `GET /api/v1/teams/{slug}`
-  - `POST /api/v1/teams` (Bearer token)
-  - `POST /api/v1/teams/{slug}/items` (Bearer token, owner only)
-  - `POST /api/v1/teams/{slug}/publish` (Bearer token, owner only)
-- export API:
-  - `POST /api/v1/exports/agents/{slug}` (Bearer token)
-  - `GET /api/v1/exports/agents/{slug}` (Bearer token, creator only)
-  - `POST /api/v1/exports/teams/{slug}` (Bearer token)
-  - `GET /api/v1/exports/teams/{slug}` (Bearer token, creator only)
-  - `GET /api/v1/exports/{id}` (Bearer token, creator only)
-  - `GET /downloads/agent/{slug}/codex.toml` (single-agent Codex config)
-  - `GET /downloads/agent/{slug}/claude_code.md` (single-agent Claude Code sub-agent)
-  - `GET /downloads/agent/{slug}/opencode.md` (single-agent OpenCode sub-agent)
-  - `GET /downloads/team/{slug}/codex.zip` (team Codex bundle with `.codex/config.toml` and `.codex/agents/*.toml`)
-  - `GET /downloads/team/{slug}/claude_code.zip` (team Claude Code bundle with `.claude/agents/*.md`)
-  - `GET /downloads/team/{slug}/opencode.zip` (team OpenCode bundle with `.opencode/agents/*.md`)
-  - download-time overrides:
-    `codex -> model, model_reasoning_effort, sandbox_mode`
-    `claude_code -> model, permissionMode`
-    `opencode -> model, permission`
-- frontend:
-  - главная страница;
-  - страницы авторизации `/auth/login` и `/auth/register`;
-  - страница каталога `/agents`;
-  - страница создания агента `/agents/new`;
-  - страница агента `/agents/[slug]` с секцией Export;
-  - страница каталога `/teams`;
-  - страница создания команды `/teams/new`;
-  - страница команды `/teams/[slug]` с Team Builder и Export.
+Важно:
+- часть текущей реализации still legacy от старой идеи marketplace;
+- документация уже переведена на новый вектор: local Codex execution platform;
+- следующие итерации должны смещать backend/frontend от catalog/export-only UX к `diagnostics + repo run + terminal + PR flow`.
+
+## Целевые следующие блоки
+
+- host diagnostics для `git`, `gh`, `codex`;
+- GitHub SCM adapter (`branches`, `PR`, `checks`, `merge state`);
+- workspace lifecycle UI поверх нового host workspace layer;
+- запуск Codex в отдельной PTY-сессии;
+- WebSocket terminal в браузере;
+- run lifecycle и логи;
+- branch + draft PR flow.
 
 ## Быстрый старт
 
@@ -76,29 +90,42 @@ Foundation:
 cp .env.example .env
 ```
 
-2. Поднять весь стек:
+2. Поднять стек:
 
 ```bash
 ./scripts/dev/up.sh
 ```
 
-3. Открыть:
+3. В отдельном терминале поднять host executor:
+
+```bash
+./scripts/setup/host-executor-local.sh
+./scripts/dev/run-host-executor.sh
+```
+
+4. Открыть:
 - frontend: `http://localhost:3000`
 - backend docs: `http://localhost:8000/docs`
+- diagnostics: `http://localhost:3000/diagnostics`
+- repos: `http://localhost:3000/repos`
+- example PR detail: `http://localhost:3000/repos/cli/cli/pulls/12870`
 
-4. Остановить стек:
+5. Остановить compose-стек:
 
 ```bash
 ./scripts/dev/down.sh
 ```
 
-Если запускаешь из VS Code (Snap) и вручную используешь `podman-compose`, запускай с:
+Если запускаешь вручную через `podman-compose` из окружения, где нужен явный `XDG_DATA_HOME`, используй:
 
 ```bash
 XDG_DATA_HOME=$HOME/.local/share podman-compose -f infra/compose/docker-compose.yml up -d --build
 ```
 
-## Локальная проверка
+Host executor работает отдельно от compose и должен быть запущен в host user-context, где уже доступны `gh auth` и `codex login`.
+В compose-режиме backend-контейнер ходит к нему через `host.containers.internal`, поэтому bridge должен слушать `0.0.0.0`, а не только `127.0.0.1`.
+
+## Локальные проверки
 
 Backend:
 
@@ -117,10 +144,47 @@ Frontend:
 cd apps/web
 npm install
 npm run lint
+npm run build
 ```
 
-Проверка compose-конфига:
+## Host tools для целевого MVP
+
+Для следующей продуктовой итерации на хосте пользователя должны быть доступны:
 
 ```bash
-make compose-config
+git --version
+gh --version
+gh auth status
+gh auth setup-git
+codex --help
+codex login status
 ```
+
+Минимальное ожидание от окружения:
+- `git` установлен;
+- `gh` установлен и уже авторизован под пользователем;
+- `gh auth setup-git` выполнен, если clone/push идут по HTTPS;
+- `codex` установлен и уже авторизован под пользователем;
+- host executor запускается в том же user-context, где доступны эти CLI-сессии.
+
+## Host Executor
+
+Текущая архитектура:
+- `backend` в compose — это control plane;
+- `host executor` на `127.0.0.1:8765` — это execution layer;
+- backend ходит к нему по `HOST_EXECUTOR_BASE_URL`;
+- в compose по умолчанию используется `http://host.containers.internal:8765`.
+
+Диагностика теперь показывает два слоя:
+- `Backend Context`
+- `Host Executor`
+
+Если `Host Executor` не поднят, `/diagnostics` честно покажет, что execution source недоступен, даже если сам backend жив.
+
+## Сид демо-данных
+
+```bash
+./scripts/dev/reset-marketplace-demo.sh
+```
+
+Скрипт пока использует текущие модели agents/teams и нужен только для локальной демонстрации UI и export-среза. В следующих итерациях он должен быть адаптирован под новый execution-first сценарий.

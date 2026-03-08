@@ -1,0 +1,49 @@
+"""Host diagnostics endpoints for local execution prerequisites."""
+
+from fastapi import APIRouter, HTTPException, status
+
+from app.core.config import get_settings
+from app.schemas.host import HostDiagnosticsResponse, HostExecutionReadinessResponse
+from app.services.host_execution_service import (
+    HostExecutionReadinessService,
+    HostExecutionReadinessServiceError,
+)
+
+router = APIRouter(prefix="/host", tags=["host"])
+readiness_service = HostExecutionReadinessService(get_settings())
+
+
+@router.get("/diagnostics", response_model=HostDiagnosticsResponse)
+def get_host_diagnostics() -> HostDiagnosticsResponse:
+    """Return a live diagnostics snapshot from the host executor bridge."""
+    try:
+        return readiness_service.get_host_diagnostics()
+    except HostExecutionReadinessServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=exc.detail,
+        ) from exc
+
+
+@router.post("/diagnostics/refresh", response_model=HostDiagnosticsResponse)
+def refresh_host_diagnostics() -> HostDiagnosticsResponse:
+    """Return a fresh host-executor diagnostics snapshot."""
+    try:
+        return readiness_service.get_host_diagnostics()
+    except HostExecutionReadinessServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=exc.detail,
+        ) from exc
+
+
+@router.get("/readiness", response_model=HostExecutionReadinessResponse)
+def get_host_readiness() -> HostExecutionReadinessResponse:
+    """Return host-executor readiness."""
+    return readiness_service.build_readiness()
+
+
+@router.post("/readiness/refresh", response_model=HostExecutionReadinessResponse)
+def refresh_host_readiness() -> HostExecutionReadinessResponse:
+    """Return a fresh host-executor readiness snapshot."""
+    return readiness_service.build_readiness()

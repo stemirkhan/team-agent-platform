@@ -1,5 +1,6 @@
 """Business logic for agent and team exports."""
 
+import json
 from io import BytesIO
 from typing import Any
 from urllib.parse import urlencode
@@ -38,7 +39,6 @@ from app.utils.agent_assets import normalize_markdown_file_records, normalize_sk
 class ExportService:
     """Use-case orchestration for export jobs."""
 
-    _DEFAULT_CODEX_MODEL = "gpt-5.3-codex-spark"
     _DEFAULT_REASONING_EFFORT = "medium"
     _DEFAULT_SANDBOX_MODE = "workspace-write"
     _DEFAULT_CLAUDE_MODEL = "inherit"
@@ -546,15 +546,11 @@ class ExportService:
         fallback_description: str,
         fallback_instructions: str,
         codex_options: CodexExportOptions | None = None,
-    ) -> dict[str, str]:
+    ) -> dict[str, str | None]:
         """Build normalized Codex role config from agent manifest."""
         codex = manifest.get("codex") if isinstance(manifest.get("codex"), dict) else {}
 
-        model = self._first_non_empty_str(
-            codex.get("model"),
-            manifest.get("model"),
-            default=self._DEFAULT_CODEX_MODEL,
-        )
+        model = None
         reasoning_effort = self._normalize_reasoning_effort(
             self._first_non_empty_str(
                 codex.get("model_reasoning_effort"),
@@ -812,7 +808,41 @@ class ExportService:
                     skill_path = f"skills/{agent_slug}/{skill_slug}/SKILL.md"
                 else:
                     skill_path = f"skills/{skill_slug}/SKILL.md"
-            files[skill_path] = str(skill["content"]).strip() + "\n"
+            content = str(skill["content"]).strip()
+            if runtime_target == RuntimeTarget.CODEX.value:
+                files[skill_path] = self._render_codex_skill_markdown(
+                    slug=skill_slug,
+                    description=skill.get("description"),
+                    content=content,
+                )
+            else:
+                files[skill_path] = content + "\n"
+
+    @staticmethod
+    def _render_codex_skill_markdown(
+        *,
+        slug: str,
+        description: Any,
+        content: str,
+    ) -> str:
+        """Wrap exported Codex skills in YAML frontmatter when the source lacks it."""
+        normalized = content.lstrip()
+        if normalized.startswith("---\n") or normalized.startswith("---\r\n"):
+            return content.rstrip() + "\n"
+
+        description_text = str(description).strip() if isinstance(description, str) else ""
+        if not description_text:
+            description_text = f"Skill '{slug}' exported from Team Agent Platform."
+
+        lines = [
+            "---",
+            f"name: {json.dumps(slug, ensure_ascii=False)}",
+            f"description: {json.dumps(description_text, ensure_ascii=False)}",
+            "---",
+            "",
+            content,
+        ]
+        return "\n".join(lines).rstrip() + "\n"
 
     @staticmethod
     def _as_str_list(value: Any) -> list[str]:

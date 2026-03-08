@@ -95,7 +95,7 @@ EOF
   fi
 
   profile_payload="$(cat <<EOF
-{"manifest_json":{"codex":{"description":"$title","model":"gpt-5.3-codex-spark","model_reasoning_effort":"medium","sandbox_mode":"workspace-write","developer_instructions":"$codex_instructions"},"claude":{"name":"$slug","description":"$title","model":"inherit","permission_mode":"default","prompt":"$claude_prompt"},"opencode":{"description":"$title","model":"openai/gpt-5.3-codex-spark","permission":"ask","prompt":"$opencode_prompt"}},"compatibility_matrix":{"codex":true,"claude_code":true,"opencode":true},"export_targets":["codex","claude_code","opencode"],"install_instructions":"Import this agent into your local runtime configuration."}
+{"manifest_json":{"codex":{"description":"$title","model_reasoning_effort":"medium","sandbox_mode":"workspace-write","developer_instructions":"$codex_instructions"},"claude":{"name":"$slug","description":"$title","model":"inherit","permission_mode":"default","prompt":"$claude_prompt"},"opencode":{"description":"$title","model":"openai/gpt-5.3-codex-spark","permission":"ask","prompt":"$opencode_prompt"}},"compatibility_matrix":{"codex":true,"claude_code":true,"opencode":true},"export_targets":["codex","claude_code","opencode"],"install_instructions":"Import this agent into your local runtime configuration."}
 EOF
 )"
   profile_result="$(request PATCH "/agents/$slug" "$profile_payload" "$token")"

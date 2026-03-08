@@ -41,6 +41,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent_marketplace}:${POSTGRES_PASSWORD:-agent_marketplace}@postgres:5432/${POSTGRES_DB:-agent_marketplace}
       REDIS_URL: redis://redis:6379/0
+      HOST_EXECUTOR_BASE_URL: ${HOST_EXECUTOR_BASE_URL:-http://host.containers.internal:8765}
       CORS_ORIGINS: "[\"http://localhost:${WEB_PORT:-3000}\",\"http://127.0.0.1:${WEB_PORT:-3000}\",\"http://[::1]:${WEB_PORT:-3000}\"]"
     working_dir: /workspace/apps/backend
     command: >

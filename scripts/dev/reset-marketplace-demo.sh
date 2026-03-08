@@ -146,7 +146,7 @@ EOF
   fi
 
   profile_payload="$(cat <<EOF
-{"manifest_json":{"description":"$full_description","instructions":"$general_instructions","tools_required":$tools_required,"permissions_required":$permissions_required,"tags":$tags,"codex":{"description":"$title","model":"gpt-5.3-codex-spark","model_reasoning_effort":"medium","sandbox_mode":"workspace-write","developer_instructions":"$codex_instructions"},"claude":{"name":"$slug","description":"$title","model":"inherit","permission_mode":"default","prompt":"$claude_prompt"},"opencode":{"description":"$title","model":"openai/gpt-5.3-codex-spark","permission":"ask","prompt":"$opencode_prompt"}},"compatibility_matrix":{"codex":true,"claude_code":true,"opencode":true},"export_targets":["codex","claude_code","opencode"],"install_instructions":"$general_instructions","skills":$skills,"markdown_files":$markdown_files}
+{"manifest_json":{"description":"$full_description","instructions":"$general_instructions","tools_required":$tools_required,"permissions_required":$permissions_required,"tags":$tags,"codex":{"description":"$title","model_reasoning_effort":"medium","sandbox_mode":"workspace-write","developer_instructions":"$codex_instructions"},"claude":{"name":"$slug","description":"$title","model":"inherit","permission_mode":"default","prompt":"$claude_prompt"},"opencode":{"description":"$title","model":"openai/gpt-5.3-codex-spark","permission":"ask","prompt":"$opencode_prompt"}},"compatibility_matrix":{"codex":true,"claude_code":true,"opencode":true},"export_targets":["codex","claude_code","opencode"],"install_instructions":"$general_instructions","skills":$skills,"markdown_files":$markdown_files}
 EOF
 )"
   profile_result="$(request PATCH "/agents/$slug" "$profile_payload" "$token")"
