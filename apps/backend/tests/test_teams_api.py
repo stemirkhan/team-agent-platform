@@ -48,7 +48,7 @@ def _configure_agent(
                 "instructions": f"Run {title} checks.",
                 "entrypoints": [f"run_{slug.replace('-', '_')}"],
             },
-            "export_targets": ["codex", "claude_code", "opencode"],
+            "export_targets": ["codex"],
         },
     )
     assert update_response.status_code == 200
@@ -82,7 +82,7 @@ def test_manage_draft_team_items_without_version_selection(client: TestClient) -
                 "instructions": "Run API Auditor checks with stricter rules.",
                 "entrypoints": ["run_api_auditor"],
             },
-            "export_targets": ["codex", "claude_code", "opencode"],
+            "export_targets": ["codex"],
         },
     )
     assert reviewer_update.status_code == 200

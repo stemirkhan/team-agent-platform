@@ -63,18 +63,6 @@ export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
       agent.install_instructions ??
       agent.short_description
   );
-  const [claudePrompt, setClaudePrompt] = useState(
-    readNestedString(manifest, "claude", "prompt") ??
-      readNestedString(manifest, "instructions") ??
-      agent.install_instructions ??
-      agent.short_description
-  );
-  const [openCodePrompt, setOpenCodePrompt] = useState(
-    readNestedString(manifest, "opencode", "prompt") ??
-      readNestedString(manifest, "instructions") ??
-      agent.install_instructions ??
-      agent.short_description
-  );
   const [skills, setSkills] = useState<AgentSkill[]>(agent.skills ?? []);
   const [markdownFiles, setMarkdownFiles] = useState<AgentMarkdownFile[]>(agent.markdown_files ?? []);
   const [submitting, setSubmitting] = useState(false);
@@ -128,18 +116,6 @@ export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
         agent.install_instructions ??
         agent.short_description
     );
-    setClaudePrompt(
-      readNestedString(manifest, "claude", "prompt") ??
-        readNestedString(manifest, "instructions") ??
-        agent.install_instructions ??
-        agent.short_description
-    );
-    setOpenCodePrompt(
-      readNestedString(manifest, "opencode", "prompt") ??
-        readNestedString(manifest, "instructions") ??
-        agent.install_instructions ??
-        agent.short_description
-    );
     setSkills(agent.skills ?? []);
     setMarkdownFiles(agent.markdown_files ?? []);
   }, [agent, manifest]);
@@ -180,19 +156,10 @@ export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
             codex: {
               description: agent.short_description,
               developer_instructions: codexInstructions.trim()
-            },
-            claude: {
-              name: agent.slug,
-              description: agent.short_description,
-              prompt: claudePrompt.trim()
-            },
-            opencode: {
-              description: agent.short_description,
-              prompt: openCodePrompt.trim()
             }
           },
-          export_targets: ["codex", "claude_code", "opencode"],
-          compatibility_matrix: { codex: true, claude_code: true, opencode: true },
+          export_targets: ["codex"],
+          compatibility_matrix: { codex: true },
           install_instructions: instructions.trim(),
           skills: skills.filter((item) => item.slug.trim() || item.content.trim()),
           markdown_files: markdownFiles.filter((item) => item.path.trim() || item.content.trim())
@@ -309,12 +276,12 @@ export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
               </summary>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                 {t(locale, {
-                  ru: "Переопределите инструкции отдельно для Codex, Claude Code и OpenCode, если нужен разный стиль поведения.",
-                  en: "Override instructions separately for Codex, Claude Code, and OpenCode when each runtime needs different behavior."
+                  ru: "Переопределите инструкции отдельно для Codex, если нужен более точный runtime-профиль.",
+                  en: "Override instructions specifically for Codex when the runtime profile needs extra detail."
                 })}
               </p>
 
-              <div className="mt-4 grid gap-4 lg:grid-cols-3">
+              <div className="mt-4">
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
                   Codex
                   <textarea
@@ -322,26 +289,6 @@ export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
                     onChange={(event) => setCodexInstructions(event.target.value)}
                     required
                     value={codexInstructions}
-                  />
-                </label>
-
-                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  Claude Code
-                  <textarea
-                    className="mt-1 min-h-28 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                    onChange={(event) => setClaudePrompt(event.target.value)}
-                    required
-                    value={claudePrompt}
-                  />
-                </label>
-
-                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  OpenCode
-                  <textarea
-                    className="mt-1 min-h-28 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                    onChange={(event) => setOpenCodePrompt(event.target.value)}
-                    required
-                    value={openCodePrompt}
                   />
                 </label>
               </div>

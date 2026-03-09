@@ -5,6 +5,7 @@ import { TerminalSquare } from "lucide-react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 
+import { LocalizedTimestamp } from "@/components/ui/localized-timestamp";
 import {
   buildRunTerminalWebSocketUrl,
   fetchRunTerminalSession,
@@ -50,17 +51,6 @@ type CodexEventLine = {
     output_tokens?: unknown;
   };
 };
-
-function formatTimestamp(locale: Locale, value: string | null): string {
-  if (!value) {
-    return "-";
-  }
-
-  return new Date(value).toLocaleString(locale === "ru" ? "ru-RU" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "medium"
-  });
-}
 
 function normalizeTerminalText(value: string): string {
   return value.replace(/\r?\n/g, "\r\n");
@@ -527,13 +517,13 @@ export function RunTerminalPanel({ locale, runId, runStatus, token }: RunTermina
             <span className="font-semibold text-slate-900 dark:text-slate-100">
               {t(locale, { ru: "Старт:", en: "Started:" })}
             </span>{" "}
-            {formatTimestamp(locale, session.started_at)}
+            <LocalizedTimestamp locale={locale} value={session.started_at} />
           </p>
           <p>
             <span className="font-semibold text-slate-900 dark:text-slate-100">
               {t(locale, { ru: "Финиш:", en: "Finished:" })}
             </span>{" "}
-            {formatTimestamp(locale, session.finished_at)}
+            <LocalizedTimestamp locale={locale} value={session.finished_at} />
           </p>
           <div className="md:col-span-2 xl:col-span-4">
             <span className="font-semibold text-slate-900 dark:text-slate-100">Command:</span>{" "}

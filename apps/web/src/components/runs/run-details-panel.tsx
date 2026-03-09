@@ -9,6 +9,7 @@ import { RunStatusBadge } from "@/components/runs/run-status-badge";
 import { RunTerminalPanel } from "@/components/runs/run-terminal-panel";
 import { RunReportPanel } from "@/components/runs/run-report-panel";
 import { Button } from "@/components/ui/button";
+import { LocalizedTimestamp } from "@/components/ui/localized-timestamp";
 import {
   clearAccessToken,
   fetchCurrentUser,
@@ -35,17 +36,6 @@ const terminalStatuses = new Set<Run["status"]>(["completed", "failed", "cancell
 
 function isTemporaryExecutionPath(path: string): boolean {
   return path === "TASK.md" || path === ".codex" || path.startsWith(".codex/") || path.startsWith("agents/");
-}
-
-function formatTimestamp(locale: Locale, value: string | null): string {
-  if (!value) {
-    return "-";
-  }
-
-  return new Date(value).toLocaleString(locale === "ru" ? "ru-RU" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "medium"
-  });
 }
 
 function formatShortSha(value: string | null): string {
@@ -439,7 +429,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
               <span className="font-semibold text-slate-900 dark:text-slate-100">
                 {t(locale, { ru: "Создан:", en: "Created:" })}
               </span>{" "}
-              {formatTimestamp(locale, run.created_at)}
+              <LocalizedTimestamp locale={locale} value={run.created_at} />
             </p>
             <div className="md:col-span-2">
               <span className="font-semibold text-slate-900 dark:text-slate-100">
@@ -502,7 +492,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                       {event.event_type}
                     </span>
                     <span className="text-xs text-slate-500 dark:text-slate-400">
-                      {formatTimestamp(locale, event.created_at)}
+                      <LocalizedTimestamp locale={locale} value={event.created_at} />
                     </span>
                   </div>
                   <p className="text-sm text-slate-700 dark:text-slate-200">
@@ -543,13 +533,13 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
               <span className="font-semibold text-slate-900 dark:text-slate-100">
                 {t(locale, { ru: "Commit time:", en: "Commit time:" })}
               </span>{" "}
-              {formatTimestamp(locale, workspace.committed_at)}
+              <LocalizedTimestamp locale={locale} value={workspace.committed_at} />
             </p>
             <p>
               <span className="font-semibold text-slate-900 dark:text-slate-100">
                 {t(locale, { ru: "Push time:", en: "Push time:" })}
               </span>{" "}
-              {formatTimestamp(locale, workspace.pushed_at)}
+              <LocalizedTimestamp locale={locale} value={workspace.pushed_at} />
             </p>
             <p>
               <span className="font-semibold text-slate-900 dark:text-slate-100">

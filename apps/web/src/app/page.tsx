@@ -137,7 +137,7 @@ export default async function HomePage() {
             {t(locale, { ru: "Скачивайте нативные runtime-конфиги", en: "Download native runtime configs" })}
           </h3>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            {t(locale, { ru: "Экспортируйте агентов и команды напрямую для Codex, Claude Code и OpenCode.", en: "Export agents and teams directly for Codex, Claude Code, and OpenCode." })}
+            {t(locale, { ru: "Экспортируйте агентов и команды напрямую для Codex.", en: "Export agents and teams directly for Codex." })}
           </p>
         </article>
       </div>

@@ -1,4 +1,4 @@
-"""Integration tests for export endpoints."""
+"""Integration tests for Codex export endpoints."""
 
 from io import BytesIO
 from urllib.parse import parse_qs, urlparse
@@ -34,7 +34,7 @@ def _configure_agent_profile(
     skills: list[dict[str, object]] | None = None,
     markdown_files: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    """Configure the current hidden agent profile for export adapter tests."""
+    """Configure the current hidden agent profile for Codex export tests."""
     response = client.patch(
         f"/api/v1/agents/{slug}",
         headers=headers,
@@ -51,14 +51,6 @@ def _configure_agent_profile(
                     "model_reasoning_effort": "high",
                     "sandbox_mode": "read-only",
                     "developer_instructions": "Inspect code and provide implementation hints.",
-                },
-                "claude": {
-                    "description": "Review API quality and architecture.",
-                    "prompt": "Inspect the repository and explain architecture concerns.",
-                },
-                "opencode": {
-                    "description": "Review API quality and architecture.",
-                    "prompt": "Inspect repository structure and report implementation risks.",
                 },
             },
             "compatibility_matrix": compatibility_matrix,
@@ -95,7 +87,7 @@ def test_export_published_agent_and_get_job(client: TestClient) -> None:
         client,
         headers=headers,
         slug="export-agent",
-        export_targets=["codex", "claude_code"],
+        export_targets=["codex"],
     )
 
     export_response = client.post(
@@ -486,267 +478,6 @@ def test_team_export_uses_current_agent_profile(client: TestClient) -> None:
         assert 'sandbox_mode = "workspace-write"' in reviewer
 
 
-def test_export_published_agent_for_claude_code(client: TestClient) -> None:
-    """Published agent can be exported as native Claude Code Markdown."""
-    headers = _auth_headers(
-        client,
-        email="claude-agent@example.com",
-        display_name="Claude Agent",
-    )
-
-    client.post(
-        "/api/v1/agents",
-        headers=headers,
-        json={
-            "slug": "claude-export-agent",
-            "title": "Claude Export Agent",
-            "short_description": "Published agent used for Claude Code export tests.",
-            "category": "backend",
-        },
-    )
-    client.post("/api/v1/agents/claude-export-agent/publish", headers=headers)
-    _configure_agent_profile(
-        client,
-        headers=headers,
-        slug="claude-export-agent",
-        export_targets=["codex", "claude_code"],
-    )
-
-    export_response = client.post(
-        "/api/v1/exports/agents/claude-export-agent",
-        headers=headers,
-        json={
-            "runtime_target": "claude_code",
-            "claude": {
-                "model": "sonnet",
-                "permissionMode": "plan",
-            },
-        },
-    )
-    assert export_response.status_code == 201
-    payload = export_response.json()
-    parsed_result_url = urlparse(payload["result_url"])
-    assert parsed_result_url.path == "/downloads/agent/claude-export-agent/claude_code.md"
-    query = parse_qs(parsed_result_url.query)
-    assert query["model"] == ["sonnet"]
-    assert query["permissionMode"] == ["plan"]
-
-    download_response = client.get(payload["result_url"])
-    assert download_response.status_code == 200
-    content = download_response.content.decode("utf-8")
-    assert 'name: "claude-export-agent"' in content
-    assert 'model: "sonnet"' in content
-    assert 'permissionMode: "plan"' in content
-    assert "Inspect the repository and explain architecture concerns." in content
-
-
-def test_export_published_team_for_claude_code(client: TestClient) -> None:
-    """Published team can be exported as native Claude Code bundle."""
-    headers = _auth_headers(
-        client,
-        email="claude-team@example.com",
-        display_name="Claude Team",
-    )
-
-    client.post(
-        "/api/v1/agents",
-        headers=headers,
-        json={
-            "slug": "claude-team-agent",
-            "title": "Claude Team Agent",
-            "short_description": "Published agent used in Claude team export tests.",
-            "category": "backend",
-        },
-    )
-    client.post("/api/v1/agents/claude-team-agent/publish", headers=headers)
-    _configure_agent_profile(
-        client,
-        headers=headers,
-        slug="claude-team-agent",
-        export_targets=["claude_code"],
-    )
-
-    client.post(
-        "/api/v1/teams",
-        headers=headers,
-        json={
-            "slug": "claude-team-export",
-            "title": "Claude Team Export",
-            "description": "Published team that can be exported to Claude Code.",
-        },
-    )
-    client.post(
-        "/api/v1/teams/claude-team-export/items",
-        headers=headers,
-        json={
-            "agent_slug": "claude-team-agent",
-            "role_name": "architect reviewer",
-        },
-    )
-    client.post("/api/v1/teams/claude-team-export/publish", headers=headers)
-
-    export_response = client.post(
-        "/api/v1/exports/teams/claude-team-export",
-        headers=headers,
-        json={
-            "runtime_target": "claude_code",
-            "claude": {
-                "model": "opus",
-                "permissionMode": "acceptEdits",
-            },
-        },
-    )
-    assert export_response.status_code == 201
-    payload = export_response.json()
-    parsed_result_url = urlparse(payload["result_url"])
-    assert parsed_result_url.path == "/downloads/team/claude-team-export/claude_code.zip"
-    query = parse_qs(parsed_result_url.query)
-    assert query["model"] == ["opus"]
-    assert query["permissionMode"] == ["acceptEdits"]
-
-    download_response = client.get(payload["result_url"])
-    assert download_response.status_code == 200
-    with ZipFile(BytesIO(download_response.content)) as archive:
-        names = set(archive.namelist())
-        assert ".claude/agents/architect-reviewer.md" in names
-        assert ".codex/config.toml" not in names
-        content = archive.read(".claude/agents/architect-reviewer.md").decode("utf-8")
-        assert 'name: "architect-reviewer"' in content
-        assert 'model: "opus"' in content
-        assert 'permissionMode: "acceptEdits"' in content
-
-
-def test_export_published_agent_for_opencode(client: TestClient) -> None:
-    """Published agent can be exported as native OpenCode Markdown."""
-    headers = _auth_headers(
-        client,
-        email="opencode-agent@example.com",
-        display_name="OpenCode Agent",
-    )
-
-    client.post(
-        "/api/v1/agents",
-        headers=headers,
-        json={
-            "slug": "opencode-export-agent",
-            "title": "OpenCode Export Agent",
-            "short_description": "Published agent used for OpenCode export tests.",
-            "category": "backend",
-        },
-    )
-    client.post("/api/v1/agents/opencode-export-agent/publish", headers=headers)
-    _configure_agent_profile(
-        client,
-        headers=headers,
-        slug="opencode-export-agent",
-        export_targets=["opencode"],
-    )
-
-    export_response = client.post(
-        "/api/v1/exports/agents/opencode-export-agent",
-        headers=headers,
-        json={
-            "runtime_target": "opencode",
-            "opencode": {
-                "model": "openai/gpt-5",
-                "permission": "allow",
-            },
-        },
-    )
-    assert export_response.status_code == 201
-    payload = export_response.json()
-    parsed_result_url = urlparse(payload["result_url"])
-    assert parsed_result_url.path == "/downloads/agent/opencode-export-agent/opencode.md"
-    query = parse_qs(parsed_result_url.query)
-    assert query["model"] == ["openai/gpt-5"]
-    assert query["permission"] == ["allow"]
-
-    download_response = client.get(payload["result_url"])
-    assert download_response.status_code == 200
-    content = download_response.content.decode("utf-8")
-    assert 'description: "Review API quality and architecture."' in content
-    assert 'mode: "subagent"' in content
-    assert 'model: "openai/gpt-5"' in content
-    assert 'permission: "allow"' in content
-    assert "Inspect repository structure and report implementation risks." in content
-
-
-def test_export_published_team_for_opencode(client: TestClient) -> None:
-    """Published team can be exported as native OpenCode bundle."""
-    headers = _auth_headers(
-        client,
-        email="opencode-team@example.com",
-        display_name="OpenCode Team",
-    )
-
-    client.post(
-        "/api/v1/agents",
-        headers=headers,
-        json={
-            "slug": "opencode-team-agent",
-            "title": "OpenCode Team Agent",
-            "short_description": "Published agent used in OpenCode team export tests.",
-            "category": "backend",
-        },
-    )
-    client.post("/api/v1/agents/opencode-team-agent/publish", headers=headers)
-    _configure_agent_profile(
-        client,
-        headers=headers,
-        slug="opencode-team-agent",
-        export_targets=["opencode"],
-    )
-
-    client.post(
-        "/api/v1/teams",
-        headers=headers,
-        json={
-            "slug": "opencode-team-export",
-            "title": "OpenCode Team Export",
-            "description": "Published team that can be exported to OpenCode.",
-        },
-    )
-    client.post(
-        "/api/v1/teams/opencode-team-export/items",
-        headers=headers,
-        json={
-            "agent_slug": "opencode-team-agent",
-            "role_name": "risk reviewer",
-        },
-    )
-    client.post("/api/v1/teams/opencode-team-export/publish", headers=headers)
-
-    export_response = client.post(
-        "/api/v1/exports/teams/opencode-team-export",
-        headers=headers,
-        json={
-            "runtime_target": "opencode",
-            "opencode": {
-                "model": "anthropic/claude-sonnet-4.5",
-                "permission": "ask",
-            },
-        },
-    )
-    assert export_response.status_code == 201
-    payload = export_response.json()
-    parsed_result_url = urlparse(payload["result_url"])
-    assert parsed_result_url.path == "/downloads/team/opencode-team-export/opencode.zip"
-    query = parse_qs(parsed_result_url.query)
-    assert query["model"] == ["anthropic/claude-sonnet-4.5"]
-    assert query["permission"] == ["ask"]
-
-    download_response = client.get(payload["result_url"])
-    assert download_response.status_code == 200
-    with ZipFile(BytesIO(download_response.content)) as archive:
-        names = set(archive.namelist())
-        assert ".opencode/agents/risk-reviewer.md" in names
-        assert ".claude/agents/architect-reviewer.md" not in names
-        content = archive.read(".opencode/agents/risk-reviewer.md").decode("utf-8")
-        assert 'mode: "subagent"' in content
-        assert 'model: "anthropic/claude-sonnet-4.5"' in content
-        assert 'permission: "ask"' in content
-
-
 def test_only_creator_can_access_export_job(client: TestClient) -> None:
     """Export jobs are visible only to creator."""
     owner_headers = _auth_headers(
@@ -828,7 +559,7 @@ def test_export_uses_default_profile_for_published_agent(client: TestClient) -> 
 
 
 def test_export_rejects_runtime_not_in_export_targets(client: TestClient) -> None:
-    """Export should fail when runtime is not allowed by the current profile."""
+    """Export should fail when Codex is not allowed by the current profile."""
     headers = _auth_headers(
         client,
         email="runtime-filter@example.com",
@@ -850,16 +581,16 @@ def test_export_rejects_runtime_not_in_export_targets(client: TestClient) -> Non
         client,
         headers=headers,
         slug="runtime-limited-agent",
-        export_targets=["codex"],
+        export_targets=["legacy-runtime"],
     )
 
     response = client.post(
         "/api/v1/exports/agents/runtime-limited-agent",
         headers=headers,
-        json={"runtime_target": "claude_code"},
+        json={"runtime_target": "codex"},
     )
     assert response.status_code == 400
     assert (
         response.json()["detail"]
-        == "Agent 'runtime-limited-agent' does not support runtime 'claude_code'."
+        == "Agent 'runtime-limited-agent' does not support runtime 'codex'."
     )

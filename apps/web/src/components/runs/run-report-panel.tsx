@@ -2,6 +2,7 @@
 
 import { CheckCircle2, CircleOff, Clock3, Loader2, OctagonAlert, Slash } from "lucide-react";
 
+import { LocalizedTimestamp } from "@/components/ui/localized-timestamp";
 import { type RunReport, type RunReportCommand, type RunReportPhase, type RunReportPhaseStatus } from "@/lib/api";
 import { t, type Locale } from "@/lib/i18n";
 
@@ -9,17 +10,6 @@ type RunReportPanelProps = {
   locale: Locale;
   report: RunReport | null;
 };
-
-function formatTimestamp(locale: Locale, value: string | null): string {
-  if (!value) {
-    return "-";
-  }
-
-  return new Date(value).toLocaleString(locale === "ru" ? "ru-RU" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "medium"
-  });
-}
 
 function phaseTitle(locale: Locale, key: RunReportPhase["key"]): string {
   switch (key) {
@@ -105,7 +95,8 @@ function renderCommand(locale: Locale, command: RunReportCommand, index: number)
         </span>
       </div>
       <div className="mb-2 text-xs text-slate-500 dark:text-slate-400">
-        {formatTimestamp(locale, command.started_at)} - {formatTimestamp(locale, command.finished_at)}
+        <LocalizedTimestamp locale={locale} value={command.started_at} /> -{" "}
+        <LocalizedTimestamp locale={locale} value={command.finished_at} />
       </div>
       {command.output ? (
         <pre className="max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-slate-200">
@@ -179,7 +170,8 @@ export function RunReportPanel({ locale, report }: RunReportPanelProps) {
 
               <p className="text-sm">{phase.description ?? "-"}</p>
               <p className="mt-1 text-xs opacity-80">
-                {formatTimestamp(locale, phase.first_event_at)} - {formatTimestamp(locale, phase.last_event_at)}
+                <LocalizedTimestamp locale={locale} value={phase.first_event_at} /> -{" "}
+                <LocalizedTimestamp locale={locale} value={phase.last_event_at} />
               </p>
 
               {phase.commands.length > 0 ? (

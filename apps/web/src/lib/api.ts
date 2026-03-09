@@ -19,17 +19,9 @@ export type Agent = {
   markdown_files: AgentMarkdownFile[];
 };
 
-export type RuntimeTarget = "codex" | "claude_code" | "opencode";
+export type RuntimeTarget = "codex";
 export type CodexReasoningEffort = "low" | "medium" | "high";
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
-export type ClaudeModel = "sonnet" | "opus" | "haiku" | "inherit";
-export type ClaudePermissionMode =
-  | "default"
-  | "acceptEdits"
-  | "dontAsk"
-  | "bypassPermissions"
-  | "plan";
-export type OpenCodePermission = "allow" | "ask" | "deny";
 export type HostToolStatus = "ready" | "missing" | "outdated" | "not_authenticated" | "error";
 export type HostExecutionSource = "host_executor";
 export type RunStatus =
@@ -91,16 +83,6 @@ export type CodexExportOptions = {
   model?: string;
   model_reasoning_effort?: CodexReasoningEffort;
   sandbox_mode?: CodexSandboxMode;
-};
-
-export type ClaudeExportOptions = {
-  model?: ClaudeModel;
-  permissionMode?: ClaudePermissionMode;
-};
-
-export type OpenCodeExportOptions = {
-  model?: string;
-  permission?: OpenCodePermission;
 };
 
 export type HostToolDiagnostics = {
@@ -504,8 +486,6 @@ export type TeamItemUpdatePayload = {
 export type ExportCreatePayload = {
   runtime_target: RuntimeTarget;
   codex?: CodexExportOptions;
-  claude?: ClaudeExportOptions;
-  opencode?: OpenCodeExportOptions;
 };
 
 export type FetchMyTeamsOptions = {

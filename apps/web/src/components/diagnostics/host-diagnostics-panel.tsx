@@ -20,6 +20,7 @@ import {
   type HostToolDiagnostics
 } from "@/lib/api";
 import { t, type Locale } from "@/lib/i18n";
+import { LocalizedTimestamp } from "@/components/ui/localized-timestamp";
 
 type HostDiagnosticsPanelProps = {
   locale: Locale;
@@ -55,13 +56,6 @@ function formatToolStatus(locale: Locale, status: HostToolDiagnostics["status"])
     default:
       return status;
   }
-}
-
-function formatTimestamp(locale: Locale, value: string): string {
-  return new Date(value).toLocaleString(locale === "ru" ? "ru-RU" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "medium"
-  });
 }
 
 function getToolEntries(snapshot: HostDiagnosticsSnapshot) {
@@ -294,7 +288,7 @@ function SnapshotSection({
             </span>
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
               {t(locale, { ru: "Обновлено:", en: "Updated:" })}{" "}
-              {formatTimestamp(locale, snapshot.generated_at)}
+              <LocalizedTimestamp locale={locale} value={snapshot.generated_at} />
             </span>
           </div>
           <h2 className="text-2xl font-black text-slate-900 dark:text-slate-50">{title}</h2>
@@ -363,7 +357,7 @@ export function HostDiagnosticsPanel({
               {snapshot ? (
                 <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                   {t(locale, { ru: "Обновлено:", en: "Updated:" })}{" "}
-                  {formatTimestamp(locale, snapshot.generated_at)}
+                  <LocalizedTimestamp locale={locale} value={snapshot.generated_at} />
                 </span>
               ) : null}
             </div>

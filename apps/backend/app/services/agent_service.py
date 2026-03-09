@@ -148,26 +148,13 @@ class AgentService:
                 "description": agent.short_description,
                 "developer_instructions": agent.full_description or agent.short_description,
             },
-            "claude": {
-                "name": agent.slug,
-                "description": agent.short_description,
-                "prompt": agent.full_description or agent.short_description,
-            },
-            "opencode": {
-                "description": agent.short_description,
-                "prompt": agent.full_description or agent.short_description,
-            },
         }
         self.agent_version_repository.upsert_current_profile(
             agent=agent,
             manifest_json=manifest,
             source_archive_url=None,
-            compatibility_matrix={
-                "codex": True,
-                "claude_code": True,
-                "opencode": True,
-            },
-            export_targets=["codex", "claude_code", "opencode"],
+            compatibility_matrix={"codex": True},
+            export_targets=["codex"],
             install_instructions=agent.full_description or agent.short_description,
         )
 

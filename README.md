@@ -47,7 +47,7 @@
 - локальный стек `PostgreSQL + Redis + backend + web` через Compose;
 - auth, health checks, базовые CRUD-сценарии;
 - модели agent profiles и teams;
-- экспорт в `codex / claude_code / opencode`;
+- экспорт в `codex`;
 - UI для редактирования agent profiles и сборки команд;
 - diagnostics для `git`, `gh`, `codex`;
 - GitHub browser и tracker actions через host `gh`:

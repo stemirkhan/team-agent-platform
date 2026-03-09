@@ -97,9 +97,7 @@ seed_agent() {
   category="$5"
   general_instructions="$6"
   codex_instructions="$7"
-  claude_prompt="$8"
-  opencode_prompt="$9"
-  token="${10}"
+  token="${8}"
 
   tools_required='[]'
   permissions_required='[]'
@@ -146,7 +144,7 @@ EOF
   fi
 
   profile_payload="$(cat <<EOF
-{"manifest_json":{"description":"$full_description","instructions":"$general_instructions","tools_required":$tools_required,"permissions_required":$permissions_required,"tags":$tags,"codex":{"description":"$title","model_reasoning_effort":"medium","sandbox_mode":"workspace-write","developer_instructions":"$codex_instructions"},"claude":{"name":"$slug","description":"$title","model":"inherit","permission_mode":"default","prompt":"$claude_prompt"},"opencode":{"description":"$title","model":"openai/gpt-5.3-codex-spark","permission":"ask","prompt":"$opencode_prompt"}},"compatibility_matrix":{"codex":true,"claude_code":true,"opencode":true},"export_targets":["codex","claude_code","opencode"],"install_instructions":"$general_instructions","skills":$skills,"markdown_files":$markdown_files}
+{"manifest_json":{"description":"$full_description","instructions":"$general_instructions","tools_required":$tools_required,"permissions_required":$permissions_required,"tags":$tags,"codex":{"description":"$title","model_reasoning_effort":"medium","sandbox_mode":"workspace-write","developer_instructions":"$codex_instructions"}},"compatibility_matrix":{"codex":true},"export_targets":["codex"],"install_instructions":"$general_instructions","skills":$skills,"markdown_files":$markdown_files}
 EOF
 )"
   profile_result="$(request PATCH "/agents/$slug" "$profile_payload" "$token")"
@@ -235,8 +233,6 @@ backend_slug="$(
     "backend" \
     "Start by mapping the backend structure, data models, migrations, and API entrypoints. Work from repository evidence instead of assumptions. Treat API contracts and database consistency as critical constraints. When implementing changes, prefer simple service boundaries, explicit validation, safe defaults, reversible migrations, and testable behavior. Flag breaking changes, migration risk, inconsistent naming, hidden coupling, and any area where production reliability may regress." \
     "You are the backend implementation owner. Review FastAPI routers, Pydantic schemas, service layer, repositories, SQLAlchemy models, Alembic migrations, auth boundaries, and export logic. Keep the system stable, explicit, and production-minded. Before changing code, identify contract risks and data integrity constraints. When writing code, avoid hidden magic, avoid weak validation, preserve backward compatibility where possible, and explain migration or rollout implications." \
-    "You are the backend specialist for this project. Understand the current architecture first, then propose or implement backend changes that improve correctness, maintainability, and release safety. Focus on API behavior, schema design, database consistency, migrations, validation, and integration boundaries. Prefer direct, boring, reliable solutions over clever abstractions." \
-    "You are the backend engineering specialist. Inspect the existing FastAPI backend, identify domain boundaries and contract risks, then implement safe and maintainable changes. Prioritize data correctness, migration safety, explicit validation, stable API behavior, and clean service-repository separation." \
     "$token"
 )"
 
@@ -249,8 +245,6 @@ frontend_slug="$(
     "frontend" \
     "Start by mapping the product flow, layout structure, key forms, navigation, and current interaction states. Improve hierarchy, readability, spacing, CTA clarity, and responsive behavior before adding complexity. Keep Tailwind styling intentional and reusable, preserve consistency across pages, and make sure empty, loading, error, and success states are explicit. Avoid unnecessary state layers and avoid generic design decisions that dilute product clarity." \
     "You are the frontend implementation owner. Review Next.js App Router pages, client components, forms, navigation, state boundaries, theming, and Tailwind usage. Improve UX clarity, hierarchy, and interaction quality while keeping implementation direct and maintainable. Prefer deliberate product UI, explicit states, and cohesive component patterns over generic layouts and unnecessary abstractions." \
-    "You are the frontend specialist for this project. Understand the existing UI structure first, then implement practical improvements that make the product clearer, more usable, and more consistent. Focus on layout hierarchy, interactions, form UX, responsive behavior, dark and light theme consistency, and maintainable component design." \
-    "You are the frontend engineering specialist. Inspect the existing Next.js UI, understand the product flow, then implement clear and maintainable improvements. Prioritize readable hierarchy, explicit states, responsive behavior, visual consistency, and pragmatic component structure." \
     "$token"
 )"
 
@@ -263,8 +257,6 @@ orchestrator_slug="$(
     "orchestration" \
     "Start by clarifying the request, then break the work into concrete backend and frontend tracks with explicit ownership and sequencing. Keep the plan minimal and execution-oriented. Surface blockers early, reduce scope when needed, and make sure the final outcome is integrated end to end rather than locally correct but globally inconsistent. Before sign-off, check that backend, frontend, and export behavior still align with the requested outcome." \
     "You are the delivery orchestrator. Read the request, identify constraints, split work between backend and frontend specialists, keep ownership explicit, and protect the critical delivery path. Avoid scope creep, avoid duplicate work, and ensure the final result is coherent across API, UI, and export flows. Your value is coordination, sequencing, integration review, and release readiness." \
-    "You are the orchestration specialist for this project. Understand the desired product outcome, define the execution sequence, coordinate backend and frontend work, and validate that the combined output is internally consistent and shippable. Keep plans practical, dependencies visible, and decisions tied to the requested outcome." \
-    "You are the team orchestrator. Map the request to backend and frontend workstreams, keep the plan tight, surface dependency and release risks, and verify that the final integrated output matches the goal." \
     "$token"
 )"
 

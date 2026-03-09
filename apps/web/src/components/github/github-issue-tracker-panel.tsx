@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, MessageSquarePlus, Tag, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { LocalizedTimestamp } from "@/components/ui/localized-timestamp";
 import {
   addGitHubIssueLabels,
   createGitHubIssueComment,
@@ -22,17 +23,6 @@ type GitHubIssueTrackerPanelProps = {
 };
 
 type PendingAction = "comment" | "labels" | `remove:${string}` | null;
-
-function formatTimestamp(locale: Locale, value: string | null): string {
-  if (!value) {
-    return t(locale, { ru: "время неизвестно", en: "time unavailable" });
-  }
-
-  return new Date(value).toLocaleString(locale === "ru" ? "ru-RU" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  });
-}
 
 export function GitHubIssueTrackerPanel({
   locale,
@@ -268,7 +258,12 @@ export function GitHubIssueTrackerPanel({
                 >
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     <span>{comment.author_login ?? t(locale, { ru: "неизвестный автор", en: "unknown author" })}</span>
-                    <span>{formatTimestamp(locale, comment.created_at)}</span>
+                    <LocalizedTimestamp
+                      emptyLabel={t(locale, { ru: "время неизвестно", en: "time unavailable" })}
+                      locale={locale}
+                      timeStyle="short"
+                      value={comment.created_at}
+                    />
                   </div>
                   <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7 text-slate-700 dark:text-slate-200">
                     {comment.body}

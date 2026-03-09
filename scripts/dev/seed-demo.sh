@@ -78,9 +78,7 @@ seed_agent() {
   full_description="$4"
   category="$5"
   codex_instructions="$6"
-  claude_prompt="$7"
-  opencode_prompt="$8"
-  token="$9"
+  token="$7"
 
   create_payload="$(cat <<EOF
 {"slug":"$slug","title":"$title","short_description":"$short_description","full_description":"$full_description","category":"$category"}
@@ -95,7 +93,7 @@ EOF
   fi
 
   profile_payload="$(cat <<EOF
-{"manifest_json":{"codex":{"description":"$title","model_reasoning_effort":"medium","sandbox_mode":"workspace-write","developer_instructions":"$codex_instructions"},"claude":{"name":"$slug","description":"$title","model":"inherit","permission_mode":"default","prompt":"$claude_prompt"},"opencode":{"description":"$title","model":"openai/gpt-5.3-codex-spark","permission":"ask","prompt":"$opencode_prompt"}},"compatibility_matrix":{"codex":true,"claude_code":true,"opencode":true},"export_targets":["codex","claude_code","opencode"],"install_instructions":"Import this agent into your local runtime configuration."}
+{"manifest_json":{"codex":{"description":"$title","model_reasoning_effort":"medium","sandbox_mode":"workspace-write","developer_instructions":"$codex_instructions"}},"compatibility_matrix":{"codex":true},"export_targets":["codex"],"install_instructions":"Import this agent into your local runtime configuration."}
 EOF
 )"
   profile_result="$(request PATCH "/agents/$slug" "$profile_payload" "$token")"
@@ -124,8 +122,6 @@ seed_agent \
   "Looks for service boundaries, schema drift, and API contract issues in FastAPI backends." \
   "backend" \
   "Audit FastAPI routers, schemas, services, and exports. Flag correctness, missing validation, and unsafe changes." \
-  "Review FastAPI backend structure, note API risks, and suggest concrete fixes." \
-  "Inspect the backend project, summarize API risks, and suggest maintainable fixes." \
   "$token"
 
 seed_agent \
@@ -135,19 +131,15 @@ seed_agent \
   "Improves page structure, interaction details, and component polish for Next.js App Router applications." \
   "frontend" \
   "Refine Next.js UI structure, improve hierarchy, and keep Tailwind implementation maintainable." \
-  "Refine Next.js product UI, keep the layout clean, and avoid unnecessary complexity." \
-  "Improve the frontend UX with practical component-level changes and clear structure." \
   "$token"
 
 seed_agent \
   "runtime-export-auditor" \
   "Runtime Export Auditor" \
-  "Checks export compatibility for Codex, Claude Code, and OpenCode." \
-  "Validates runtime-specific manifests, config fields, and packaging expectations for supported agent runtimes." \
+  "Checks export compatibility for Codex." \
+  "Validates Codex manifests, config fields, and packaging expectations for supported exports." \
   "tooling" \
-  "Validate export manifests for Codex, Claude Code, and OpenCode. Focus on config completeness and portability." \
-  "Check runtime export packaging, flag missing fields, and keep the format close to native tool expectations." \
-  "Review runtime export settings, highlight missing metadata, and keep the bundle minimal." \
+  "Validate export manifests for Codex. Focus on config completeness and portability." \
   "$token"
 
 printf 'Seeded demo user: %s\n' "$DEMO_EMAIL"

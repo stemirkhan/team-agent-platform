@@ -5,7 +5,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 _SKILL_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
-_RESERVED_MARKDOWN_ROOTS = {".codex", ".claude", ".opencode", "skills"}
+_RESERVED_MARKDOWN_ROOTS = {".codex", "skills"}
 
 
 def normalize_skill_records(value: Any, *, strict: bool) -> list[dict[str, str]]:
@@ -131,7 +131,7 @@ def normalize_markdown_path(value: Any) -> str:
     if parts[0] in _RESERVED_MARKDOWN_ROOTS:
         raise ValueError(
             "Markdown file path must not target reserved export directories "
-            "('.codex', '.claude', '.opencode', 'skills')."
+            "('.codex', 'skills')."
         )
 
     normalized_path = str(path)

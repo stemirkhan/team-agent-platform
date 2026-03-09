@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { RunStatusBadge } from "@/components/runs/run-status-badge";
 import { Button } from "@/components/ui/button";
+import { LocalizedTimestamp } from "@/components/ui/localized-timestamp";
 import {
   clearAccessToken,
   fetchCurrentUser,
@@ -20,17 +21,6 @@ type RunsListPanelProps = {
 };
 
 type RunsFilter = "all" | RunStatus;
-
-function formatTimestamp(locale: Locale, value: string | null): string {
-  if (!value) {
-    return "-";
-  }
-
-  return new Date(value).toLocaleString(locale === "ru" ? "ru-RU" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  });
-}
 
 const runFilters: RunsFilter[] = [
   "all",
@@ -313,13 +303,13 @@ export function RunsListPanel({ locale }: RunsListPanelProps) {
                   <span className="font-semibold text-slate-900 dark:text-slate-100">
                     {t(locale, { ru: "Создан:", en: "Created:" })}
                   </span>{" "}
-                  {formatTimestamp(locale, run.created_at)}
+                  <LocalizedTimestamp locale={locale} timeStyle="short" value={run.created_at} />
                 </p>
                 <p>
                   <span className="font-semibold text-slate-900 dark:text-slate-100">
                     {t(locale, { ru: "Завершен:", en: "Finished:" })}
                   </span>{" "}
-                  {formatTimestamp(locale, run.finished_at)}
+                  <LocalizedTimestamp locale={locale} timeStyle="short" value={run.finished_at} />
                 </p>
               </div>
 

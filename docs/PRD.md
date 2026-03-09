@@ -183,7 +183,6 @@
 - moderation;
 - публичный marketplace;
 - рейтинги, отзывы, social discovery;
-- Claude/OpenCode execution;
 - auto-merge и auto-deploy.
 
 ## Core Product Objects
