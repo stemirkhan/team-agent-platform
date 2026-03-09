@@ -75,3 +75,43 @@ class WorkspaceMaterialize(BaseModel):
     """Batch of files to materialize inside a prepared workspace."""
 
     files: list[WorkspaceFileWrite] = Field(default_factory=list, min_length=1, max_length=500)
+
+
+class WorkspaceExecutionConfigRead(BaseModel):
+    """Normalized repo-level execution contract discovered in one workspace."""
+
+    source_path: str | None = None
+    run_working_directory: str = "."
+    setup_working_directory: str = "."
+    setup_commands: list[str] = Field(default_factory=list)
+    check_working_directory: str = "."
+    check_commands: list[str] = Field(default_factory=list)
+
+
+class WorkspaceCommandsRun(BaseModel):
+    """Batch of shell commands that should run inside one prepared workspace."""
+
+    commands: list[str] = Field(default_factory=list, min_length=1, max_length=50)
+    working_directory: str = Field(default=".", min_length=1, max_length=1000)
+    label: str | None = Field(default=None, max_length=255)
+
+
+class WorkspaceCommandResult(BaseModel):
+    """One command execution result inside a workspace."""
+
+    command: str
+    exit_code: int
+    output: str
+    started_at: str
+    finished_at: str
+    succeeded: bool
+
+
+class WorkspaceCommandsRunResponse(BaseModel):
+    """Result of sequential workspace command execution."""
+
+    label: str | None = None
+    working_directory: str
+    success: bool
+    failed_command: str | None = None
+    items: list[WorkspaceCommandResult] = Field(default_factory=list)

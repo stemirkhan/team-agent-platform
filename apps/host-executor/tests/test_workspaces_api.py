@@ -5,7 +5,11 @@ from fastapi.testclient import TestClient
 from host_executor_app.api import workspaces as workspace_api
 from host_executor_app.main import app
 from host_executor_app.schemas.workspace import (
+    WorkspaceCommandResult,
+    WorkspaceCommandsRun,
+    WorkspaceCommandsRunResponse,
     WorkspaceCommit,
+    WorkspaceExecutionConfigRead,
     WorkspaceListResponse,
     WorkspaceMaterialize,
     WorkspacePrepare,
@@ -55,6 +59,18 @@ def test_host_executor_workspace_endpoints(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         workspace_api.workspace_service,
+        "get_execution_config",
+        lambda workspace_id: WorkspaceExecutionConfigRead(
+            source_path=".team-agent-platform.toml",
+            run_working_directory=".",
+            setup_working_directory=".",
+            setup_commands=["cd apps/backend && .venv/bin/python -m pip install -e '.[dev]'"],
+            check_working_directory=".",
+            check_commands=["make compose-config"],
+        ),
+    )
+    monkeypatch.setattr(
+        workspace_api.workspace_service,
         "commit_workspace",
         lambda workspace_id, payload: workspace.model_copy(
             update={
@@ -83,6 +99,25 @@ def test_host_executor_workspace_endpoints(monkeypatch) -> None:
                 "has_changes": False,
                 "changed_files": [],
             }
+        ),
+    )
+    monkeypatch.setattr(
+        workspace_api.workspace_service,
+        "run_commands",
+        lambda workspace_id, payload: WorkspaceCommandsRunResponse(
+            label=payload.label,
+            working_directory=payload.working_directory,
+            success=True,
+            items=[
+                WorkspaceCommandResult(
+                    command=payload.commands[0],
+                    exit_code=0,
+                    output="ok",
+                    started_at="2026-03-09T10:00:00Z",
+                    finished_at="2026-03-09T10:00:01Z",
+                    succeeded=True,
+                )
+            ],
         ),
     )
     monkeypatch.setattr(
@@ -122,6 +157,10 @@ def test_host_executor_workspace_endpoints(monkeypatch) -> None:
     assert get_response.status_code == 200
     assert get_response.json()["changed_files"] == ["README.md"]
 
+    config_response = client.get("/workspaces/ws-1/execution-config")
+    assert config_response.status_code == 200
+    assert config_response.json()["source_path"] == ".team-agent-platform.toml"
+
     commit_response = client.post(
         "/workspaces/ws-1/commit",
         json=WorkspaceCommit(message="test: commit workspace").model_dump(),
@@ -142,6 +181,17 @@ def test_host_executor_workspace_endpoints(monkeypatch) -> None:
     cleanup_response = client.post("/workspaces/ws-1/cleanup")
     assert cleanup_response.status_code == 200
     assert cleanup_response.json()["has_changes"] is False
+
+    commands_response = client.post(
+        "/workspaces/ws-1/commands",
+        json=WorkspaceCommandsRun(
+            commands=["make compose-config"],
+            working_directory=".",
+            label="repo-checks",
+        ).model_dump(),
+    )
+    assert commands_response.status_code == 200
+    assert commands_response.json()["success"] is True
 
     push_response = client.post("/workspaces/ws-1/push")
     assert push_response.status_code == 200

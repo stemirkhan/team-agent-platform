@@ -6,7 +6,10 @@ from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.models.user import User
 from app.schemas.workspace import (
+    WorkspaceCommandsRun,
+    WorkspaceCommandsRunResponse,
     WorkspaceCommit,
+    WorkspaceExecutionConfigRead,
     WorkspaceListResponse,
     WorkspaceMaterialize,
     WorkspacePrepare,
@@ -55,6 +58,19 @@ def get_workspace(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.get("/{workspace_id}/execution-config", response_model=WorkspaceExecutionConfigRead)
+def get_workspace_execution_config(
+    workspace_id: str = Path(min_length=1),
+    user: User = Depends(get_current_user),
+) -> WorkspaceExecutionConfigRead:
+    """Return repo-level execution config discovered in one workspace."""
+    _ = user
+    try:
+        return workspace_proxy_service.get_execution_config(workspace_id)
+    except WorkspaceProxyServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.post("/{workspace_id}/commit", response_model=WorkspaceRead)
 def commit_workspace(
     payload: WorkspaceCommit,
@@ -92,6 +108,20 @@ def cleanup_workspace(
     _ = user
     try:
         return workspace_proxy_service.cleanup_workspace(workspace_id)
+    except WorkspaceProxyServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/{workspace_id}/commands", response_model=WorkspaceCommandsRunResponse)
+def run_workspace_commands(
+    payload: WorkspaceCommandsRun,
+    workspace_id: str = Path(min_length=1),
+    user: User = Depends(get_current_user),
+) -> WorkspaceCommandsRunResponse:
+    """Run sequential shell commands inside one prepared workspace."""
+    _ = user
+    try:
+        return workspace_proxy_service.run_commands(workspace_id, payload)
     except WorkspaceProxyServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

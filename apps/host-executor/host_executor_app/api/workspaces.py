@@ -3,7 +3,10 @@
 from fastapi import APIRouter, HTTPException, Path, status
 
 from host_executor_app.schemas.workspace import (
+    WorkspaceCommandsRun,
+    WorkspaceCommandsRunResponse,
     WorkspaceCommit,
+    WorkspaceExecutionConfigRead,
     WorkspaceListResponse,
     WorkspaceMaterialize,
     WorkspacePrepare,
@@ -40,6 +43,17 @@ def get_workspace(workspace_id: str = Path(min_length=1)) -> WorkspaceRead:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.get("/{workspace_id}/execution-config", response_model=WorkspaceExecutionConfigRead)
+def get_workspace_execution_config(
+    workspace_id: str = Path(min_length=1),
+) -> WorkspaceExecutionConfigRead:
+    """Return repo-level execution config normalized for one workspace."""
+    try:
+        return workspace_service.get_execution_config(workspace_id)
+    except WorkspaceServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.post("/{workspace_id}/commit", response_model=WorkspaceRead)
 def commit_workspace(
     payload: WorkspaceCommit,
@@ -69,6 +83,18 @@ def cleanup_workspace(workspace_id: str = Path(min_length=1)) -> WorkspaceRead:
     """Restore or delete temporary run scaffolding files inside a workspace."""
     try:
         return workspace_service.cleanup_materialized_files(workspace_id)
+    except WorkspaceServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/{workspace_id}/commands", response_model=WorkspaceCommandsRunResponse)
+def run_workspace_commands(
+    payload: WorkspaceCommandsRun,
+    workspace_id: str = Path(min_length=1),
+) -> WorkspaceCommandsRunResponse:
+    """Run repo-scoped shell commands inside one prepared workspace."""
+    try:
+        return workspace_service.run_commands(workspace_id, payload)
     except WorkspaceServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

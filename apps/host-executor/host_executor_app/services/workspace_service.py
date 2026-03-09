@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tomllib
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,7 +13,11 @@ from pathlib import Path, PurePosixPath
 
 from host_executor_app.core.config import get_settings
 from host_executor_app.schemas.workspace import (
+    WorkspaceCommandResult,
+    WorkspaceCommandsRun,
+    WorkspaceCommandsRunResponse,
     WorkspaceCommit,
+    WorkspaceExecutionConfigRead,
     WorkspaceListResponse,
     WorkspaceMaterialize,
     WorkspacePrepare,
@@ -37,6 +42,7 @@ class WorkspaceService:
     """Manage local workspaces for clone, branch, commit, push, and draft PR flow."""
 
     _MATERIALIZED_STATE_FILENAME = ".materialized-files.json"
+    _EXECUTION_CONFIG_FILENAMES = (".team-agent-platform.toml", "team-agent-platform.toml")
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -122,6 +128,90 @@ class WorkspaceService:
         refreshed = self._refresh_workspace(metadata)
         self._save_workspace(refreshed)
         return refreshed
+
+    def get_execution_config(self, workspace_id: str) -> WorkspaceExecutionConfigRead:
+        """Return normalized repo-level execution config for one workspace."""
+        metadata = self._load_workspace(workspace_id)
+        repo_dir = Path(metadata.repo_path)
+        if not repo_dir.exists():
+            raise WorkspaceServiceError(404, f"Workspace repo path is missing: {repo_dir}")
+        return self._load_execution_config(repo_dir)
+
+    def run_commands(
+        self,
+        workspace_id: str,
+        payload: WorkspaceCommandsRun,
+    ) -> WorkspaceCommandsRunResponse:
+        """Run sequential shell commands inside one workspace and return normalized results."""
+        metadata = self._load_workspace(workspace_id)
+        repo_dir = Path(metadata.repo_path)
+        if not repo_dir.exists():
+            raise WorkspaceServiceError(404, f"Workspace repo path is missing: {repo_dir}")
+
+        command_cwd = self._resolve_repo_directory_path(
+            repo_dir=repo_dir,
+            relative_path=payload.working_directory,
+        )
+        items: list[WorkspaceCommandResult] = []
+        failed_command: str | None = None
+
+        for command in payload.commands:
+            started_at = _utc_now()
+            try:
+                completed = subprocess.run(
+                    ["zsh", "-lc", command],
+                    capture_output=True,
+                    check=False,
+                    text=True,
+                    cwd=str(command_cwd),
+                    timeout=self.settings.workspace_command_timeout_seconds,
+                )
+            except FileNotFoundError as exc:
+                raise WorkspaceServiceError(
+                    503,
+                    "The host shell required for workspace commands was not found.",
+                ) from exc
+            except subprocess.TimeoutExpired as exc:
+                raise WorkspaceServiceError(
+                    504,
+                    (
+                        "Workspace command timed out after "
+                        f"{self.settings.workspace_command_timeout_seconds} seconds: {command}"
+                    ),
+                ) from exc
+            except OSError as exc:
+                raise WorkspaceServiceError(
+                    503,
+                    f"Failed to launch workspace command `{command}`: {exc}",
+                ) from exc
+
+            output = "\n".join(
+                part
+                for part in [completed.stdout.strip(), completed.stderr.strip()]
+                if part
+            )
+            result = WorkspaceCommandResult(
+                command=command,
+                exit_code=completed.returncode,
+                output=output,
+                started_at=started_at,
+                finished_at=_utc_now(),
+                succeeded=completed.returncode == 0,
+            )
+            items.append(result)
+            if completed.returncode != 0:
+                failed_command = command
+                break
+
+        refreshed = self._refresh_workspace(metadata)
+        self._save_workspace(refreshed)
+        return WorkspaceCommandsRunResponse(
+            label=payload.label,
+            working_directory=str(PurePosixPath(payload.working_directory.strip() or ".")),
+            success=failed_command is None,
+            failed_command=failed_command,
+            items=items,
+        )
 
     def commit_workspace(self, workspace_id: str, payload: WorkspaceCommit) -> WorkspaceRead:
         """Commit local changes in a prepared workspace."""
@@ -430,6 +520,106 @@ class WorkspaceService:
                 break
             current = current.parent
 
+    def _load_execution_config(self, repo_dir: Path) -> WorkspaceExecutionConfigRead:
+        """Read repo-level execution config when present and normalize it."""
+        config_path = self._find_execution_config_path(repo_dir)
+        if config_path is None:
+            return WorkspaceExecutionConfigRead()
+
+        try:
+            payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as exc:
+            raise WorkspaceServiceError(
+                422,
+                f"Repo execution config is invalid: {config_path.name}",
+            ) from exc
+        if not isinstance(payload, dict):
+            raise WorkspaceServiceError(
+                422,
+                f"Repo execution config must be a TOML table: {config_path.name}",
+            )
+
+        run_section = payload.get("run") if isinstance(payload.get("run"), dict) else {}
+        setup_section = payload.get("setup") if isinstance(payload.get("setup"), dict) else {}
+        checks_section = payload.get("checks") if isinstance(payload.get("checks"), dict) else {}
+
+        run_working_directory = self._normalize_working_directory(
+            repo_dir=repo_dir,
+            value=run_section.get("working_directory"),
+            field_name="run.working_directory",
+        )
+        setup_working_directory = self._normalize_working_directory(
+            repo_dir=repo_dir,
+            value=setup_section.get("working_directory", run_working_directory),
+            field_name="setup.working_directory",
+        )
+        check_working_directory = self._normalize_working_directory(
+            repo_dir=repo_dir,
+            value=checks_section.get("working_directory", run_working_directory),
+            field_name="checks.working_directory",
+        )
+
+        return WorkspaceExecutionConfigRead(
+            source_path=config_path.name,
+            run_working_directory=run_working_directory,
+            setup_working_directory=setup_working_directory,
+            setup_commands=self._normalize_command_list(
+                setup_section.get("commands"),
+                field_name="setup.commands",
+            ),
+            check_working_directory=check_working_directory,
+            check_commands=self._normalize_command_list(
+                checks_section.get("commands"),
+                field_name="checks.commands",
+            ),
+        )
+
+    def _find_execution_config_path(self, repo_dir: Path) -> Path | None:
+        """Return the first supported repo execution config file under the repo root."""
+        for filename in self._EXECUTION_CONFIG_FILENAMES:
+            candidate = repo_dir / filename
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _normalize_working_directory(
+        self,
+        *,
+        repo_dir: Path,
+        value: object,
+        field_name: str,
+    ) -> str:
+        """Validate and normalize a repo-relative working directory string."""
+        normalized = "." if value is None else str(value).strip()
+        if not normalized:
+            raise WorkspaceServiceError(
+                422,
+                f"Repo execution config field `{field_name}` must not be empty.",
+            )
+        self._resolve_repo_directory_path(repo_dir=repo_dir, relative_path=normalized)
+        return str(PurePosixPath(normalized))
+
+    @staticmethod
+    def _normalize_command_list(value: object, *, field_name: str) -> list[str]:
+        """Validate a list of shell commands from repo execution config."""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise WorkspaceServiceError(
+                422,
+                f"Repo execution config field `{field_name}` must be a list.",
+            )
+
+        commands: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise WorkspaceServiceError(
+                    422,
+                    f"Repo execution config field `{field_name}` must contain non-empty strings.",
+                )
+            commands.append(item.strip())
+        return commands
+
     def _run_git(
         self,
         args: list[str],
@@ -601,6 +791,40 @@ class WorkspaceService:
                 400,
                 f"Workspace file path escapes the repo root: {relative_path}",
             ) from exc
+        return resolved
+
+    @staticmethod
+    def _resolve_repo_directory_path(*, repo_dir: Path, relative_path: str) -> Path:
+        """Return a validated directory path inside the repo root."""
+        normalized = PurePosixPath(relative_path.strip())
+        if normalized == PurePosixPath("."):
+            return repo_dir.resolve()
+        if normalized.is_absolute():
+            raise WorkspaceServiceError(400, "Workspace directory path must be relative.")
+        if any(part in {"", ".", ".."} for part in normalized.parts):
+            raise WorkspaceServiceError(
+                400,
+                f"Workspace directory path is not allowed: {relative_path}",
+            )
+
+        resolved = (repo_dir / Path(*normalized.parts)).resolve()
+        try:
+            resolved.relative_to(repo_dir.resolve())
+        except ValueError as exc:
+            raise WorkspaceServiceError(
+                400,
+                f"Workspace directory path escapes the repo root: {relative_path}",
+            ) from exc
+        if not resolved.exists():
+            raise WorkspaceServiceError(
+                404,
+                f"Workspace directory path does not exist: {relative_path}",
+            )
+        if not resolved.is_dir():
+            raise WorkspaceServiceError(
+                400,
+                f"Workspace directory path is not a directory: {relative_path}",
+            )
         return resolved
 
     @staticmethod

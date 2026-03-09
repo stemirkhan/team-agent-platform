@@ -10,7 +10,12 @@ from fastapi.testclient import TestClient
 
 from app.schemas.codex import CodexSessionEventsResponse, CodexSessionRead, CodexTerminalChunk
 from app.schemas.github import GitHubIssueDetailRead, GitHubRepoRead
-from app.schemas.workspace import WorkspaceRead
+from app.schemas.workspace import (
+    WorkspaceCommandResult,
+    WorkspaceCommandsRunResponse,
+    WorkspaceExecutionConfigRead,
+    WorkspaceRead,
+)
 from app.services.codex_proxy_service import CodexProxyService, CodexProxyServiceError
 from app.services.export_service import ExportService
 from app.services.github_proxy_service import GitHubProxyService
@@ -121,6 +126,23 @@ def _workspace() -> WorkspaceRead:
     )
 
 
+def _execution_config(
+    *,
+    source_path: str | None = None,
+    setup_commands: list[str] | None = None,
+    check_commands: list[str] | None = None,
+) -> WorkspaceExecutionConfigRead:
+    """Return one normalized repo execution config payload for tests."""
+    return WorkspaceExecutionConfigRead(
+        source_path=source_path,
+        run_working_directory=".",
+        setup_working_directory=".",
+        setup_commands=setup_commands or [],
+        check_working_directory=".",
+        check_commands=check_commands or [],
+    )
+
+
 def test_create_run_prepares_workspace_and_records_status_events(
     client: TestClient,
     monkeypatch,
@@ -183,6 +205,11 @@ def test_create_run_prepares_workspace_and_records_status_events(
                 "changed_files": [file.path for file in payload.files],
             }
         ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(source_path=".team-agent-platform.toml"),
     )
     monkeypatch.setattr(
         ExportService,
@@ -364,6 +391,11 @@ def test_create_run_returns_failed_state_when_workspace_prepare_breaks(
             )
         ),
     )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(),
+    )
 
     create_response = client.post(
         "/api/v1/runs",
@@ -434,7 +466,34 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
             update={"has_changes": True, "changed_files": ["TASK.md"]}
         ),
     )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(
+            source_path=".team-agent-platform.toml",
+            check_commands=["make compose-config"],
+        ),
+    )
     scm_calls: list[str] = []
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "run_commands",
+        lambda self, workspace_id, payload: WorkspaceCommandsRunResponse(
+            label=payload.label,
+            working_directory=payload.working_directory,
+            success=True,
+            items=[
+                WorkspaceCommandResult(
+                    command="make compose-config",
+                    exit_code=0,
+                    output="ok",
+                    started_at="2026-03-08T10:07:00Z",
+                    finished_at="2026-03-08T10:07:02Z",
+                    succeeded=True,
+                )
+            ],
+        ),
+    )
     monkeypatch.setattr(
         WorkspaceProxyService,
         "cleanup_workspace",
@@ -551,7 +610,7 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
     get_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert get_response.status_code == 200
     assert get_response.json()["status"] == "completed"
-    assert get_response.json()["summary"] == "Run codex."
+    assert get_response.json()["summary"] == "Codex finished successfully."
     assert (
         get_response.json()["pr_url"]
         == "https://github.com/stemirkhan/team-agent-platform/pull/42"
@@ -568,7 +627,14 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
         for item in events_response.json()["items"]
         if item["event_type"] == "status"
     ]
-    assert statuses[-4:] == ["committing", "pushing", "creating_pr", "completed"]
+    assert statuses[-6:] == [
+        "committing",
+        "running_checks",
+        "committing",
+        "pushing",
+        "creating_pr",
+        "completed",
+    ]
 
     cancel_response = client.post(f"/api/v1/runs/{run_id}/cancel", headers=headers)
     assert cancel_response.status_code == 200
@@ -622,6 +688,11 @@ def test_get_run_completes_without_commit_when_only_materialized_files_changed(
         lambda self, workspace_id, payload: _workspace().model_copy(
             update={"has_changes": True, "changed_files": [".codex/config.toml", "TASK.md"]}
         ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(),
     )
     monkeypatch.setattr(
         WorkspaceProxyService,
@@ -777,6 +848,11 @@ def test_get_run_fails_when_codex_session_state_is_lost(
         lambda self, workspace_id, payload: _workspace().model_copy(
             update={"has_changes": True, "changed_files": ["TASK.md"]}
         ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(),
     )
     monkeypatch.setattr(
         ExportService,

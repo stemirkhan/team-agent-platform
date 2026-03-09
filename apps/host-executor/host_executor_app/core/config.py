@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     host_executor_host: str = "0.0.0.0"
     host_executor_port: int = 8765
     workspace_root: str = "~/.team-agent-platform/workspaces"
+    workspace_command_timeout_seconds: int = 1800
     cors_origins: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",

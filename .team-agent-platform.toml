@@ -1,0 +1,17 @@
+[run]
+working_directory = "."
+
+[setup]
+commands = [
+  "cd apps/backend && test -d .venv || python3 -m venv .venv",
+  "cd apps/backend && .venv/bin/python -m pip install -e '.[dev]'",
+  "cd apps/web && npm ci",
+]
+
+[checks]
+commands = [
+  "make compose-config",
+  "cd apps/backend && .venv/bin/python -m ruff check app tests",
+  "cd apps/backend && .venv/bin/python -m pytest -q",
+  "cd apps/web && npm run lint",
+]

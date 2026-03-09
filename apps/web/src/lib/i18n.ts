@@ -62,8 +62,10 @@ export function formatRunStatus(
     | "preparing"
     | "cloning_repo"
     | "materializing_team"
+    | "running_setup"
     | "starting_codex"
     | "running"
+    | "running_checks"
     | "committing"
     | "pushing"
     | "creating_pr"
@@ -80,10 +82,14 @@ export function formatRunStatus(
       return t(locale, { ru: "клонирование", en: "cloning repo" });
     case "materializing_team":
       return t(locale, { ru: "материализация команды", en: "materializing team" });
+    case "running_setup":
+      return t(locale, { ru: "setup", en: "running setup" });
     case "starting_codex":
       return t(locale, { ru: "старт Codex", en: "starting Codex" });
     case "running":
       return t(locale, { ru: "выполняется", en: "running" });
+    case "running_checks":
+      return t(locale, { ru: "проверки", en: "running checks" });
     case "committing":
       return t(locale, { ru: "коммит", en: "committing" });
     case "pushing":

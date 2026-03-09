@@ -19,7 +19,10 @@ from app.schemas.codex import CodexSessionEventsResponse, CodexSessionRead, Code
 from app.schemas.export import CodexExportOptions
 from app.schemas.run import RunCreate, RunEventListResponse, RunListResponse
 from app.schemas.workspace import (
+    WorkspaceCommandsRun,
+    WorkspaceCommandsRunResponse,
     WorkspaceCommit,
+    WorkspaceExecutionConfigRead,
     WorkspaceFileWrite,
     WorkspaceMaterialize,
     WorkspacePrepare,
@@ -155,6 +158,56 @@ class RunService:
                     "repo_path": workspace.repo_path,
                 },
             )
+            execution_config = self.workspace_proxy_service.get_execution_config(workspace.id)
+            if execution_config.source_path:
+                self._append_event(
+                    run_id=run.id,
+                    event_type=RunEventType.NOTE,
+                    payload={
+                        "message": (
+                            f"Loaded repo execution config from `{execution_config.source_path}`."
+                        ),
+                        "config": execution_config.model_dump(),
+                    },
+                )
+            if execution_config.setup_commands:
+                run = self._transition_run(
+                    run,
+                    status_value=RunStatus.RUNNING_SETUP,
+                    message="Running repo setup commands before starting Codex.",
+                )
+                setup_result = self.workspace_proxy_service.run_commands(
+                    workspace.id,
+                    WorkspaceCommandsRun(
+                        commands=execution_config.setup_commands,
+                        working_directory=execution_config.setup_working_directory,
+                        label="repo-setup",
+                    ),
+                )
+                self._append_command_results_event(
+                    run_id=run.id,
+                    command_results=setup_result,
+                    success_message="Repo setup commands completed successfully.",
+                )
+                if not setup_result.success:
+                    return self._fail_run(
+                        run,
+                        detail=self._build_command_failure_detail(
+                            phase="repo setup",
+                            result=setup_result,
+                        ),
+                    )
+                workspace = self.workspace_proxy_service.get_workspace(workspace.id)
+                if workspace.has_changes:
+                    changed_files = ", ".join(workspace.changed_files[:10]) or "unknown files"
+                    return self._fail_run(
+                        run,
+                        detail=(
+                            "Repo setup commands modified tracked files before Codex execution. "
+                            f"Review `{execution_config.source_path}` and keep setup read-only. "
+                            f"Changed files: {changed_files}."
+                        ),
+                    )
 
             run = self._transition_run(
                 run,
@@ -170,6 +223,7 @@ class RunService:
                         repo_full_name=repo.full_name,
                         base_branch=workspace.base_branch,
                         working_branch=workspace.working_branch,
+                        execution_config=execution_config,
                         issue_title=issue.title if issue else None,
                         issue_number=issue.number if issue else None,
                         issue_url=issue.url if issue else None,
@@ -189,6 +243,7 @@ class RunService:
                 repo_full_name=repo.full_name,
                 base_branch=workspace.base_branch,
                 working_branch=workspace.working_branch,
+                execution_config=execution_config,
                 issue_title=issue.title if issue else None,
                 issue_number=issue.number if issue else None,
                 issue_url=issue.url if issue else None,
@@ -357,6 +412,7 @@ class RunService:
         repo_full_name: str,
         base_branch: str,
         working_branch: str,
+        execution_config: WorkspaceExecutionConfigRead,
         issue_title: str | None,
         issue_number: int | None,
         issue_url: str | None,
@@ -375,6 +431,7 @@ class RunService:
             repo_full_name=repo_full_name,
             base_branch=base_branch,
             working_branch=working_branch,
+            execution_config=execution_config,
             issue_title=issue_title,
             issue_number=issue_number,
             issue_url=issue_url,
@@ -412,6 +469,7 @@ class RunService:
         repo_full_name: str,
         base_branch: str,
         working_branch: str,
+        execution_config: WorkspaceExecutionConfigRead,
         issue_title: str | None,
         issue_number: int | None,
         issue_url: str | None,
@@ -445,13 +503,32 @@ class RunService:
                 lines.extend(["", "### Issue Body", issue_body.strip()])
         if payload.task_text:
             lines.extend(["", "## Task Instructions", payload.task_text.strip()])
+        if execution_config.source_path:
+            lines.extend(
+                [
+                    "",
+                    "## Repo Execution Contract",
+                    f"- Source: `{execution_config.source_path}`",
+                    f"- Preferred working directory: `{execution_config.run_working_directory}`",
+                ]
+            )
+            if execution_config.setup_commands:
+                lines.extend(["", "### Repo Setup Commands"])
+                lines.extend(f"- `{command}`" for command in execution_config.setup_commands)
+            if execution_config.check_commands:
+                lines.extend(["", "### Repo Check Commands"])
+                lines.extend(f"- `{command}`" for command in execution_config.check_commands)
         lines.extend(
             [
                 "",
                 "## Constraints",
                 "- Keep changes scoped to the requested task.",
                 "- Prefer minimal, reviewable edits over broad rewrites.",
-                "- Run relevant checks before finishing work.",
+                (
+                    "- Prefer repo execution commands from the config above instead of "
+                    "guessing project bootstrap."
+                ),
+                "- Run the configured repo checks before finishing work.",
                 "- Avoid modifying unrelated files.",
             ]
         )
@@ -528,6 +605,59 @@ class RunService:
             run_id=run_id,
             event_type=event_type.value,
             payload_json=payload,
+        )
+
+    def _append_command_results_event(
+        self,
+        *,
+        run_id,
+        command_results: WorkspaceCommandsRunResponse,
+        success_message: str,
+    ) -> None:
+        """Persist one note event that summarizes repo-scoped command execution."""
+        items = [
+            {
+                "command": item.command,
+                "exit_code": item.exit_code,
+                "succeeded": item.succeeded,
+            }
+            for item in command_results.items
+        ]
+        message = success_message
+        if not command_results.success and command_results.failed_command:
+            message = f"Command batch failed on `{command_results.failed_command}`."
+        self._append_event(
+            run_id=run_id,
+            event_type=RunEventType.NOTE,
+            payload={
+                "message": message,
+                "label": command_results.label,
+                "working_directory": command_results.working_directory,
+                "success": command_results.success,
+                "items": items,
+            },
+        )
+
+    @staticmethod
+    def _build_command_failure_detail(
+        *,
+        phase: str,
+        result: WorkspaceCommandsRunResponse,
+    ) -> str:
+        """Return readable failure detail for a failed repo command batch."""
+        if not result.items:
+            return f"{phase.capitalize()} failed before any command completed."
+
+        failed_item = next((item for item in result.items if not item.succeeded), result.items[-1])
+        detail = failed_item.output.strip()
+        if detail:
+            return (
+                f"{phase.capitalize()} failed on `{failed_item.command}` "
+                f"(exit code {failed_item.exit_code}).\n\n{detail[:1200]}"
+            )
+        return (
+            f"{phase.capitalize()} failed on `{failed_item.command}` "
+            f"(exit code {failed_item.exit_code})."
         )
 
     def _sync_run_with_codex_session(self, run):
@@ -612,6 +742,7 @@ class RunService:
                 message="Cleaning temporary `.codex` files and preparing a git commit.",
             )
             workspace = self.workspace_proxy_service.cleanup_workspace(run.workspace_id)
+            execution_config = self.workspace_proxy_service.get_execution_config(run.workspace_id)
 
             if not workspace.has_changes:
                 return self._complete_run(
@@ -620,6 +751,39 @@ class RunService:
                     message="Codex session completed with no repository changes to commit.",
                 )
 
+            if execution_config.check_commands:
+                run = self._transition_run(
+                    run,
+                    status_value=RunStatus.RUNNING_CHECKS,
+                    message="Running repo check commands before commit and push.",
+                )
+                check_result = self.workspace_proxy_service.run_commands(
+                    run.workspace_id,
+                    WorkspaceCommandsRun(
+                        commands=execution_config.check_commands,
+                        working_directory=execution_config.check_working_directory,
+                        label="repo-checks",
+                    ),
+                )
+                self._append_command_results_event(
+                    run_id=run.id,
+                    command_results=check_result,
+                    success_message="Repo check commands completed successfully.",
+                )
+                if not check_result.success:
+                    return self._fail_run(
+                        run,
+                        detail=self._build_command_failure_detail(
+                            phase="repo checks",
+                            result=check_result,
+                        ),
+                    )
+
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.COMMITTING,
+                message="Creating a git commit from the Codex changes.",
+            )
             workspace = self.workspace_proxy_service.commit_workspace(
                 run.workspace_id,
                 WorkspaceCommit(message=self._build_commit_message(run)),
@@ -630,6 +794,7 @@ class RunService:
                     "working_branch": workspace.working_branch,
                     "workspace_path": workspace.workspace_path,
                     "repo_path": workspace.repo_path,
+                    "summary": session.summary_text or run.summary,
                 },
             )
 

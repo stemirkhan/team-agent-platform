@@ -37,8 +37,10 @@ export type RunStatus =
   | "preparing"
   | "cloning_repo"
   | "materializing_team"
+  | "running_setup"
   | "starting_codex"
   | "running"
+  | "running_checks"
   | "committing"
   | "pushing"
   | "creating_pr"
@@ -172,6 +174,31 @@ export type Run = {
   pr_url: string | null;
   started_at: string | null;
   finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Workspace = {
+  id: string;
+  repo_owner: string;
+  repo_name: string;
+  repo_full_name: string;
+  remote_url: string;
+  workspace_path: string;
+  repo_path: string;
+  base_branch: string;
+  working_branch: string;
+  current_branch: string | null;
+  upstream_branch: string | null;
+  status: "prepared" | "committed" | "pushed" | "pull_request_created";
+  has_changes: boolean;
+  changed_files: string[];
+  last_commit_sha: string | null;
+  last_commit_message: string | null;
+  committed_at: string | null;
+  pushed_at: string | null;
+  pull_request_number: number | null;
+  pull_request_url: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -697,6 +724,22 @@ export async function fetchRun(runId: string, token: string): Promise<Run> {
   }
 
   return json as Run;
+}
+
+export async function fetchWorkspace(workspaceId: string, token: string): Promise<Workspace> {
+  const response = await fetch(`${getApiBaseUrl()}/workspaces/${workspaceId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    cache: "no-store"
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to fetch workspace.");
+  }
+
+  return json as Workspace;
 }
 
 export async function fetchRunEvents(runId: string, token: string): Promise<RunEventListResponse> {

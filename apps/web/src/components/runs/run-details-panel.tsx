@@ -14,7 +14,15 @@ import {
   getAccessToken,
   type AuthUser
 } from "@/lib/auth-client";
-import { cancelRun, fetchRun, fetchRunEvents, type Run, type RunEvent } from "@/lib/api";
+import {
+  cancelRun,
+  fetchRun,
+  fetchRunEvents,
+  fetchWorkspace,
+  type Run,
+  type RunEvent,
+  type Workspace
+} from "@/lib/api";
 import { formatAuthLoading, t, type Locale } from "@/lib/i18n";
 
 type RunDetailsPanelProps = {
@@ -23,6 +31,10 @@ type RunDetailsPanelProps = {
 };
 
 const terminalStatuses = new Set<Run["status"]>(["completed", "failed", "cancelled"]);
+
+function isTemporaryExecutionPath(path: string): boolean {
+  return path === "TASK.md" || path === ".codex" || path.startsWith(".codex/") || path.startsWith("agents/");
+}
 
 function formatTimestamp(locale: Locale, value: string | null): string {
   if (!value) {
@@ -33,6 +45,13 @@ function formatTimestamp(locale: Locale, value: string | null): string {
     dateStyle: "medium",
     timeStyle: "medium"
   });
+}
+
+function formatShortSha(value: string | null): string {
+  if (!value) {
+    return "-";
+  }
+  return value.slice(0, 7);
 }
 
 function extractEventMessage(event: RunEvent, locale: Locale): string {
@@ -114,6 +133,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [run, setRun] = useState<Run | null>(null);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [loadingRun, setLoadingRun] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -171,13 +191,18 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
       fetchRun(runId, token),
       fetchRunEvents(runId, token)
     ]);
+    const workspacePayload = runPayload.workspace_id
+      ? await fetchWorkspace(runPayload.workspace_id, token).catch(() => null)
+      : null;
     setRun(runPayload);
+    setWorkspace(workspacePayload);
     setEvents(eventsPayload.items);
   }, [runId, token]);
 
   useEffect(() => {
     if (!token) {
       setRun(null);
+      setWorkspace(null);
       setEvents([]);
       setLoadingRun(false);
       return;
@@ -248,6 +273,21 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     () => tryExtractNestedMessage(run?.error_message ?? null),
     [run?.error_message]
   );
+  const filteredChangedFiles = useMemo(() => {
+    if (!workspace || !run) {
+      return [];
+    }
+    if (terminalStatuses.has(run.status)) {
+      return workspace.changed_files;
+    }
+    return workspace.changed_files.filter((path) => !isTemporaryExecutionPath(path));
+  }, [run, workspace]);
+  const hiddenTemporaryFilesCount = useMemo(() => {
+    if (!workspace || !run || terminalStatuses.has(run.status)) {
+      return 0;
+    }
+    return workspace.changed_files.filter((path) => isTemporaryExecutionPath(path)).length;
+  }, [run, workspace]);
 
   async function onCancel() {
     if (!token || !run) {
@@ -473,6 +513,105 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
           )}
         </div>
       </div>
+
+      {workspace ? (
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20">
+          <h2 className="mb-4 text-xl font-black text-slate-900 dark:text-slate-50">
+            {t(locale, { ru: "SCM результат", en: "SCM result" })}
+          </h2>
+          <div className="grid gap-4 text-sm text-slate-600 dark:text-slate-300 md:grid-cols-2">
+            <p>
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {t(locale, { ru: "Статус workspace:", en: "Workspace status:" })}
+              </span>{" "}
+              {workspace.status}
+            </p>
+            <p>
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {t(locale, { ru: "Текущая ветка:", en: "Current branch:" })}
+              </span>{" "}
+              {workspace.current_branch ?? "-"}
+            </p>
+            <p>
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {t(locale, { ru: "Последний commit:", en: "Last commit:" })}
+              </span>{" "}
+              <code className="text-xs">{formatShortSha(workspace.last_commit_sha)}</code>
+            </p>
+            <p>
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {t(locale, { ru: "Commit time:", en: "Commit time:" })}
+              </span>{" "}
+              {formatTimestamp(locale, workspace.committed_at)}
+            </p>
+            <p>
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {t(locale, { ru: "Push time:", en: "Push time:" })}
+              </span>{" "}
+              {formatTimestamp(locale, workspace.pushed_at)}
+            </p>
+            <p>
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {t(locale, { ru: "Pull request:", en: "Pull request:" })}
+              </span>{" "}
+              {workspace.pull_request_number ? `#${workspace.pull_request_number}` : "-"}
+            </p>
+            {workspace.last_commit_message ? (
+              <div className="md:col-span-2">
+                <span className="font-semibold text-slate-900 dark:text-slate-100">
+                  {t(locale, { ru: "Commit message:", en: "Commit message:" })}
+                </span>{" "}
+                <span>{workspace.last_commit_message}</span>
+              </div>
+            ) : null}
+            {workspace.pull_request_url ? (
+              <div className="md:col-span-2">
+                <a
+                  className="inline-flex items-center gap-2 font-semibold text-brand-700 hover:text-brand-800 dark:text-brand-300 dark:hover:text-brand-200"
+                  href={workspace.pull_request_url}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  {t(locale, { ru: "Открыть draft PR", en: "Open draft PR" })}
+                </a>
+              </div>
+            ) : null}
+            <div className="md:col-span-2">
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {t(locale, {
+                  ru: terminalStatuses.has(run.status)
+                    ? "Tracked changes after run:"
+                    : "Текущие tracked changes:",
+                  en: terminalStatuses.has(run.status)
+                    ? "Tracked changes after run:"
+                    : "Current tracked changes:"
+                })}
+              </span>{" "}
+              {filteredChangedFiles.length > 0 ? (
+                <span>{filteredChangedFiles.join(", ")}</span>
+              ) : (
+                <span>
+                  {workspace.has_changes && !terminalStatuses.has(run.status)
+                    ? t(locale, {
+                        ru: "пока виден только временный execution scaffolding",
+                        en: "only temporary execution scaffolding is visible right now"
+                      })
+                    : t(locale, { ru: "рабочее дерево чистое", en: "worktree is clean" })}
+                </span>
+              )}
+            </div>
+            {hiddenTemporaryFilesCount > 0 ? (
+              <div className="md:col-span-2 text-xs text-slate-500 dark:text-slate-400">
+                {t(locale, {
+                  ru: `Временные execution-файлы скрыты из этого блока до завершения run: ${hiddenTemporaryFilesCount}.`,
+                  en: `Temporary execution files are hidden from this block until the run finishes: ${hiddenTemporaryFilesCount}.`
+                })}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <RunTerminalPanel locale={locale} runId={run.id} runStatus={run.status} token={token!} />
     </section>

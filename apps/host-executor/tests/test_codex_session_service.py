@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
-from host_executor_app.schemas.codex import CodexTerminalChunk
+from host_executor_app.schemas.codex import CodexSessionStart, CodexTerminalChunk
 from host_executor_app.services import workspace_service as workspace_service_module
 from host_executor_app.services.codex_session_service import CodexSessionService
 
@@ -63,3 +64,25 @@ def test_get_session_recovers_persisted_running_session_as_failed(tmp_path, monk
     events = service.get_events("run-1", offset=0)
     assert len(events.items) == 1
     assert events.items[0].text == '{"type":"turn.started"}\n'
+
+
+def test_build_command_enables_colorized_terminal_output(tmp_path, monkeypatch) -> None:
+    """Codex sessions should keep ANSI colors enabled for the live terminal."""
+    monkeypatch.setattr(
+        workspace_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=str(tmp_path / "workspaces")),
+    )
+    service = CodexSessionService()
+
+    command = service._build_command(
+        repo_path=Path("/tmp/repo"),
+        payload=CodexSessionStart(
+            run_id="run-color",
+            workspace_id="ws-color",
+            prompt_text="Run a color smoke test.",
+        ),
+    )
+
+    color_index = command.index("--color")
+    assert command[color_index + 1] == "always"

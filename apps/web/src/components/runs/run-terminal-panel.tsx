@@ -66,6 +66,13 @@ function normalizeTerminalText(value: string): string {
   return value.replace(/\r?\n/g, "\r\n");
 }
 
+function isIgnorableCodexWarning(line: string): boolean {
+  return (
+    line.includes("WARN codex_core::shell_snapshot: Failed to delete shell snapshot") ||
+    line.includes("WARN codex_core::file_watcher: failed to unwatch")
+  );
+}
+
 function stringifyUnknown(value: unknown): string | null {
   if (typeof value === "string") {
     const normalized = value.trim();
@@ -104,6 +111,10 @@ function extractNestedMessage(value: unknown): string | null {
 }
 
 function renderCodexJsonLine(line: string, locale: Locale): string | null {
+  if (isIgnorableCodexWarning(line)) {
+    return null;
+  }
+
   if (!line.trim().startsWith("{")) {
     return normalizeTerminalText(`${line}\n`);
   }

@@ -167,6 +167,33 @@ codex login status
 - `codex` установлен и уже авторизован под пользователем;
 - host executor запускается в том же user-context, где доступны эти CLI-сессии.
 
+## Repo Execution Config
+
+Для стабилизации run flow репозиторий может хранить `.team-agent-platform.toml` в корне.
+
+Минимальный контракт:
+
+```toml
+[run]
+working_directory = "."
+
+[setup]
+commands = [
+  "cd apps/backend && .venv/bin/python -m pip install -e '.[dev]'",
+]
+
+[checks]
+commands = [
+  "cd apps/backend && .venv/bin/python -m pytest -q",
+]
+```
+
+Что делает платформа:
+- читает config после clone;
+- запускает `setup.commands` до старта Codex;
+- встраивает `checks.commands` в `TASK.md`;
+- запускает `checks.commands` после Codex и до `commit -> push -> draft PR`.
+
 ## Host Executor
 
 Текущая архитектура:
@@ -174,10 +201,6 @@ codex login status
 - `host executor` на `127.0.0.1:8765` — это execution layer;
 - backend ходит к нему по `HOST_EXECUTOR_BASE_URL`;
 - в compose по умолчанию используется `http://host.containers.internal:8765`.
-
-Диагностика теперь показывает два слоя:
-- `Backend Context`
-- `Host Executor`
 
 Если `Host Executor` не поднят, `/diagnostics` честно покажет, что execution source недоступен, даже если сам backend жив.
 

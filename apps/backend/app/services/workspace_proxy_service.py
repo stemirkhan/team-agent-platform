@@ -10,7 +10,10 @@ from urllib.request import Request, urlopen
 
 from app.core.config import Settings
 from app.schemas.workspace import (
+    WorkspaceCommandsRun,
+    WorkspaceCommandsRunResponse,
     WorkspaceCommit,
+    WorkspaceExecutionConfigRead,
     WorkspaceListResponse,
     WorkspaceMaterialize,
     WorkspacePrepare,
@@ -18,7 +21,13 @@ from app.schemas.workspace import (
     WorkspaceRead,
 )
 
-SchemaModel = TypeVar("SchemaModel", WorkspaceRead, WorkspaceListResponse)
+SchemaModel = TypeVar(
+    "SchemaModel",
+    WorkspaceRead,
+    WorkspaceListResponse,
+    WorkspaceExecutionConfigRead,
+    WorkspaceCommandsRunResponse,
+)
 
 
 class WorkspaceProxyServiceError(Exception):
@@ -51,6 +60,11 @@ class WorkspaceProxyService:
         data = self._request_json(f"workspaces/{workspace_id}")
         return self._validate(data, WorkspaceRead, "workspace")
 
+    def get_execution_config(self, workspace_id: str) -> WorkspaceExecutionConfigRead:
+        """Return repo-level execution config from the host executor bridge."""
+        data = self._request_json(f"workspaces/{workspace_id}/execution-config")
+        return self._validate(data, WorkspaceExecutionConfigRead, "workspace execution config")
+
     def commit_workspace(self, workspace_id: str, payload: WorkspaceCommit) -> WorkspaceRead:
         """Commit a workspace through the host executor bridge."""
         data = self._request_json(
@@ -77,6 +91,19 @@ class WorkspaceProxyService:
         """Restore or delete temporary run scaffolding inside a workspace."""
         data = self._request_json(f"workspaces/{workspace_id}/cleanup", method="POST")
         return self._validate(data, WorkspaceRead, "workspace")
+
+    def run_commands(
+        self,
+        workspace_id: str,
+        payload: WorkspaceCommandsRun,
+    ) -> WorkspaceCommandsRunResponse:
+        """Run sequential shell commands inside one workspace through the host executor."""
+        data = self._request_json(
+            f"workspaces/{workspace_id}/commands",
+            method="POST",
+            body=payload.model_dump(),
+        )
+        return self._validate(data, WorkspaceCommandsRunResponse, "workspace command execution")
 
     def push_workspace(self, workspace_id: str) -> WorkspaceRead:
         """Push a workspace through the host executor bridge."""

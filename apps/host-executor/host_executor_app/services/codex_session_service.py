@@ -187,7 +187,7 @@ class CodexSessionService:
             "exec",
             "--json",
             "--color",
-            "never",
+            "always",
             "--cd",
             str(repo_path),
             "--sandbox",
@@ -218,6 +218,12 @@ class CodexSessionService:
         master_fd, slave_fd = pty.openpty()
         env = os.environ.copy()
         env["CODEX_HOME"] = str(codex_home)
+        env.setdefault("TERM", "xterm-256color")
+        env.setdefault("COLORTERM", "truecolor")
+        env["CLICOLOR"] = "1"
+        env["CLICOLOR_FORCE"] = "1"
+        env["FORCE_COLOR"] = "1"
+        env["PY_COLORS"] = "1"
         try:
             process = subprocess.Popen(
                 command,
