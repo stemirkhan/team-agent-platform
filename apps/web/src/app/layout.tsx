@@ -83,7 +83,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               </div>
             </div>
           </header>
-          <main className="flex-1 pb-8">{children}</main>
+          <main className="flex-1 pb-8">
+            <div className="mx-auto w-full max-w-[1360px] px-1 sm:px-2 lg:px-4">{children}</div>
+          </main>
           <footer className="mt-6 border-t border-slate-200 dark:border-zinc-700/80 py-4 text-xs text-slate-500 dark:text-slate-400">
             {t(locale, {
               ru: "Team Agent Platform: local-first Codex execution поверх GitHub-репозиториев",
