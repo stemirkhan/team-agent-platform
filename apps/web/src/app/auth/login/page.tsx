@@ -4,5 +4,9 @@ import { getRequestLocale } from "@/lib/i18n.server";
 export default function LoginPage() {
   const locale = getRequestLocale();
 
-  return <LoginForm locale={locale} />;
+  return (
+    <section className="mx-auto w-full max-w-6xl">
+      <LoginForm locale={locale} />
+    </section>
+  );
 }
