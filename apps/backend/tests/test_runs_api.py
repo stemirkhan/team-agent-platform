@@ -474,6 +474,18 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
             check_commands=["make compose-config"],
         ),
     )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_workspace",
+        lambda self, workspace_id: _workspace().model_copy(
+            update={
+                "status": "pull_request_created",
+                "last_commit_sha": "abcdef1234567890",
+                "pull_request_number": 42,
+                "pull_request_url": "https://github.com/stemirkhan/team-agent-platform/pull/42",
+            }
+        ),
+    )
     scm_calls: list[str] = []
     monkeypatch.setattr(
         WorkspaceProxyService,
@@ -511,6 +523,7 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
                 "status": "committed",
                 "has_changes": False,
                 "changed_files": [],
+                "last_commit_sha": "abcdef1234567890",
                 "last_commit_message": payload.message,
             }
         ),
@@ -613,6 +626,22 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
     assert get_response.json()["summary"] == "Codex finished successfully."
     assert (
         get_response.json()["pr_url"]
+        == "https://github.com/stemirkhan/team-agent-platform/pull/42"
+    )
+    report = get_response.json()["run_report"]
+    assert report is not None
+    phases = {item["key"]: item for item in report["phases"]}
+    assert phases["preparation"]["status"] == "completed"
+    assert phases["setup"]["status"] == "not_available"
+    assert phases["codex"]["status"] == "completed"
+    assert phases["checks"]["status"] == "completed"
+    assert phases["checks"]["commands"][0]["command"] == "make compose-config"
+    assert phases["checks"]["commands"][0]["output"] == "ok"
+    assert phases["git_pr"]["status"] == "completed"
+    assert phases["git_pr"]["meta"]["working_branch"] == "tap/team-agent-platform/demo-branch"
+    assert phases["git_pr"]["meta"]["commit_sha"] == "abcdef1234567890"
+    assert (
+        phases["git_pr"]["meta"]["pr_url"]
         == "https://github.com/stemirkhan/team-agent-platform/pull/42"
     )
     assert scm_calls[0] == "cleanup"

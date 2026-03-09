@@ -17,7 +17,15 @@ from app.repositories.run import RunRepository
 from app.repositories.team import TeamRepository
 from app.schemas.codex import CodexSessionEventsResponse, CodexSessionRead, CodexSessionStart
 from app.schemas.export import CodexExportOptions
-from app.schemas.run import RunCreate, RunEventListResponse, RunListResponse
+from app.schemas.run import (
+    RunCreate,
+    RunEventListResponse,
+    RunListResponse,
+    RunReportCommandRead,
+    RunReportPhaseRead,
+    RunReportPhaseStatus,
+    RunReportRead,
+)
 from app.schemas.workspace import (
     WorkspaceCommandsRun,
     WorkspaceCommandsRunResponse,
@@ -27,6 +35,7 @@ from app.schemas.workspace import (
     WorkspaceMaterialize,
     WorkspacePrepare,
     WorkspacePullRequestCreate,
+    WorkspaceRead,
 )
 from app.services.codex_proxy_service import CodexProxyService, CodexProxyServiceError
 from app.services.export_service import ExportService
@@ -300,7 +309,9 @@ class RunService:
         if run is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
         self._ensure_owner(run.created_by, current_user.id)
-        return self._sync_run_with_codex_session(run)
+        run = self._sync_run_with_codex_session(run)
+        run.run_report = self._build_run_report(run)
+        return run
 
     def list_run_events(self, run_id, current_user: User) -> RunEventListResponse:
         """Return ordered run events for one run owned by the current user."""
@@ -620,6 +631,9 @@ class RunService:
                 "command": item.command,
                 "exit_code": item.exit_code,
                 "succeeded": item.succeeded,
+                "output": item.output,
+                "started_at": item.started_at,
+                "finished_at": item.finished_at,
             }
             for item in command_results.items
         ]
@@ -911,6 +925,225 @@ class RunService:
         )
         body = "\n".join(lines).strip()
         return body[:19_500]
+
+    def _build_run_report(self, run) -> RunReportRead:
+        """Build a phase-oriented run report from structured events and workspace metadata."""
+        events = self.run_repository.list_events(run_id=run.id)
+        workspace = self._try_get_workspace(run.workspace_id)
+
+        phases: dict[str, RunReportPhaseRead] = {
+            "preparation": RunReportPhaseRead(
+                key="preparation",
+                order=1,
+                status="not_started",
+                description="Workspace and task scaffolding preparation.",
+            ),
+            "setup": RunReportPhaseRead(
+                key="setup",
+                order=2,
+                status="not_started",
+                description="Repository setup commands from execution config.",
+            ),
+            "codex": RunReportPhaseRead(
+                key="codex",
+                order=3,
+                status="not_started",
+                description="Host-side Codex terminal execution.",
+            ),
+            "checks": RunReportPhaseRead(
+                key="checks",
+                order=4,
+                status="not_started",
+                description="Repository check commands before commit and push.",
+            ),
+            "git_pr": RunReportPhaseRead(
+                key="git_pr",
+                order=5,
+                status="not_started",
+                description="Commit, push, and draft pull request finalization.",
+            ),
+        }
+
+        setup_available = False
+        checks_available = False
+        failure_phase = self._resolve_failure_phase(events)
+
+        for event in events:
+            payload = event.payload_json or {}
+            if event.event_type == RunEventType.STATUS.value:
+                status_value = payload.get("status") if isinstance(payload, dict) else None
+                if not isinstance(status_value, str):
+                    continue
+                phase_key = self._status_to_phase(status_value)
+                if phase_key is None:
+                    continue
+                phase = phases[phase_key]
+                phase.first_event_at = phase.first_event_at or event.created_at
+                phase.last_event_at = event.created_at
+                message = payload.get("message") if isinstance(payload, dict) else None
+                if isinstance(message, str) and message.strip():
+                    phase.description = message.strip()
+            elif event.event_type == RunEventType.NOTE.value and isinstance(payload, dict):
+                label = payload.get("label")
+                commands = payload.get("items")
+                config = payload.get("config")
+
+                if isinstance(config, dict):
+                    setup_commands = config.get("setup_commands")
+                    check_commands = config.get("check_commands")
+                    setup_available = isinstance(setup_commands, list) and len(setup_commands) > 0
+                    checks_available = isinstance(check_commands, list) and len(check_commands) > 0
+
+                if label == "repo-setup":
+                    phase = phases["setup"]
+                    phase.first_event_at = phase.first_event_at or event.created_at
+                    phase.last_event_at = event.created_at
+                    phase.commands = self._parse_report_commands(commands)
+                    setup_available = True
+                if label == "repo-checks":
+                    phase = phases["checks"]
+                    phase.first_event_at = phase.first_event_at or event.created_at
+                    phase.last_event_at = event.created_at
+                    phase.commands = self._parse_report_commands(commands)
+                    checks_available = True
+
+        for key, phase in phases.items():
+            phase.status = self._resolve_phase_status(
+                phase_key=key,
+                run_status=run.status,
+                has_events=phase.first_event_at is not None,
+                failure_phase=failure_phase,
+                setup_available=setup_available,
+                checks_available=checks_available,
+            )
+
+        git_phase = phases["git_pr"]
+        git_phase.meta = {
+            "working_branch": run.working_branch,
+            "commit_sha": workspace.last_commit_sha if workspace is not None else None,
+            "pr_url": run.pr_url or (workspace.pull_request_url if workspace is not None else None),
+        }
+
+        return RunReportRead(phases=sorted(phases.values(), key=lambda item: item.order))
+
+    def _try_get_workspace(self, workspace_id: str | None) -> WorkspaceRead | None:
+        """Best-effort workspace snapshot lookup for structured run reporting."""
+        if not workspace_id:
+            return None
+        try:
+            return self.workspace_proxy_service.get_workspace(workspace_id)
+        except WorkspaceProxyServiceError:
+            return None
+
+    @staticmethod
+    def _status_to_phase(status_value: str) -> str | None:
+        """Map run status values to run report phase keys."""
+        mapping = {
+            RunStatus.PREPARING.value: "preparation",
+            RunStatus.CLONING_REPO.value: "preparation",
+            RunStatus.MATERIALIZING_TEAM.value: "preparation",
+            RunStatus.RUNNING_SETUP.value: "setup",
+            RunStatus.STARTING_CODEX.value: "codex",
+            RunStatus.RUNNING.value: "codex",
+            RunStatus.RUNNING_CHECKS.value: "checks",
+            RunStatus.COMMITTING.value: "git_pr",
+            RunStatus.PUSHING.value: "git_pr",
+            RunStatus.CREATING_PR.value: "git_pr",
+            RunStatus.COMPLETED.value: "git_pr",
+        }
+        return mapping.get(status_value)
+
+    def _resolve_failure_phase(self, events) -> str | None:
+        """Determine which phase failed/cancelled based on the latest status transition."""
+        last_phase: str | None = None
+        for event in events:
+            if event.event_type != RunEventType.STATUS.value:
+                continue
+            payload = event.payload_json or {}
+            status_value = payload.get("status") if isinstance(payload, dict) else None
+            if not isinstance(status_value, str):
+                continue
+            if status_value in {RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
+                return last_phase
+            phase = self._status_to_phase(status_value)
+            if phase is not None:
+                last_phase = phase
+        return None
+
+    @staticmethod
+    def _parse_report_commands(items: object) -> list[RunReportCommandRead]:
+        """Convert note payload command entries into report command records."""
+        if not isinstance(items, list):
+            return []
+        parsed: list[RunReportCommandRead] = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            command = raw.get("command")
+            exit_code = raw.get("exit_code")
+            succeeded = raw.get("succeeded")
+            if not isinstance(command, str) or not isinstance(exit_code, int):
+                continue
+            if not isinstance(succeeded, bool):
+                succeeded = exit_code == 0
+            output = raw.get("output") if isinstance(raw.get("output"), str) else None
+            started_at = raw.get("started_at") if isinstance(raw.get("started_at"), str) else None
+            finished_raw = raw.get("finished_at")
+            finished_at = finished_raw if isinstance(finished_raw, str) else None
+            parsed.append(
+                RunReportCommandRead(
+                    command=command,
+                    exit_code=exit_code,
+                    succeeded=succeeded,
+                    output=output[:4000] if output else None,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                )
+            )
+        return parsed
+
+    def _resolve_phase_status(
+        self,
+        *,
+        phase_key: str,
+        run_status: str,
+        has_events: bool,
+        failure_phase: str | None,
+        setup_available: bool,
+        checks_available: bool,
+    ) -> RunReportPhaseStatus:
+        """Compute one report-phase status from run state and event history."""
+        if phase_key == "setup" and not setup_available and not has_events:
+            return "not_available"
+        if phase_key == "checks" and not checks_available and not has_events:
+            return "not_available"
+
+        run_phase = self._status_to_phase(run_status)
+
+        if run_status == RunStatus.CANCELLED.value:
+            if failure_phase == phase_key:
+                return "cancelled"
+            if has_events:
+                return "completed"
+            return "not_started"
+
+        if run_status == RunStatus.FAILED.value:
+            if failure_phase == phase_key:
+                return "failed"
+            if has_events:
+                return "completed"
+            return "not_started"
+
+        if run_status == RunStatus.COMPLETED.value:
+            if has_events or phase_key in {"setup", "checks"}:
+                return "completed"
+            return "not_started"
+
+        if run_phase == phase_key:
+            return "running"
+        if has_events:
+            return "completed"
+        return "not_started"
 
     @staticmethod
     def _ensure_owner(owner_id, current_user_id) -> None:

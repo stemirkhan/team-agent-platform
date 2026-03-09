@@ -33,6 +33,47 @@ class RunCreate(BaseModel):
         return self
 
 
+RunReportPhaseKey = Literal["preparation", "setup", "codex", "checks", "git_pr"]
+RunReportPhaseStatus = Literal[
+    "not_started",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "not_available",
+]
+
+
+class RunReportCommandRead(BaseModel):
+    """One command execution record for setup/check phases."""
+
+    command: str
+    exit_code: int
+    succeeded: bool
+    output: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+class RunReportPhaseRead(BaseModel):
+    """Structured phase-level snapshot for one run."""
+
+    key: RunReportPhaseKey
+    order: int
+    status: RunReportPhaseStatus
+    description: str | None = None
+    first_event_at: datetime | None = None
+    last_event_at: datetime | None = None
+    commands: list[RunReportCommandRead] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunReportRead(BaseModel):
+    """Top-level structured report grouped by execution phases."""
+
+    phases: list[RunReportPhaseRead] = Field(default_factory=list)
+
+
 class RunRead(BaseModel):
     """Serialized run payload."""
 
@@ -65,6 +106,7 @@ class RunRead(BaseModel):
     finished_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    run_report: RunReportRead | None = None
 
 
 class RunListResponse(BaseModel):

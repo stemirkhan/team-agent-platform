@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { RunStatusBadge } from "@/components/runs/run-status-badge";
 import { RunTerminalPanel } from "@/components/runs/run-terminal-panel";
+import { RunReportPanel } from "@/components/runs/run-report-panel";
 import { Button } from "@/components/ui/button";
 import {
   clearAccessToken,
@@ -612,6 +613,8 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
           </div>
         </div>
       ) : null}
+
+      <RunReportPanel locale={locale} report={run.run_report} />
 
       <RunTerminalPanel locale={locale} runId={run.id} runStatus={run.status} token={token!} />
     </section>
