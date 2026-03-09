@@ -176,6 +176,7 @@ export type Run = {
   finished_at: string | null;
   created_at: string;
   updated_at: string;
+  run_report: RunReport | null;
 };
 
 export type Workspace = {
@@ -209,6 +210,39 @@ export type RunEvent = {
   event_type: RunEventType;
   payload_json: Record<string, unknown> | null;
   created_at: string;
+};
+
+export type RunReportPhaseKey = "preparation" | "setup" | "codex" | "checks" | "git_pr";
+export type RunReportPhaseStatus =
+  | "not_started"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "not_available";
+
+export type RunReportCommand = {
+  command: string;
+  exit_code: number;
+  succeeded: boolean;
+  output: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type RunReportPhase = {
+  key: RunReportPhaseKey;
+  order: number;
+  status: RunReportPhaseStatus;
+  description: string | null;
+  first_event_at: string | null;
+  last_event_at: string | null;
+  commands: RunReportCommand[];
+  meta: Record<string, unknown>;
+};
+
+export type RunReport = {
+  phases: RunReportPhase[];
 };
 
 export type RunListResponse = {
