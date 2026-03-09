@@ -13,6 +13,8 @@ Always read these files first before making meaningful changes:
 1. `docs/TZ.md`
 2. `docs/PRD.md`
 
+After that, check `memory/` and open only the memory file whose filename best matches the current task/topic to avoid loading unrelated context.
+
 If there is a conflict:
 - prefer `docs/TZ.md`
 - then use `docs/PRD.md`
