@@ -1,6 +1,7 @@
 import { Activity } from "lucide-react";
 
 import { HostDiagnosticsPanel } from "@/components/diagnostics/host-diagnostics-panel";
+import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
 import { fetchHostReadiness } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { getRequestLocale } from "@/lib/i18n.server";
@@ -23,7 +24,7 @@ export default async function DiagnosticsPage() {
   }
 
   return (
-    <section className="space-y-6">
+    <ExecutionPageContainer>
       <div>
         <h1 className="mb-2 flex items-center gap-3 text-3xl font-black text-slate-900 dark:text-slate-50">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-brand-100 text-brand-700 ring-1 ring-brand-200 dark:bg-zinc-800 dark:text-slate-200 dark:ring-zinc-700">
@@ -44,6 +45,6 @@ export default async function DiagnosticsPage() {
         initialSnapshot={initialSnapshot}
         locale={locale}
       />
-    </section>
+    </ExecutionPageContainer>
   );
 }

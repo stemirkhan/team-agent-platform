@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, PlaySquare } from "lucide-react";
 
+import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
 import { RunDetailsPanel } from "@/components/runs/run-details-panel";
 import { t } from "@/lib/i18n";
 import { getRequestLocale } from "@/lib/i18n.server";
@@ -9,7 +10,7 @@ export default function RunDetailsPage({ params }: { params: { id: string } }) {
   const locale = getRequestLocale();
 
   return (
-    <section className="space-y-6">
+    <ExecutionPageContainer>
       <div className="space-y-3">
         <Link
           className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-800 dark:text-brand-300 dark:hover:text-brand-200"
@@ -27,6 +28,6 @@ export default function RunDetailsPage({ params }: { params: { id: string } }) {
       </div>
 
       <RunDetailsPanel locale={locale} runId={params.id} />
-    </section>
+    </ExecutionPageContainer>
   );
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ExternalLink, FolderGit2, GitBranch, Search } from "lucide-react";
 
+import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
 import { fetchGitHubRepos } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { getRequestLocale } from "@/lib/i18n.server";
@@ -41,7 +42,7 @@ export default async function ReposPage({
   }
 
   return (
-    <section className="space-y-6">
+    <ExecutionPageContainer>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="mb-2 flex items-center gap-3 text-3xl font-black text-slate-900 dark:text-slate-50">
@@ -163,6 +164,6 @@ export default async function ReposPage({
           ))}
         </div>
       ) : null}
-    </section>
+    </ExecutionPageContainer>
   );
 }
