@@ -16,7 +16,7 @@ export default async function TeamDetailsPage({ params }: { params: { slug: stri
     const team = await fetchTeam(params.slug);
 
     return (
-      <section className="w-full space-y-6">
+      <section className="mx-auto w-full max-w-6xl space-y-6">
         <Link className="mb-4 inline-flex text-sm font-semibold text-brand-700 hover:text-brand-900 dark:text-slate-200 dark:hover:text-white" href="/teams">
           &larr; {t(locale, { ru: "Назад к командам", en: "Back to teams" })}
         </Link>
