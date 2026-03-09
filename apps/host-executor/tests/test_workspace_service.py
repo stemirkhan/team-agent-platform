@@ -89,6 +89,71 @@ def test_cleanup_materialized_files_restores_original_repo_state(tmp_path, monke
     assert not (repo_dir / "TASK.md").exists()
 
 
+def test_cleanup_materialized_files_tolerates_missing_generated_file(tmp_path, monkeypatch) -> None:
+    """Cleanup should not fail if Codex already removed one generated file."""
+    monkeypatch.setattr(
+        workspace_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=str(tmp_path)),
+    )
+    service = WorkspaceService()
+
+    workspace_dir = tmp_path / "ws-missing"
+    repo_dir = workspace_dir / "repo"
+    repo_dir.mkdir(parents=True)
+    _init_git_repo(repo_dir)
+
+    metadata = WorkspaceRead(
+        id="ws-missing",
+        repo_owner="stemirkhan",
+        repo_name="team-agent-platform",
+        repo_full_name="stemirkhan/team-agent-platform",
+        remote_url="https://github.com/stemirkhan/team-agent-platform.git",
+        workspace_path=str(workspace_dir),
+        repo_path=str(repo_dir),
+        base_branch="main",
+        working_branch="tap/demo",
+        current_branch="tap/demo",
+        status="prepared",
+        created_at="2026-03-09T10:00:00Z",
+        updated_at="2026-03-09T10:00:00Z",
+    )
+    service._save_workspace(metadata)
+
+    service.materialize_workspace(
+        "ws-missing",
+        WorkspaceMaterialize(
+            files=[
+                {
+                    "path": (
+                        "agents/backend-platform-engineer/"
+                        "playbooks/backend-platform-checklist.md"
+                    ),
+                    "content": "# Checklist\n",
+                },
+                {
+                    "path": "TASK.md",
+                    "content": "# Task\n",
+                },
+            ]
+        ),
+    )
+
+    generated_skill = (
+        repo_dir
+        / "agents"
+        / "backend-platform-engineer"
+        / "playbooks"
+        / "backend-platform-checklist.md"
+    )
+    generated_skill.unlink()
+
+    cleaned = service.cleanup_materialized_files("ws-missing")
+    assert cleaned.has_changes is False
+    assert cleaned.changed_files == []
+    assert not (repo_dir / "TASK.md").exists()
+
+
 def test_load_execution_config_reads_repo_contract(tmp_path, monkeypatch) -> None:
     """Repo-level TOML config should be normalized for one workspace."""
     monkeypatch.setattr(

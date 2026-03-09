@@ -296,7 +296,7 @@ class WorkspaceService:
                 continue
 
             if target_path.exists():
-                target_path.unlink()
+                target_path.unlink(missing_ok=True)
                 self._prune_empty_directories(target_path.parent, stop_at=repo_dir.resolve())
 
         self._delete_materialized_state(metadata)

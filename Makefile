@@ -19,7 +19,16 @@ ps:
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) ps
 
 compose-config: ensure-env
-	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) config
+	@if command -v docker >/dev/null 2>&1; then \
+		docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) config; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+		XDG_DATA_HOME=$${XDG_DATA_HOME:-$$HOME/.local/share} podman-compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) config; \
+	elif command -v podman >/dev/null 2>&1; then \
+		XDG_DATA_HOME=$${XDG_DATA_HOME:-$$HOME/.local/share} podman compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) config; \
+	else \
+		echo "No supported compose provider found. Install docker, podman-compose, or podman." >&2; \
+		exit 127; \
+	fi
 
 backend-lint:
 	cd apps/backend && python3 -m ruff check app tests

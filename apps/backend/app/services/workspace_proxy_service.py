@@ -102,6 +102,7 @@ class WorkspaceProxyService:
             f"workspaces/{workspace_id}/commands",
             method="POST",
             body=payload.model_dump(),
+            timeout=self.settings.host_executor_workspace_command_timeout_seconds,
         )
         return self._validate(data, WorkspaceCommandsRunResponse, "workspace command execution")
 
@@ -134,6 +135,7 @@ class WorkspaceProxyService:
         method: str = "GET",
         body: dict[str, object] | None = None,
         expect_json: bool = True,
+        timeout: float | None = None,
     ) -> Any:
         """Request JSON from the host executor bridge."""
         base_url = self._normalize_base_url(self.settings.host_executor_base_url)
@@ -155,7 +157,11 @@ class WorkspaceProxyService:
         try:
             with urlopen(
                 request,
-                timeout=self.settings.host_executor_api_timeout_seconds,
+                timeout=(
+                    timeout
+                    if timeout is not None
+                    else self.settings.host_executor_api_timeout_seconds
+                ),
             ) as response:
                 response_payload = response.read().decode("utf-8")
         except HTTPError as exc:

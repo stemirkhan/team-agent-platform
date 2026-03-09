@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     host_executor_base_url: str | None = None
     host_executor_timeout_seconds: float = 2.5
     host_executor_api_timeout_seconds: float = 15.0
+    host_executor_workspace_command_timeout_seconds: float = 1800.0
     jwt_secret_key: str = "dev-secret-key-change-me-at-least-32-chars"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60 * 24
