@@ -9,6 +9,7 @@ import {
   PlaySquare
 } from "lucide-react";
 
+import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
 import {
   fetchGitHubRepo,
   fetchGitHubRepoIssues,
@@ -116,7 +117,7 @@ export default async function RepoDetailsPage({
 
   if (repoError || !repo) {
     return (
-      <section className="space-y-6">
+      <ExecutionPageContainer>
         <Link
           className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-800 dark:text-brand-300 dark:hover:text-brand-200"
           href="/repos"
@@ -127,12 +128,12 @@ export default async function RepoDetailsPage({
         <div className="rounded-3xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-200">
           {repoError}
         </div>
-      </section>
+      </ExecutionPageContainer>
     );
   }
 
   return (
-    <section className="space-y-6">
+    <ExecutionPageContainer>
       <div className="space-y-3">
         <Link
           className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-800 dark:text-brand-300 dark:hover:text-brand-200"
@@ -431,6 +432,6 @@ export default async function RepoDetailsPage({
           </div>
         ) : null}
       </div>
-    </section>
+    </ExecutionPageContainer>
   );
 }

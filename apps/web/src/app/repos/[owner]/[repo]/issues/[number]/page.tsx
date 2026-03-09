@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink, MessageSquareText, PlaySquare } from "lucide-react";
 
 import { GitHubIssueTrackerPanel } from "@/components/github/github-issue-tracker-panel";
+import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
 import { fetchGitHubIssue, fetchGitHubRepo } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { getRequestLocale } from "@/lib/i18n.server";
@@ -34,7 +35,7 @@ export default async function RepoIssuePage({
   }
 
   return (
-    <section className="space-y-6">
+    <ExecutionPageContainer>
       <Link
         className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-800 dark:text-brand-300 dark:hover:text-brand-200"
         href={`/repos/${encodeURIComponent(params.owner)}/${encodeURIComponent(params.repo)}`}
@@ -111,6 +112,6 @@ export default async function RepoIssuePage({
           />
         </>
       )}
-    </section>
+    </ExecutionPageContainer>
   );
 }
