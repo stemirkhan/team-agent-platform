@@ -15,7 +15,7 @@ class CodexExportOptions(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     model: str | None = Field(default=None, min_length=1, max_length=128)
-    model_reasoning_effort: Literal["low", "medium", "high"] | None = None
+    model_reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None
     sandbox_mode: Literal["read-only", "workspace-write", "danger-full-access"] | None = None
 
     def to_query_params(self) -> dict[str, str]:

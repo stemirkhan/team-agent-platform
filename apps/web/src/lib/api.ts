@@ -20,7 +20,7 @@ export type Agent = {
 };
 
 export type RuntimeTarget = "codex";
-export type CodexReasoningEffort = "low" | "medium" | "high";
+export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type HostToolStatus = "ready" | "missing" | "outdated" | "not_authenticated" | "error";
 export type HostExecutionSource = "host_executor";
@@ -308,6 +308,18 @@ export type GitHubRepoListResponse = {
   limit: number;
 };
 
+export type GitHubBranch = {
+  name: string;
+  is_default: boolean;
+  is_protected: boolean;
+};
+
+export type GitHubBranchListResponse = {
+  items: GitHubBranch[];
+  total: number;
+  limit: number;
+};
+
 export type GitHubIssue = {
   number: number;
   title: string;
@@ -509,6 +521,7 @@ export type FetchGitHubReposOptions = {
 export type FetchGitHubIssuesOptions = {
   state?: "open" | "closed" | "all";
   limit?: number;
+  q?: string;
 };
 
 export type FetchGitHubPullsOptions = {
@@ -898,6 +911,26 @@ export async function fetchGitHubRepo(owner: string, repo: string): Promise<GitH
   return json as GitHubRepo;
 }
 
+export async function fetchGitHubRepoBranches(
+  owner: string,
+  repo: string,
+  limit = 30
+): Promise<GitHubBranchListResponse> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/github/repos/${owner}/${repo}/branches?limit=${limit}`,
+    {
+      cache: "no-store"
+    }
+  );
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to fetch GitHub branches.");
+  }
+
+  return json as GitHubBranchListResponse;
+}
+
 export async function fetchGitHubRepoIssues(
   owner: string,
   repo: string,
@@ -906,6 +939,9 @@ export async function fetchGitHubRepoIssues(
   const params = new URLSearchParams();
   params.set("state", options.state ?? "open");
   params.set("limit", String(options.limit ?? 30));
+  if (options.q) {
+    params.set("q", options.q);
+  }
 
   const response = await fetch(
     `${getApiBaseUrl()}/github/repos/${owner}/${repo}/issues?${params.toString()}`,

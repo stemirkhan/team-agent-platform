@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 from host_executor_app.core.config import get_settings
 from host_executor_app.schemas.github import (
+    GitHubBranchListResponse,
+    GitHubBranchRead,
     GitHubIssueCommentCreate,
     GitHubIssueCommentRead,
     GitHubIssueDetailRead,
@@ -105,28 +107,50 @@ class GitHubTrackerService:
             raise GitHubTrackerServiceError(502, "GitHub CLI returned an unexpected repo payload.")
         return self._normalize_repo(payload)
 
+    def list_branches(self, owner: str, repo: str, limit: int) -> GitHubBranchListResponse:
+        """Return normalized branches for one repository."""
+        repo_payload = self.get_repo(owner=owner, repo=repo)
+        payload = self._run_json(
+            [
+                "api",
+                f"repos/{owner}/{repo}/branches?per_page={limit}",
+            ]
+        )
+        if not isinstance(payload, list):
+            raise GitHubTrackerServiceError(502, "GitHub CLI returned an unexpected branch list.")
+
+        items = [
+            self._normalize_branch(item, default_branch=repo_payload.default_branch)
+            for item in payload
+            if isinstance(item, dict)
+        ]
+        return GitHubBranchListResponse(items=items, total=len(items), limit=limit)
+
     def list_issues(
         self,
         owner: str,
         repo: str,
         state: str,
         limit: int,
+        query: str | None,
     ) -> GitHubIssueListResponse:
         """Return normalized issues for a repository."""
-        payload = self._run_json(
-            [
-                "issue",
-                "list",
-                "--repo",
-                f"{owner}/{repo}",
-                "--state",
-                state,
-                "--limit",
-                str(limit),
-                "--json",
-                ",".join(self.ISSUE_FIELDS),
-            ]
-        )
+        args = [
+            "issue",
+            "list",
+            "--repo",
+            f"{owner}/{repo}",
+            "--state",
+            state,
+            "--limit",
+            str(limit),
+            "--json",
+            ",".join(self.ISSUE_FIELDS),
+        ]
+        if query:
+            args.extend(["--search", query])
+
+        payload = self._run_json(args)
         if not isinstance(payload, list):
             raise GitHubTrackerServiceError(502, "GitHub CLI returned an unexpected issue list.")
 
@@ -305,6 +329,23 @@ class GitHubTrackerService:
             comments_count=_extract_comments_count(comments),
             created_at=_optional_string(payload.get("createdAt")),
             updated_at=_optional_string(payload.get("updatedAt")),
+        )
+
+    @staticmethod
+    def _normalize_branch(
+        payload: dict[str, object],
+        *,
+        default_branch: str | None,
+    ) -> GitHubBranchRead:
+        """Convert gh branch JSON into the normalized API schema."""
+        name = _optional_string(payload.get("name"))
+        if name is None:
+            raise GitHubTrackerServiceError(502, "GitHub CLI returned a branch without a name.")
+
+        return GitHubBranchRead(
+            name=name,
+            is_default=name == default_branch,
+            is_protected=bool(payload.get("protected", False)),
         )
 
     @staticmethod

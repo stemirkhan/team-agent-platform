@@ -51,12 +51,12 @@ export default async function NewRunPage({
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-brand-100 text-brand-700 ring-1 ring-brand-200 dark:bg-zinc-800 dark:text-slate-200 dark:ring-zinc-700">
               <PlaySquare className="h-5 w-5" />
             </span>
-            <span>{t(locale, { ru: "Запустить команду", en: "Run team" })}</span>
+            <span>{t(locale, { ru: "Новый запуск", en: "New run" })}</span>
           </h1>
           <p className="max-w-3xl text-sm text-slate-600 dark:text-slate-300">
             {t(locale, {
-              ru: "Форма собирает repo target, task context и runtime-параметры Codex. После submit платформа готовит workspace и сразу стартует host-side run.",
-              en: "This form collects the repo target, task context, and Codex runtime parameters. After submit, the platform prepares the workspace and starts the host-side run immediately."
+              ru: "Сначала выбери команду, repo и task context. После submit платформа подготовит workspace, стартует Codex и переведет run в live execution.",
+              en: "Choose the team, repo, and task context first. After submit, the platform prepares the workspace, starts Codex, and moves the run into live execution."
             })}
           </p>
         </div>

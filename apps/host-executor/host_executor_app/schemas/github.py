@@ -29,6 +29,22 @@ class GitHubRepoListResponse(BaseModel):
     limit: int
 
 
+class GitHubBranchRead(BaseModel):
+    """Normalized GitHub branch payload."""
+
+    name: str
+    is_default: bool = False
+    is_protected: bool = False
+
+
+class GitHubBranchListResponse(BaseModel):
+    """Paginated branch list."""
+
+    items: list[GitHubBranchRead] = Field(default_factory=list)
+    total: int
+    limit: int
+
+
 class GitHubIssueRead(BaseModel):
     """Normalized GitHub issue payload."""
 

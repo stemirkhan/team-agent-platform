@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from app.core.config import Settings
 from app.schemas.github import (
+    GitHubBranchListResponse,
     GitHubIssueCommentCreate,
     GitHubIssueDetailRead,
     GitHubIssueLabelsUpdate,
@@ -24,6 +25,7 @@ from app.schemas.github import (
 
 SchemaModel = TypeVar(
     "SchemaModel",
+    GitHubBranchListResponse,
     GitHubRepoRead,
     GitHubRepoListResponse,
     GitHubIssueRead,
@@ -71,17 +73,29 @@ class GitHubProxyService:
         data = self._request_json(f"github/repos/{owner}/{repo}")
         return self._validate(data, GitHubRepoRead, "repository")
 
+    def list_branches(self, owner: str, repo: str, limit: int) -> GitHubBranchListResponse:
+        """Return repository branches from the host executor bridge."""
+        data = self._request_json(
+            f"github/repos/{owner}/{repo}/branches",
+            {"limit": str(limit)},
+        )
+        return self._validate(data, GitHubBranchListResponse, "branch list")
+
     def list_issues(
         self,
         owner: str,
         repo: str,
         state: str,
         limit: int,
+        query: str | None,
     ) -> GitHubIssueListResponse:
         """Return repository issues from the host executor bridge."""
+        params = {"state": state, "limit": str(limit)}
+        if query:
+            params["q"] = query
         data = self._request_json(
             f"github/repos/{owner}/{repo}/issues",
-            {"state": state, "limit": str(limit)},
+            params,
         )
         return self._validate(data, GitHubIssueListResponse, "issue list")
 

@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Path, Query
 
 from app.core.config import get_settings
 from app.schemas.github import (
+    GitHubBranchListResponse,
     GitHubIssueCommentCreate,
     GitHubIssueDetailRead,
     GitHubIssueLabelsUpdate,
@@ -47,16 +48,36 @@ def get_repo(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.get("/repos/{owner}/{repo}/branches", response_model=GitHubBranchListResponse)
+def list_branches(
+    owner: str = Path(min_length=1),
+    repo: str = Path(min_length=1),
+    limit: int = Query(default=30, ge=1, le=100),
+) -> GitHubBranchListResponse:
+    """Return repository branches."""
+    try:
+        return github_proxy_service.list_branches(owner=owner, repo=repo, limit=limit)
+    except GitHubProxyServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.get("/repos/{owner}/{repo}/issues", response_model=GitHubIssueListResponse)
 def list_issues(
     owner: str = Path(min_length=1),
     repo: str = Path(min_length=1),
     state: Literal["open", "closed", "all"] = Query(default="open"),
     limit: int = Query(default=30, ge=1, le=100),
+    search: str | None = Query(default=None, alias="q", max_length=255),
 ) -> GitHubIssueListResponse:
     """Return repository issues."""
     try:
-        return github_proxy_service.list_issues(owner=owner, repo=repo, state=state, limit=limit)
+        return github_proxy_service.list_issues(
+            owner=owner,
+            repo=repo,
+            state=state,
+            limit=limit,
+            query=search,
+        )
     except GitHubProxyServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

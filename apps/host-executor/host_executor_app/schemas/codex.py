@@ -14,7 +14,7 @@ class CodexSessionStart(BaseModel):
     workspace_id: str = Field(min_length=1, max_length=64)
     prompt_text: str = Field(min_length=1, max_length=50_000)
     model: str | None = Field(default=None, min_length=1, max_length=128)
-    model_reasoning_effort: Literal["low", "medium", "high"] | None = None
+    model_reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None
     sandbox_mode: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
 
 

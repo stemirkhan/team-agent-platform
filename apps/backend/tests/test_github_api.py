@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import github
 from app.schemas.github import (
+    GitHubBranchListResponse,
+    GitHubBranchRead,
     GitHubIssueCommentCreate,
     GitHubIssueCommentRead,
     GitHubIssueDetailRead,
@@ -36,6 +38,14 @@ def test_github_repo_endpoints_return_normalized_payloads(client: TestClient, mo
         viewer_permission="ADMIN",
         updated_at="2026-03-08T00:00:00Z",
         pushed_at="2026-03-08T00:10:00Z",
+    )
+    branch_list = GitHubBranchListResponse(
+        items=[
+            GitHubBranchRead(name="main", is_default=True, is_protected=True),
+            GitHubBranchRead(name="develop", is_default=False, is_protected=False),
+        ],
+        total=2,
+        limit=10,
     )
     issue = GitHubIssueRead(
         number=12,
@@ -110,8 +120,13 @@ def test_github_repo_endpoints_return_normalized_payloads(client: TestClient, mo
     monkeypatch.setattr(github.github_proxy_service, "get_repo", lambda owner, repo: repo_payload)
     monkeypatch.setattr(
         github.github_proxy_service,
+        "list_branches",
+        lambda owner, repo, limit: branch_list.model_copy(update={"limit": limit}),
+    )
+    monkeypatch.setattr(
+        github.github_proxy_service,
         "list_issues",
-        lambda owner, repo, state, limit: GitHubIssueListResponse(
+        lambda owner, repo, state, limit, query: GitHubIssueListResponse(
             items=[issue], total=1, limit=limit, state=state
         ),
     )
@@ -181,8 +196,13 @@ def test_github_repo_endpoints_return_normalized_payloads(client: TestClient, mo
     assert repo_response.status_code == 200
     assert repo_response.json()["default_branch"] == "main"
 
+    branches_response = client.get("/api/v1/github/repos/stemirkhan/team-agent-platform/branches?limit=10")
+    assert branches_response.status_code == 200
+    assert branches_response.json()["items"][0]["name"] == "main"
+    assert branches_response.json()["items"][0]["is_default"] is True
+
     issues_response = client.get(
-        "/api/v1/github/repos/stemirkhan/team-agent-platform/issues?state=all"
+        "/api/v1/github/repos/stemirkhan/team-agent-platform/issues?state=all&q=repo"
     )
     assert issues_response.status_code == 200
     assert issues_response.json()["items"][0]["number"] == 12
