@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Bot, PlusCircle } from "lucide-react";
 
-import { CatalogTeamComposer } from "@/components/agents/catalog-team-composer";
+import { AgentCard } from "@/components/agents/agent-card";
 import { Button } from "@/components/ui/button";
 import { fetchAgents } from "@/lib/api";
 import { t } from "@/lib/i18n";
@@ -22,7 +22,10 @@ export default async function AgentsCatalogPage() {
             <span>{t(locale, { ru: "Каталог агентов", en: "Agent Catalog" })}</span>
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            {t(locale, { ru: "Опубликованные агенты, доступные в marketplace MVP.", en: "Published agents available in the marketplace MVP." })}
+            {t(locale, {
+              ru: "Опубликованные профили агентов для локального Codex workflow.",
+              en: "Published agent profiles for the local Codex workflow."
+            })}
           </p>
         </div>
         <Link href="/agents/new">
@@ -36,12 +39,16 @@ export default async function AgentsCatalogPage() {
       {data.items.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-6 text-sm text-slate-500 dark:text-slate-400">
           {t(locale, {
-            ru: "Пока нет опубликованных агентов. Используйте `POST /api/v1/agents` и `POST /api/v1/agents/<slug>/publish`, чтобы добавить первую карточку.",
-            en: "No published agents yet. Use `POST /api/v1/agents` and `POST /api/v1/agents/<slug>/publish` to add your first card."
+            ru: "Пока нет опубликованных агентов. Создай первый профиль и опубликуй его, чтобы он появился в каталоге.",
+            en: "No published agents yet. Create and publish the first profile to make it appear in the catalog."
           })}
         </div>
       ) : (
-        <CatalogTeamComposer initialAgents={data.items} locale={locale} />
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {data.items.map((agent) => (
+            <AgentCard agent={agent} key={agent.id} locale={locale} />
+          ))}
+        </div>
       )}
     </section>
   );
