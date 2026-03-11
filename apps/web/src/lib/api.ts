@@ -255,6 +255,7 @@ export type FetchRunsOptions = {
   limit?: number;
   offset?: number;
   status?: RunStatus;
+  repo?: string;
 };
 
 export type CodexSessionStatus = "running" | "completed" | "failed" | "cancelled";
@@ -269,6 +270,8 @@ export type CodexSessionRead = {
   exit_code: number | null;
   error_message: string | null;
   summary_text: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
   started_at: string;
   finished_at: string | null;
   last_output_offset: number;
@@ -720,6 +723,9 @@ export async function fetchRuns(
   params.set("offset", String(options.offset ?? 0));
   if (options.status) {
     params.set("status", options.status);
+  }
+  if (options.repo) {
+    params.set("repo", options.repo);
   }
 
   const response = await fetch(`${getApiBaseUrl()}/runs?${params.toString()}`, {

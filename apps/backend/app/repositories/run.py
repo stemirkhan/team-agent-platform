@@ -70,6 +70,7 @@ class RunRepository:
         limit: int,
         offset: int,
         status: str | None,
+        repo_full_name: str | None,
     ) -> tuple[list[Run], int]:
         """Return paginated runs owned by one user."""
         query = select(Run).where(Run.created_by == created_by)
@@ -78,6 +79,10 @@ class RunRepository:
         if status:
             query = query.where(Run.status == status)
             count_query = count_query.where(Run.status == status)
+
+        if repo_full_name:
+            query = query.where(Run.repo_full_name == repo_full_name)
+            count_query = count_query.where(Run.repo_full_name == repo_full_name)
 
         query = query.order_by(Run.created_at.desc()).offset(offset).limit(limit)
         items = list(self.session.scalars(query).all())

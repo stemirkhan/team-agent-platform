@@ -30,6 +30,8 @@ class CodexSessionRead(BaseModel):
     exit_code: int | None = None
     error_message: str | None = None
     summary_text: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     started_at: str
     finished_at: str | None = None
     last_output_offset: int = 0

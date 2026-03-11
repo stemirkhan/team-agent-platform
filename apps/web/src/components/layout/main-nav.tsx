@@ -2,26 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Bot, FolderGit2, Home, PlaySquare, UsersRound } from "lucide-react";
+import { Activity, Bot, FolderGit2, LayoutDashboard, PlaySquare, UsersRound } from "lucide-react";
 
 import { t, type Locale } from "@/lib/i18n";
 
 function isItemActive(pathname: string, href: string): boolean {
-  if (href === "/") {
-    return pathname === "/";
-  }
-
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 export function MainNav({ locale }: { locale: Locale }) {
   const pathname = usePathname();
   const navItems = [
-    {
-      href: "/",
-      label: t(locale, { ru: "Главная", en: "Home" }),
-      icon: Home
-    },
     {
       href: "/agents",
       label: t(locale, { ru: "Агенты", en: "Agents" }),
@@ -43,6 +34,11 @@ export function MainNav({ locale }: { locale: Locale }) {
       icon: FolderGit2
     },
     {
+      href: "/projects",
+      label: t(locale, { ru: "Доска", en: "Board" }),
+      icon: LayoutDashboard
+    },
+    {
       href: "/runs",
       label: t(locale, { ru: "Запуски", en: "Runs" }),
       icon: PlaySquare
@@ -50,7 +46,7 @@ export function MainNav({ locale }: { locale: Locale }) {
   ];
 
   return (
-    <nav className="flex shrink-0 items-center gap-2">
+    <nav className="flex shrink-0 items-center gap-2.5">
       {navItems.map((item) => {
         const active = isItemActive(pathname, item.href);
         const Icon = item.icon;
@@ -58,7 +54,7 @@ export function MainNav({ locale }: { locale: Locale }) {
         return (
           <Link
             className={[
-              "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold transition",
+              "inline-flex items-center gap-2.5 rounded-full px-3.5 py-2 text-sm font-semibold transition",
               active
                 ? "bg-brand-100 text-brand-800 ring-1 ring-brand-300 dark:bg-zinc-800 dark:text-slate-100 dark:ring-zinc-600"
                 : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800/80 hover:text-slate-900 dark:hover:text-slate-100"
@@ -66,7 +62,7 @@ export function MainNav({ locale }: { locale: Locale }) {
             href={item.href}
             key={item.href}
           >
-            <Icon className="h-3.5 w-3.5" />
+            <Icon className="h-4 w-4" />
             {item.label}
           </Link>
         );

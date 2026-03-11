@@ -86,3 +86,53 @@ def test_build_command_enables_colorized_terminal_output(tmp_path, monkeypatch) 
 
     color_index = command.index("--color")
     assert command[color_index + 1] == "always"
+
+
+def test_get_session_exposes_latest_token_usage(tmp_path, monkeypatch) -> None:
+    """Persisted session metadata should expose the latest token usage from terminal chunks."""
+    monkeypatch.setattr(
+        workspace_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=str(tmp_path / "workspaces")),
+    )
+    service = CodexSessionService()
+
+    storage_dir = service.sessions_root / "run-usage"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "session.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-usage",
+                "workspace_id": "ws-usage",
+                "repo_path": "/tmp/ws-usage/repo",
+                "command": ["codex", "exec", "--json"],
+                "status": "completed",
+                "pid": 101,
+                "exit_code": 0,
+                "error_message": None,
+                "summary_text": "done",
+                "started_at": "2026-03-09T10:00:00Z",
+                "finished_at": "2026-03-09T10:05:00Z",
+                "last_output_offset": 1,
+            },
+            ensure_ascii=True,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    with (storage_dir / "chunks.jsonl").open("w", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                CodexTerminalChunk(
+                    offset=0,
+                    text='{"type":"turn.completed","usage":{"input_tokens":3417189,"output_tokens":23804}}\n',
+                    created_at="2026-03-09T10:05:00Z",
+                ).model_dump(),
+                ensure_ascii=True,
+            )
+        )
+        handle.write("\n")
+
+    session = service.get_session("run-usage")
+    assert session.input_tokens == 3417189
+    assert session.output_tokens == 23804

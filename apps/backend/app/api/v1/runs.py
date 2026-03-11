@@ -23,6 +23,7 @@ def list_runs(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     status_filter: RunStatus | None = Query(default=None, alias="status"),
+    repo_filter: str | None = Query(default=None, alias="repo", min_length=1, max_length=511),
     user: User = Depends(get_current_user),
     service: RunService = Depends(get_run_service),
 ) -> RunListResponse:
@@ -32,6 +33,7 @@ def list_runs(
         limit=limit,
         offset=offset,
         status_filter=status_filter,
+        repo_full_name=repo_filter,
     )
 
 

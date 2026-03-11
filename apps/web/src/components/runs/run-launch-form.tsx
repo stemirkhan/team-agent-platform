@@ -9,6 +9,7 @@ import {
   FolderGit2,
   Loader2,
   Play,
+  RefreshCcw,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -30,6 +31,7 @@ import {
   fetchGitHubRepoBranches,
   fetchGitHubRepoIssues,
   fetchGitHubRepos,
+  refreshHostReadiness,
   type CodexReasoningEffort,
   type CodexSandboxMode,
   type GitHubBranch,
@@ -142,6 +144,24 @@ export function RunLaunchForm({
   const [sandboxMode, setSandboxMode] = useState<CodexSandboxMode>("workspace-write");
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [readinessSnapshot, setReadinessSnapshot] = useState(readiness);
+  const [refreshingReadiness, setRefreshingReadiness] = useState(false);
+
+  async function refreshReadiness() {
+    setRefreshingReadiness(true);
+    try {
+      const nextSnapshot = await refreshHostReadiness();
+      setReadinessSnapshot(nextSnapshot);
+    } catch {
+      return;
+    } finally {
+      setRefreshingReadiness(false);
+    }
+  }
+
+  useEffect(() => {
+    setReadinessSnapshot(readiness);
+  }, [readiness]);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,6 +206,41 @@ export function RunLaunchForm({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshSilently() {
+      try {
+        const nextSnapshot = await refreshHostReadiness();
+        if (!cancelled) {
+          setReadinessSnapshot(nextSnapshot);
+        }
+      } catch {
+        return;
+      }
+    }
+
+    void refreshSilently();
+
+    const handleFocus = () => {
+      void refreshSilently();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshSilently();
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
   const parsedRepository = useMemo(() => parseRepositoryInput(repository), [repository]);
   const selectedRepoFromOptions = useMemo(
     () =>
@@ -223,6 +278,7 @@ export function RunLaunchForm({
   const usingIssueFlow = issueNumber.trim().length > 0;
   const hasManualTask = taskText.trim().length > 0;
   const hasTaskSource = usingIssueFlow || hasManualTask;
+  const effectiveReadiness = readinessSnapshot ?? readiness;
   const codexOverridesSelected =
     codexModel.trim().length > 0 ||
     reasoningEffort !== "medium" ||
@@ -484,7 +540,7 @@ export function RunLaunchForm({
       return;
     }
 
-    if (readiness && !readiness.effective_ready) {
+    if (effectiveReadiness && !effectiveReadiness.effective_ready) {
       setErrorMessage(
         t(locale, {
           ru: "Host execution пока не готов. Сначала исправь диагностику и затем повтори запуск.",
@@ -561,26 +617,34 @@ export function RunLaunchForm({
               ))}
             </div>
           </div>
-          <Link
-            className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 dark:bg-zinc-950 dark:text-slate-200 dark:hover:bg-zinc-800"
-            href="/diagnostics"
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            {t(locale, { ru: "Открыть диагностику", en: "Open diagnostics" })}
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 dark:bg-zinc-950 dark:text-slate-200 dark:hover:bg-zinc-800"
+              href="/diagnostics"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {t(locale, { ru: "Открыть диагностику", en: "Open diagnostics" })}
+            </Link>
+            <Button className="rounded-full" onClick={() => void refreshReadiness()} size="sm" type="button" variant="secondary">
+              <RefreshCcw className={`mr-2 h-3.5 w-3.5 ${refreshingReadiness ? "animate-spin" : ""}`} />
+              {refreshingReadiness
+                ? t(locale, { ru: "Обновление...", en: "Refreshing..." })
+                : t(locale, { ru: "Обновить readiness", en: "Refresh readiness" })}
+            </Button>
+          </div>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
           <span
             className={[
               "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold",
-              readiness?.effective_ready === false
+              effectiveReadiness?.effective_ready === false
                 ? "bg-rose-100 text-rose-700 dark:bg-rose-500/10 dark:text-rose-200"
                 : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200"
             ].join(" ")}
           >
             <ShieldCheck className="h-3.5 w-3.5" />
-            {readiness?.effective_ready === false
+            {effectiveReadiness?.effective_ready === false
               ? t(locale, { ru: "Нужна диагностика", en: "Diagnostics required" })
               : t(locale, { ru: "Host execution готов", en: "Host execution ready" })}
           </span>
@@ -622,7 +686,7 @@ export function RunLaunchForm({
         </div>
       ) : null}
 
-      {readiness && !readiness.effective_ready ? (
+      {effectiveReadiness && !effectiveReadiness.effective_ready ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-200">
           {t(locale, {
             ru: "Host execution сейчас не готов. Открой диагностику и исправь `git` / `gh` / `codex` до запуска run.",
@@ -1290,7 +1354,7 @@ export function RunLaunchForm({
               loadingUser ||
               !user ||
               teams.length === 0 ||
-              readiness?.effective_ready === false
+              effectiveReadiness?.effective_ready === false
             }
             type="submit"
           >

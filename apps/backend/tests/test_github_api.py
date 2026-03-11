@@ -196,7 +196,9 @@ def test_github_repo_endpoints_return_normalized_payloads(client: TestClient, mo
     assert repo_response.status_code == 200
     assert repo_response.json()["default_branch"] == "main"
 
-    branches_response = client.get("/api/v1/github/repos/stemirkhan/team-agent-platform/branches?limit=10")
+    branches_response = client.get(
+        "/api/v1/github/repos/stemirkhan/team-agent-platform/branches?limit=10"
+    )
     assert branches_response.status_code == 200
     assert branches_response.json()["items"][0]["name"] == "main"
     assert branches_response.json()["items"][0]["is_default"] is True

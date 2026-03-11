@@ -555,9 +555,62 @@ class CodexSessionService:
             return None
         return nested
 
+    @classmethod
+    def _derive_usage_metrics(cls, chunks: list[CodexTerminalChunk]) -> tuple[int | None, int | None]:
+        """Return the latest token usage reported by Codex turn completion events."""
+        buffer = ""
+        input_tokens: int | None = None
+        output_tokens: int | None = None
+
+        for chunk in chunks:
+            combined = f"{buffer}{chunk.text}".replace("\r\n", "\n")
+            lines = combined.split("\n")
+            buffer = lines.pop() or ""
+
+            for line in lines:
+                parsed = cls._extract_usage_from_json_line(line.strip())
+                if parsed is not None:
+                    input_tokens, output_tokens = parsed
+
+        if buffer.strip():
+            parsed = cls._extract_usage_from_json_line(buffer.strip())
+            if parsed is not None:
+                input_tokens, output_tokens = parsed
+
+        return input_tokens, output_tokens
+
+    @classmethod
+    def _extract_usage_from_json_line(cls, line: str) -> tuple[int | None, int | None] | None:
+        """Parse one JSONL line and return token usage when available."""
+        if not line.startswith("{"):
+            return None
+
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(payload, dict) or payload.get("type") != "turn.completed":
+            return None
+
+        usage = payload.get("usage")
+        if not isinstance(usage, dict):
+            return None
+
+        raw_input = usage.get("input_tokens")
+        raw_output = usage.get("output_tokens")
+
+        input_tokens = raw_input if isinstance(raw_input, int) else None
+        output_tokens = raw_output if isinstance(raw_output, int) else None
+
+        if input_tokens is None and output_tokens is None:
+            return None
+        return input_tokens, output_tokens
+
     @staticmethod
     def _to_read(state: _SessionState) -> CodexSessionRead:
         """Convert internal state into a public API payload."""
+        input_tokens, output_tokens = CodexSessionService._derive_usage_metrics(state.chunks)
         return CodexSessionRead(
             run_id=state.run_id,
             workspace_id=state.workspace_id,
@@ -568,6 +621,8 @@ class CodexSessionService:
             exit_code=state.exit_code,
             error_message=state.error_message,
             summary_text=state.summary_text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             started_at=state.started_at,
             finished_at=state.finished_at,
             last_output_offset=len(state.chunks),

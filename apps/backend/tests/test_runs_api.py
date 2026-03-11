@@ -218,7 +218,13 @@ def test_create_run_prepares_workspace_and_records_status_events(
             "delivery-team-codex.zip",
             _bundle_bytes(
                 {
-                    ".codex/config.toml": "[features]\nmulti_agent = true\n",
+                    ".codex/config.toml": (
+                        "[features]\n"
+                        "multi_agent = true\n\n"
+                        '[agents."orchestrator"]\n'
+                        'description = "Orchestrator"\n'
+                        'config_file = "agents/orchestrator.toml"\n'
+                    ),
                     ".codex/agents/orchestrator.toml": 'description = "Orchestrator"\n',
                 }
             ),
@@ -330,6 +336,17 @@ def test_create_run_prepares_workspace_and_records_status_events(
 
     events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
     assert events_response.status_code == 200
+    bundle_events = [
+        item["payload_json"]
+        for item in events_response.json()["items"]
+        if item["event_type"] == "note"
+        and item["payload_json"]
+        and item["payload_json"].get("kind") == "codex_bundle"
+    ]
+    assert len(bundle_events) == 1
+    assert bundle_events[0]["multi_agent_enabled"] is True
+    assert bundle_events[0]["configured_agents"] == ["orchestrator"]
+    assert bundle_events[0]["task_markdown"].startswith("# Fix run preparation flow")
     statuses = [
         item["payload_json"]["status"]
         for item in events_response.json()["items"]
@@ -416,6 +433,129 @@ def test_create_run_returns_failed_state_when_workspace_prepare_breaks(
     assert events_response.status_code == 200
     event_types = [item["event_type"] for item in events_response.json()["items"]]
     assert event_types[-1] == "error"
+
+
+def test_list_runs_supports_repository_filter(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Run list should support filtering by repository full name."""
+    headers = _auth_headers(
+        client,
+        email="runner-filter@example.com",
+        display_name="Runner Filter",
+    )
+    _publish_agent(
+        client,
+        headers=headers,
+        slug="delivery-orchestrator",
+        title="Delivery Orchestrator",
+    )
+    _publish_team(client, headers=headers, slug="delivery-team-filter")
+
+    monkeypatch.setattr(
+        HostExecutionReadinessService,
+        "build_readiness",
+        lambda self: SimpleNamespace(effective_ready=True),
+    )
+    monkeypatch.setattr(
+        GitHubProxyService,
+        "get_repo",
+        lambda self, owner, repo: GitHubRepoRead(
+            owner=owner,
+            name=repo,
+            full_name=f"{owner}/{repo}",
+            description="Demo repo",
+            url=f"https://github.com/{owner}/{repo}",
+            is_private=False,
+            default_branch="main",
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "prepare_workspace",
+        lambda self, payload: _workspace(),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "materialize_workspace",
+        lambda self, workspace_id, payload: _workspace().model_copy(
+            update={"has_changes": True, "changed_files": [file.path for file in payload.files]}
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(source_path=".team-agent-platform.toml"),
+    )
+    monkeypatch.setattr(
+        ExportService,
+        "build_download_artifact",
+        lambda self, **kwargs: (
+            "delivery-team-filter-codex.zip",
+            _bundle_bytes(
+                {
+                    ".codex/config.toml": "[features]\nmulti_agent = true\n",
+                    ".codex/agents/orchestrator.toml": 'description = "Orchestrator"\n',
+                }
+            ),
+            "application/zip",
+        ),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "start_session",
+        lambda self, payload: CodexSessionRead(
+            run_id=payload.run_id,
+            workspace_id=payload.workspace_id,
+            repo_path="/tmp/ws-1/repo",
+            command=["codex", "exec", "--json"],
+            status="running",
+            pid=12345,
+            started_at="2026-03-08T10:06:00Z",
+            last_output_offset=0,
+        ),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_session",
+        lambda self, run_id: CodexSessionRead(
+            run_id=run_id,
+            workspace_id="ws-1",
+            repo_path="/tmp/ws-1/repo",
+            command=["codex", "exec", "--json"],
+            status="running",
+            pid=12345,
+            started_at="2026-03-08T10:06:00Z",
+            last_output_offset=0,
+        ),
+    )
+
+    for owner, repo in [
+        ("stemirkhan", "team-agent-platform"),
+        ("stemirkhan", "agent-ops-demo"),
+    ]:
+        create_response = client.post(
+            "/api/v1/runs",
+            headers=headers,
+            json={
+                "team_slug": "delivery-team-filter",
+                "repo_owner": owner,
+                "repo_name": repo,
+                "task_text": f"Run delivery workflow for {owner}/{repo}.",
+            },
+        )
+        assert create_response.status_code == 201
+
+    list_response = client.get(
+        "/api/v1/runs?repo=stemirkhan/team-agent-platform",
+        headers=headers,
+    )
+    assert list_response.status_code == 200
+    payload = list_response.json()
+    assert payload["total"] == 1
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["repo_full_name"] == "stemirkhan/team-agent-platform"
 
 
 def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
@@ -606,6 +746,43 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
             last_output_offset=2,
         ),
     )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_events",
+        lambda self, run_id, offset: CodexSessionEventsResponse(
+            session=CodexSessionRead(
+                run_id=run_id,
+                workspace_id="ws-1",
+                repo_path="/tmp/ws-1/repo",
+                command=["codex", "exec", "--json"],
+                status="completed",
+                pid=12345,
+                exit_code=0,
+                summary_text="Codex finished successfully.",
+                started_at="2026-03-08T10:06:00Z",
+                finished_at="2026-03-08T10:08:00Z",
+                last_output_offset=4,
+            ),
+            items=[
+                CodexTerminalChunk(
+                    offset=0,
+                    text=(
+                        '{"type":"item.completed","item":{"type":"command_execution",'
+                        '"command":"sed -n '
+                        '\'1,220p\' '
+                        '.codex/skills/frontend-product-engineer-frontend-ux-review/SKILL.md",'
+                        '"aggregated_output":"ok","exit_code":0,"status":"completed"}}\n'
+                        '{"type":"item.completed","item":{"type":"agent_message","text":"Использую '
+                        '`frontend-ux-review` для фронтенд-оценки."}}\n'
+                    ),
+                    created_at="2026-03-08T10:07:30Z",
+                )
+            ]
+            if offset == 0
+            else [],
+            next_offset=1,
+        ),
+    )
 
     create_response = client.post(
         "/api/v1/runs",
@@ -651,6 +828,19 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
 
     events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
     assert events_response.status_code == 200
+    trace_events = [
+        item["payload_json"]
+        for item in events_response.json()["items"]
+        if item["event_type"] == "note"
+        and item["payload_json"]
+        and item["payload_json"].get("kind") == "codex_execution_trace"
+    ]
+    assert len(trace_events) == 1
+    assert trace_events[0]["skill_refs"] == [
+        "frontend-product-engineer-frontend-ux-review",
+        "frontend-ux-review",
+    ]
+    assert trace_events[0]["delegation_markers"] == []
     statuses = [
         item["payload_json"]["status"]
         for item in events_response.json()["items"]
@@ -768,6 +958,27 @@ def test_get_run_completes_without_commit_when_only_materialized_files_changed(
             started_at="2026-03-08T10:06:00Z",
             finished_at="2026-03-08T10:08:00Z",
             last_output_offset=2,
+        ),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_events",
+        lambda self, run_id, offset: CodexSessionEventsResponse(
+            session=CodexSessionRead(
+                run_id=run_id,
+                workspace_id="ws-1",
+                repo_path="/tmp/ws-1/repo",
+                command=["codex", "exec", "--json"],
+                status="completed",
+                pid=12345,
+                exit_code=0,
+                summary_text="No code changes were required.",
+                started_at="2026-03-08T10:06:00Z",
+                finished_at="2026-03-08T10:08:00Z",
+                last_output_offset=2,
+            ),
+            items=[] if offset > 0 else [],
+            next_offset=0,
         ),
     )
 

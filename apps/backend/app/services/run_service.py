@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import re
+import tomllib
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import PurePosixPath
@@ -47,6 +50,14 @@ from app.services.workspace_proxy_service import WorkspaceProxyService, Workspac
 class RunService:
     """Create and inspect local-first Codex runs."""
 
+    _SKILL_PATH_PATTERN = re.compile(r"\.codex/skills/([^/\s]+)/SKILL\.md")
+    _AGENT_CONFIG_PATH_PATTERN = re.compile(r"\.codex/agents/([^/\s]+)\.toml")
+    _SKILL_MENTION_PATTERN = re.compile(r"(?:skill|скилл)[^`]*`([^`]+)`", re.IGNORECASE)
+    _BACKTICK_SLUG_PATTERN = re.compile(r"`([a-z0-9][a-z0-9_-]{1,80})`", re.IGNORECASE)
+    _DELEGATION_PATTERN = re.compile(
+        r"\b(subagent|delegate|delegation|handoff|multi-agent|multi_agent)\b",
+        re.IGNORECASE,
+    )
     _READY_MESSAGE = (
         "Workspace is prepared and `.codex` plus `TASK.md` are materialized. "
         "Codex PTY execution is the next layer."
@@ -223,31 +234,8 @@ class RunService:
                 status_value=RunStatus.MATERIALIZING_TEAM,
                 message="Writing `.codex` bundle and `TASK.md` into the workspace.",
             )
-            workspace = self.workspace_proxy_service.materialize_workspace(
-                workspace.id,
-                WorkspaceMaterialize(
-                    files=self._build_workspace_files(
-                        team_slug=team.slug,
-                        payload=payload,
-                        repo_full_name=repo.full_name,
-                        base_branch=workspace.base_branch,
-                        working_branch=workspace.working_branch,
-                        execution_config=execution_config,
-                        issue_title=issue.title if issue else None,
-                        issue_number=issue.number if issue else None,
-                        issue_url=issue.url if issue else None,
-                        issue_body=issue.body if issue else None,
-                    )
-                ),
-            )
-            run = self.run_repository.update(
-                run,
-                fields={
-                    "workspace_path": workspace.workspace_path,
-                    "repo_path": workspace.repo_path,
-                },
-            )
-            task_markdown = self._build_task_markdown(
+            workspace_files = self._build_workspace_files(
+                team_slug=team.slug,
                 payload=payload,
                 repo_full_name=repo.full_name,
                 base_branch=workspace.base_branch,
@@ -258,6 +246,24 @@ class RunService:
                 issue_url=issue.url if issue else None,
                 issue_body=issue.body if issue else None,
             )
+            workspace = self.workspace_proxy_service.materialize_workspace(
+                workspace.id,
+                WorkspaceMaterialize(
+                    files=workspace_files
+                ),
+            )
+            run = self.run_repository.update(
+                run,
+                fields={
+                    "workspace_path": workspace.workspace_path,
+                    "repo_path": workspace.repo_path,
+                },
+            )
+            self._append_materialization_audit_event(
+                run_id=run.id,
+                files=workspace_files,
+            )
+            task_markdown = self._find_workspace_file_content(workspace_files, "TASK.md")
             run = self._transition_run(
                 run,
                 status_value=RunStatus.STARTING_CODEX,
@@ -291,14 +297,17 @@ class RunService:
         limit: int,
         offset: int,
         status_filter: RunStatus | None,
+        repo_full_name: str | None,
     ) -> RunListResponse:
         """Return paginated runs owned by the current user."""
         status_value = status_filter.value if status_filter else None
+        normalized_repo_full_name = repo_full_name.strip() or None if repo_full_name else None
         items, total = self.run_repository.list_for_creator(
             created_by=current_user.id,
             limit=limit,
             offset=offset,
             status=status_value,
+            repo_full_name=normalized_repo_full_name,
         )
         items = [self._sync_run_with_codex_session(item) for item in items]
         return RunListResponse(items=items, total=total, limit=limit, offset=offset)
@@ -652,6 +661,90 @@ class RunService:
             },
         )
 
+    def _append_materialization_audit_event(
+        self,
+        *,
+        run_id,
+        files: list[WorkspaceFileWrite],
+    ) -> None:
+        """Persist one snapshot of the materialized Codex bundle before cleanup."""
+        file_map = {item.path: item.content for item in files}
+        config_toml = file_map.get(".codex/config.toml")
+        task_markdown = file_map.get("TASK.md")
+        configured_agents = self._extract_configured_agents(config_toml)
+        multi_agent_enabled = self._config_enables_multi_agent(config_toml)
+        agent_configs = [
+            {
+                "key": path.rsplit("/", maxsplit=1)[-1].removesuffix(".toml"),
+                "path": path,
+                "content": content,
+            }
+            for path, content in sorted(file_map.items())
+            if path.startswith(".codex/agents/") and path.endswith(".toml")
+        ]
+
+        if multi_agent_enabled:
+            message = (
+                f"Materialized Codex multi-agent bundle with "
+                f"{len(configured_agents)} configured role(s)."
+            )
+        else:
+            message = "Materialized Codex bundle for the run workspace."
+
+        self._append_event(
+            run_id=run_id,
+            event_type=RunEventType.NOTE,
+            payload={
+                "kind": "codex_bundle",
+                "message": message,
+                "multi_agent_enabled": multi_agent_enabled,
+                "configured_agents": configured_agents,
+                "config_toml": config_toml,
+                "agent_configs": agent_configs,
+                "task_markdown": task_markdown,
+            },
+        )
+
+    @classmethod
+    def _extract_configured_agents(cls, config_toml: str | None) -> list[str]:
+        """Return configured Codex agent keys from one materialized config."""
+        if not config_toml:
+            return []
+        try:
+            parsed = tomllib.loads(config_toml)
+        except tomllib.TOMLDecodeError:
+            return []
+        agents = parsed.get("agents")
+        if not isinstance(agents, dict):
+            return []
+        return [str(key) for key in agents.keys()]
+
+    @staticmethod
+    def _config_enables_multi_agent(config_toml: str | None) -> bool:
+        """Return whether one materialized config explicitly enables multi-agent mode."""
+        if not config_toml:
+            return False
+        try:
+            parsed = tomllib.loads(config_toml)
+        except tomllib.TOMLDecodeError:
+            return False
+        features = parsed.get("features")
+        return isinstance(features, dict) and bool(features.get("multi_agent"))
+
+    @staticmethod
+    def _find_workspace_file_content(
+        files: list[WorkspaceFileWrite],
+        path: str,
+    ) -> str:
+        """Return one materialized file body by path."""
+        for item in files:
+            if item.path == path:
+                return item.content
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Materialized workspace is missing `{path}`.",
+        )
+
     @staticmethod
     def _build_command_failure_detail(
         *,
@@ -695,6 +788,8 @@ class RunService:
 
         if session.status == "running":
             return run
+
+        self._append_codex_terminal_audit_event(run_id=run.id)
 
         if session.status == "completed":
             return self._finalize_completed_run(run, session)
@@ -740,6 +835,151 @@ class RunService:
             payload={"detail": updated.error_message},
         )
         return updated
+
+    def _append_codex_terminal_audit_event(self, *, run_id) -> None:
+        """Persist one execution-trace snapshot derived from Codex terminal JSON."""
+        try:
+            session_events = self.codex_proxy_service.get_events(str(run_id), offset=0)
+        except CodexProxyServiceError as exc:
+            self._append_event(
+                run_id=run_id,
+                event_type=RunEventType.NOTE,
+                payload={
+                    "kind": "codex_execution_trace",
+                    "message": "Codex terminal trace could not be captured.",
+                    "trace_capture_error": exc.detail,
+                },
+            )
+            return
+
+        trace_payload = self._build_codex_terminal_audit_payload(session_events)
+        self._append_event(
+            run_id=run_id,
+            event_type=RunEventType.NOTE,
+            payload=trace_payload,
+        )
+
+    @classmethod
+    def _build_codex_terminal_audit_payload(
+        cls,
+        session_events: CodexSessionEventsResponse,
+    ) -> dict[str, object]:
+        """Summarize Codex terminal output into one audit-friendly payload."""
+        skill_reads: set[str] = set()
+        skill_mentions: set[str] = set()
+        agent_config_reads: set[str] = set()
+        delegation_markers: list[str] = []
+        item_type_counts: dict[str, int] = {}
+
+        for line in cls._iter_terminal_lines(session_events):
+            if "WARN codex_core::file_watcher: failed to unwatch" in line:
+                continue
+            if not line.strip():
+                continue
+
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                if cls._DELEGATION_PATTERN.search(line):
+                    delegation_markers.append(cls._truncate_audit_line(line))
+                continue
+
+            item = payload.get("item")
+            if not isinstance(item, dict):
+                continue
+
+            item_type = item.get("type")
+            if not isinstance(item_type, str):
+                continue
+            item_type_counts[item_type] = item_type_counts.get(item_type, 0) + 1
+
+            if item_type == "command_execution":
+                for value in (item.get("command"), item.get("aggregated_output")):
+                    if not isinstance(value, str):
+                        continue
+                    skill_reads.update(cls._SKILL_PATH_PATTERN.findall(value))
+                    agent_config_reads.update(cls._AGENT_CONFIG_PATH_PATTERN.findall(value))
+                    if cls._DELEGATION_PATTERN.search(value):
+                        delegation_markers.append(cls._truncate_audit_line(value))
+                continue
+
+            if item_type == "agent_message":
+                text = item.get("text")
+                if not isinstance(text, str):
+                    continue
+                skill_mentions.update(
+                    match.group(1) for match in cls._SKILL_MENTION_PATTERN.finditer(text)
+                )
+                skill_mentions.update(
+                    match.group(1) for match in cls._BACKTICK_SLUG_PATTERN.finditer(text)
+                )
+                if cls._DELEGATION_PATTERN.search(text):
+                    delegation_markers.append(cls._truncate_audit_line(text))
+
+        unique_delegation_markers = cls._dedupe_preserve_order(delegation_markers)
+        unique_skill_refs = cls._dedupe_preserve_order(
+            [*sorted(skill_reads), *sorted(skill_mentions)]
+        )
+        unique_agent_config_reads = cls._dedupe_preserve_order(sorted(agent_config_reads))
+
+        if unique_delegation_markers:
+            message = (
+                f"Detected {len(unique_delegation_markers)} explicit delegation marker(s) "
+                "in the Codex terminal output."
+            )
+        elif unique_skill_refs or unique_agent_config_reads:
+            message = (
+                "Codex referenced skills or agent configs during execution, "
+                "but no explicit delegation markers were detected."
+            )
+        else:
+            message = (
+                "No explicit multi-agent or delegation markers were detected "
+                "in the Codex terminal output."
+            )
+
+        return {
+            "kind": "codex_execution_trace",
+            "message": message,
+            "chunk_count": len(session_events.items),
+            "skill_refs": unique_skill_refs,
+            "agent_config_reads": unique_agent_config_reads,
+            "delegation_markers": unique_delegation_markers[:5],
+            "item_type_counts": item_type_counts,
+        }
+
+    @staticmethod
+    def _iter_terminal_lines(session_events: CodexSessionEventsResponse) -> list[str]:
+        """Return complete terminal lines reconstructed from raw chunk output."""
+        lines: list[str] = []
+        buffer = ""
+        for item in session_events.items:
+            combined = f"{buffer}{item.text}"
+            normalized = combined.replace("\r\n", "\n")
+            parts = normalized.split("\n")
+            buffer = parts.pop() if parts else normalized
+            lines.extend(parts)
+        if buffer.strip():
+            lines.append(buffer)
+        return lines
+
+    @staticmethod
+    def _truncate_audit_line(value: str) -> str:
+        """Return a compact, single-line preview for audit payloads."""
+        normalized = " ".join(value.strip().split())
+        return normalized[:240]
+
+    @staticmethod
+    def _dedupe_preserve_order(items: list[str]) -> list[str]:
+        """Return one stable list with duplicates removed."""
+        unique: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            unique.append(item)
+        return unique
 
     def _finalize_completed_run(self, run, session: CodexSessionRead):
         """Convert a completed Codex session into commit, push, and draft-PR artifacts."""
