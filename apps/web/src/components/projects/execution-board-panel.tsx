@@ -27,7 +27,6 @@ type BoardColumn = {
   key: RunsBoardLane;
   title: string;
   description: string;
-  emptyLabel: string;
   statuses: RunStatus[];
   columnClassName: string;
 };
@@ -55,10 +54,6 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
         ru: "Run создан и проходит подготовительные шаги.",
         en: "Runs that were created and are still moving through preparation."
       }),
-      emptyLabel: t(locale, {
-        ru: "Нет запусков в очереди.",
-        en: "No queued runs."
-      }),
       statuses: laneStatusMap.queued,
       columnClassName:
         "border-slate-200 bg-slate-50/70 dark:border-zinc-800 dark:bg-zinc-900/70"
@@ -69,10 +64,6 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       description: t(locale, {
         ru: "Setup, Codex execution и checks идут прямо сейчас.",
         en: "Setup, Codex execution, and checks are currently in progress."
-      }),
-      emptyLabel: t(locale, {
-        ru: "Сейчас ничего не выполняется.",
-        en: "Nothing is actively executing right now."
       }),
       statuses: laneStatusMap.active,
       columnClassName:
@@ -85,10 +76,6 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
         ru: "Run уже выходит из Codex и оформляет git/PR слой.",
         en: "Codex is done and the run is finishing the git and PR layer."
       }),
-      emptyLabel: t(locale, {
-        ru: "Нет запусков на финализации.",
-        en: "No runs are in the finalization phase."
-      }),
       statuses: laneStatusMap.finalizing,
       columnClassName:
         "border-amber-200 bg-amber-50/70 dark:border-amber-500/20 dark:bg-amber-500/5"
@@ -100,10 +87,6 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
         ru: "Успешно завершенные исполнения.",
         en: "Runs that completed successfully."
       }),
-      emptyLabel: t(locale, {
-        ru: "Успешных запусков пока нет.",
-        en: "There are no completed runs yet."
-      }),
       statuses: laneStatusMap.completed,
       columnClassName:
         "border-sky-200 bg-sky-50/70 dark:border-sky-500/20 dark:bg-sky-500/5"
@@ -114,10 +97,6 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       description: t(locale, {
         ru: "Запуски с ошибкой или ручной отменой.",
         en: "Runs that failed or were cancelled."
-      }),
-      emptyLabel: t(locale, {
-        ru: "Нет упавших или отмененных запусков.",
-        en: "No failed or cancelled runs."
       }),
       statuses: laneStatusMap.failed,
       columnClassName:
@@ -441,12 +420,6 @@ export function ExecutionBoardPanel({ locale }: ExecutionBoardPanelProps) {
               </div>
 
               <div className="space-y-3">
-                {groupedRuns[column.key].length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300/80 bg-white/60 px-4 py-4 text-sm text-slate-500 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-slate-400">
-                    {column.emptyLabel}
-                  </div>
-                ) : null}
-
                 {groupedRuns[column.key].map((run) => (
                   <ExecutionBoardCard
                     key={run.id}
