@@ -4,7 +4,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-CodexSessionStatus = Literal["running", "completed", "failed", "cancelled"]
+CodexSessionStatus = Literal[
+    "running",
+    "resuming",
+    "interrupted",
+    "completed",
+    "failed",
+    "cancelled",
+]
 
 
 class CodexSessionStart(BaseModel):
@@ -30,6 +37,13 @@ class CodexSessionRead(BaseModel):
     exit_code: int | None = None
     error_message: str | None = None
     summary_text: str | None = None
+    codex_session_id: str | None = None
+    transport_kind: Literal["pty", "tmux"] = "pty"
+    transport_ref: str | None = None
+    resume_attempt_count: int = 0
+    interrupted_at: str | None = None
+    resumable: bool = False
+    recovered_from_restart: bool = False
     input_tokens: int | None = None
     output_tokens: int | None = None
     started_at: str

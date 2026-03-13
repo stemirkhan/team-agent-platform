@@ -53,3 +53,12 @@ def cancel_codex_session(run_id: str = Path(min_length=1)) -> CodexSessionRead:
         return codex_session_service.cancel_session(run_id)
     except CodexSessionServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/{run_id}/resume", response_model=CodexSessionRead)
+def resume_codex_session(run_id: str = Path(min_length=1)) -> CodexSessionRead:
+    """Resume one interrupted Codex session."""
+    try:
+        return codex_session_service.resume_session(run_id)
+    except CodexSessionServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

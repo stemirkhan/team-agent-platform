@@ -54,9 +54,20 @@ class RunService:
     _AGENT_CONFIG_PATH_PATTERN = re.compile(r"\.codex/agents/([^/\s]+)\.toml")
     _SKILL_MENTION_PATTERN = re.compile(r"(?:skill|скилл)[^`]*`([^`]+)`", re.IGNORECASE)
     _BACKTICK_SLUG_PATTERN = re.compile(r"`([a-z0-9][a-z0-9_-]{1,80})`", re.IGNORECASE)
-    _DELEGATION_PATTERN = re.compile(
-        r"\b(subagent|delegate|delegation|handoff|multi-agent|multi_agent)\b",
+    _ROLE_PROMPT_PATTERN = re.compile(
+        r"^\s*Role:\s*([a-z0-9][a-z0-9_-]{1,80})\.?\s*$",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    _MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+    _SUBAGENT_SIGNAL_PATTERN = re.compile(
+        r"\b(spawn(?:ed|ing)?|launch(?:ed|ing)?|delegat(?:e|ed|ing)|handoff|hand off)\b"
+        r"[^.\n\r]{0,120}\b(subagent|sub-agent|child agent|agent)\b",
         re.IGNORECASE,
+    )
+    _AGENT_RESULT_SECTION_PATTERN = re.compile(
+        r"(?:^|\n)(?:2\.\s*Risks or findings|3\.\s*Proposed changes|"
+        r"2\.\s*Риски или находки|3\.\s*Предлагаемые изменения)\s*(.*?)(?=\n\d+\.\s|\Z)",
+        re.IGNORECASE | re.DOTALL,
     )
     _READY_MESSAGE = (
         "Workspace is prepared and `.codex` plus `TASK.md` are materialized. "
@@ -236,6 +247,7 @@ class RunService:
             )
             workspace_files = self._build_workspace_files(
                 team_slug=team.slug,
+                team_startup_prompt=team.startup_prompt,
                 payload=payload,
                 repo_full_name=repo.full_name,
                 base_branch=workspace.base_branch,
@@ -269,13 +281,17 @@ class RunService:
                 status_value=RunStatus.STARTING_CODEX,
                 message="Starting host-side Codex session.",
             )
-            self.codex_proxy_service.start_session(
+            session = self.codex_proxy_service.start_session(
                 payload=self._build_codex_session_payload(
                     run_id=str(run.id),
                     workspace_id=workspace.id,
                     task_markdown=task_markdown,
                     codex_options=payload.codex,
                 )
+            )
+            run = self.run_repository.update(
+                run,
+                fields=self._build_run_session_fields(session),
             )
             run = self._transition_run(
                 run,
@@ -337,12 +353,30 @@ class RunService:
             RunStatus.CANCELLED.value,
         }:
             return run
+        if run.status == RunStatus.INTERRUPTED.value:
+            run = self.run_repository.update(
+                run,
+                fields={
+                    "status": RunStatus.CANCELLED.value,
+                    "error_message": None,
+                    "finished_at": datetime.now(UTC),
+                },
+            )
+            self._append_event(
+                run_id=run.id,
+                event_type=RunEventType.STATUS,
+                payload={
+                    "status": RunStatus.CANCELLED.value,
+                    "message": "Interrupted run was cancelled without resume.",
+                },
+            )
+            return run
         try:
             session = self.codex_proxy_service.cancel_session(str(run.id))
         except CodexProxyServiceError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-        if session.status in {"running", "cancelled"}:
+        if session.status in {"running", "resuming", "cancelled"}:
             run = self.run_repository.update(
                 run,
                 fields={
@@ -359,6 +393,77 @@ class RunService:
                     "message": "Run cancellation was requested.",
                 },
             )
+        return run
+
+    def resume_run(self, run_id, current_user: User):
+        """Resume one interrupted run by restarting Codex from the persisted session id."""
+        run = self.get_run(run_id, current_user)
+        if run.status != RunStatus.INTERRUPTED.value:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only interrupted runs can be resumed.",
+            )
+        if not run.workspace_id or not run.codex_session_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Run is missing workspace or Codex session metadata required for resume.",
+            )
+
+        run = self._transition_run(
+            run,
+            status_value=RunStatus.RESUMING,
+            message="Resuming the persisted Codex session after host interruption.",
+        )
+        self._append_event(
+            run_id=run.id,
+            event_type=RunEventType.NOTE,
+            payload={
+                "kind": "codex_resume_requested",
+                "message": "Resume was requested from the interrupted run state.",
+                "codex_session_id": run.codex_session_id,
+            },
+        )
+
+        try:
+            session = self.codex_proxy_service.resume_session(str(run.id))
+        except CodexProxyServiceError as exc:
+            run = self.run_repository.update(
+                run,
+                fields={
+                    "status": RunStatus.INTERRUPTED.value,
+                    "error_message": exc.detail,
+                    "finished_at": run.finished_at,
+                },
+            )
+            self._append_event(
+                run_id=run.id,
+                event_type=RunEventType.NOTE,
+                payload={
+                    "kind": "codex_resume_failed",
+                    "message": exc.detail,
+                },
+            )
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+        run = self.run_repository.update(
+            run,
+            fields={
+                **self._build_run_session_fields(session),
+                "status": RunStatus.RESUMING.value,
+                "error_message": None,
+                "finished_at": None,
+            },
+        )
+        self._append_event(
+            run_id=run.id,
+            event_type=RunEventType.NOTE,
+            payload={
+                "kind": "codex_resume_started",
+                "message": "Host executor started `codex exec resume` for this run.",
+                "resume_attempt_count": session.resume_attempt_count,
+                "codex_session_id": session.codex_session_id,
+            },
+        )
         return run
 
     def get_terminal_session(self, run_id, current_user: User) -> CodexSessionRead:
@@ -428,6 +533,7 @@ class RunService:
         self,
         *,
         team_slug: str,
+        team_startup_prompt: str | None,
         payload: RunCreate,
         repo_full_name: str,
         base_branch: str,
@@ -448,6 +554,7 @@ class RunService:
         files = self._extract_text_files_from_zip(bundle_bytes)
         files["TASK.md"] = self._build_task_markdown(
             payload=payload,
+            team_startup_prompt=team_startup_prompt,
             repo_full_name=repo_full_name,
             base_branch=base_branch,
             working_branch=working_branch,
@@ -486,6 +593,7 @@ class RunService:
         cls,
         *,
         payload: RunCreate,
+        team_startup_prompt: str | None,
         repo_full_name: str,
         base_branch: str,
         working_branch: str,
@@ -498,13 +606,25 @@ class RunService:
         """Render the task handoff file materialized into the repo workspace."""
         lines = [
             f"# {payload.title or issue_title or 'Execution Task'}",
-            "",
-            "## Context",
-            f"- Repository: `{repo_full_name}`",
-            f"- Base branch: `{base_branch}`",
-            f"- Working branch: `{working_branch}`",
-            f"- Team: `{payload.team_slug}`",
         ]
+        if team_startup_prompt and team_startup_prompt.strip():
+            lines.extend(
+                [
+                    "",
+                    "## Codex Startup Prompt",
+                    team_startup_prompt.strip(),
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                "## Context",
+                f"- Repository: `{repo_full_name}`",
+                f"- Base branch: `{base_branch}`",
+                f"- Working branch: `{working_branch}`",
+                f"- Team: `{payload.team_slug}`",
+            ]
+        )
         if payload.summary:
             lines.extend(["", "## Goal Summary", payload.summary.strip()])
         if issue_number is not None:
@@ -769,7 +889,11 @@ class RunService:
 
     def _sync_run_with_codex_session(self, run):
         """Reconcile DB run state with host-side Codex session state when needed."""
-        if run.status not in {RunStatus.STARTING_CODEX.value, RunStatus.RUNNING.value}:
+        if run.status not in {
+            RunStatus.STARTING_CODEX.value,
+            RunStatus.RUNNING.value,
+            RunStatus.RESUMING.value,
+        }:
             return run
 
         try:
@@ -787,20 +911,111 @@ class RunService:
             return self._fail_run(run, detail=exc.detail)
 
         if session.status == "running":
+            fields = self._build_run_session_fields(session)
+            if run.status == RunStatus.RESUMING.value:
+                updated = self.run_repository.update(
+                    run,
+                    fields={
+                        **fields,
+                        "status": RunStatus.RUNNING.value,
+                        "error_message": None,
+                        "finished_at": None,
+                    },
+                )
+                self._append_event(
+                    run_id=updated.id,
+                    event_type=RunEventType.STATUS,
+                    payload={
+                        "status": RunStatus.RUNNING.value,
+                        "message": "Codex session resumed and is running again.",
+                    },
+                )
+                self._append_event(
+                    run_id=updated.id,
+                    event_type=RunEventType.NOTE,
+                    payload={
+                        "kind": "codex_resume_completed",
+                        "message": "Resume completed and terminal output is live again.",
+                        "resume_attempt_count": session.resume_attempt_count,
+                    },
+                )
+                return updated
+            if fields:
+                return self.run_repository.update(run, fields=fields)
             return run
+
+        if session.status == "resuming":
+            return self.run_repository.update(
+                run,
+                fields={
+                    **self._build_run_session_fields(session),
+                    "status": RunStatus.RESUMING.value,
+                    "error_message": None,
+                    "finished_at": None,
+                },
+            )
 
         self._append_codex_terminal_audit_event(run_id=run.id)
 
+        if session.status == "interrupted":
+            interrupted_at = self._parse_terminal_timestamp(session.interrupted_at)
+            updated = self.run_repository.update(
+                run,
+                fields={
+                    **self._build_run_session_fields(session),
+                    "status": RunStatus.INTERRUPTED.value,
+                    "error_message": session.error_message,
+                    "finished_at": interrupted_at or datetime.now(UTC),
+                    "interrupted_at": interrupted_at or datetime.now(UTC),
+                },
+            )
+            self._append_event(
+                run_id=updated.id,
+                event_type=RunEventType.STATUS,
+                payload={
+                    "status": RunStatus.INTERRUPTED.value,
+                    "message": session.error_message or "Codex session was interrupted.",
+                },
+            )
+            self._append_event(
+                run_id=updated.id,
+                event_type=RunEventType.NOTE,
+                payload={
+                    "kind": "codex_session_interrupted",
+                    "message": session.error_message or "Codex session was interrupted.",
+                    "resumable": session.resumable,
+                    "codex_session_id": session.codex_session_id,
+                    "resume_attempt_count": session.resume_attempt_count,
+                },
+            )
+            if session.resumable:
+                self._append_event(
+                    run_id=updated.id,
+                    event_type=RunEventType.NOTE,
+                    payload={
+                        "kind": "codex_resume_available",
+                        "message": (
+                            "The interrupted Codex session can be resumed "
+                            "from the same run."
+                        ),
+                        "codex_session_id": session.codex_session_id,
+                    },
+                )
+            return updated
+
         if session.status == "completed":
+            run = self.run_repository.update(run, fields=self._build_run_session_fields(session))
             return self._finalize_completed_run(run, session)
 
         if session.status == "cancelled":
             updated = self.run_repository.update(
                 run,
                 fields={
+                    **self._build_run_session_fields(session),
                     "status": RunStatus.CANCELLED.value,
                     "error_message": None,
-                    "finished_at": datetime.now(UTC),
+                    "finished_at": self._parse_terminal_timestamp(session.finished_at)
+                    or datetime.now(UTC),
                 },
             )
             self._append_event(
@@ -816,9 +1031,11 @@ class RunService:
         updated = self.run_repository.update(
             run,
             fields={
+                **self._build_run_session_fields(session),
                 "status": RunStatus.FAILED.value,
                 "error_message": session.error_message or "Codex session failed.",
-                "finished_at": datetime.now(UTC),
+                "finished_at": self._parse_terminal_timestamp(session.finished_at)
+                or datetime.now(UTC),
             },
         )
         self._append_event(
@@ -835,6 +1052,30 @@ class RunService:
             payload={"detail": updated.error_message},
         )
         return updated
+
+    @staticmethod
+    def _build_run_session_fields(session: CodexSessionRead) -> dict[str, object]:
+        """Return run fields that mirror host-side Codex session metadata."""
+        fields: dict[str, object] = {
+            "codex_session_id": session.codex_session_id,
+            "transport_kind": session.transport_kind,
+            "transport_ref": session.transport_ref,
+            "resume_attempt_count": session.resume_attempt_count,
+        }
+        interrupted_at = RunService._parse_terminal_timestamp(session.interrupted_at)
+        if interrupted_at is not None:
+            fields["interrupted_at"] = interrupted_at
+        return fields
+
+    @staticmethod
+    def _parse_terminal_timestamp(value: str | None) -> datetime | None:
+        """Parse one host-side UTC timestamp emitted in terminal/session payloads."""
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
 
     def _append_codex_terminal_audit_event(self, *, run_id) -> None:
         """Persist one execution-trace snapshot derived from Codex terminal JSON."""
@@ -869,6 +1110,8 @@ class RunService:
         skill_mentions: set[str] = set()
         agent_config_reads: set[str] = set()
         delegation_markers: list[str] = []
+        thread_ids: list[str] = []
+        spawned_agents_by_thread: dict[str, dict[str, str | None]] = {}
         item_type_counts: dict[str, int] = {}
 
         for line in cls._iter_terminal_lines(session_events):
@@ -880,9 +1123,12 @@ class RunService:
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError:
-                if cls._DELEGATION_PATTERN.search(line):
-                    delegation_markers.append(cls._truncate_audit_line(line))
                 continue
+
+            if payload.get("type") == "thread.started":
+                thread_id = payload.get("thread_id")
+                if isinstance(thread_id, str) and thread_id.strip():
+                    thread_ids.append(thread_id.strip())
 
             item = payload.get("item")
             if not isinstance(item, dict):
@@ -899,8 +1145,6 @@ class RunService:
                         continue
                     skill_reads.update(cls._SKILL_PATH_PATTERN.findall(value))
                     agent_config_reads.update(cls._AGENT_CONFIG_PATH_PATTERN.findall(value))
-                    if cls._DELEGATION_PATTERN.search(value):
-                        delegation_markers.append(cls._truncate_audit_line(value))
                 continue
 
             if item_type == "agent_message":
@@ -913,35 +1157,96 @@ class RunService:
                 skill_mentions.update(
                     match.group(1) for match in cls._BACKTICK_SLUG_PATTERN.finditer(text)
                 )
-                if cls._DELEGATION_PATTERN.search(text):
+                if cls._SUBAGENT_SIGNAL_PATTERN.search(text):
                     delegation_markers.append(cls._truncate_audit_line(text))
+                continue
 
+            if item_type != "collab_tool_call":
+                continue
+
+            tool = item.get("tool")
+            receiver_thread_ids = cls._coerce_receiver_thread_ids(item.get("receiver_thread_ids"))
+            if not receiver_thread_ids:
+                continue
+
+            if tool == "spawn_agent":
+                role = cls._extract_role_from_prompt(item.get("prompt"))
+                cls._merge_spawned_agent_states(
+                    spawned_agents_by_thread=spawned_agents_by_thread,
+                    receiver_thread_ids=receiver_thread_ids,
+                    role=role,
+                    agents_states=item.get("agents_states"),
+                )
+                continue
+
+            if tool in {"wait", "close_agent"}:
+                cls._merge_spawned_agent_states(
+                    spawned_agents_by_thread=spawned_agents_by_thread,
+                    receiver_thread_ids=receiver_thread_ids,
+                    role=None,
+                    agents_states=item.get("agents_states"),
+                )
+
+        unique_thread_ids = cls._dedupe_preserve_order(thread_ids)
+        spawned_agents = list(spawned_agents_by_thread.values())
+        spawned_thread_ids = [
+            thread_id
+            for agent in spawned_agents
+            if isinstance(thread_id := agent.get("thread_id"), str) and thread_id
+        ]
+        additional_thread_ids = cls._dedupe_preserve_order(
+            [*unique_thread_ids[1:], *spawned_thread_ids]
+        )
         unique_delegation_markers = cls._dedupe_preserve_order(delegation_markers)
         unique_skill_refs = cls._dedupe_preserve_order(
             [*sorted(skill_reads), *sorted(skill_mentions)]
         )
         unique_agent_config_reads = cls._dedupe_preserve_order(sorted(agent_config_reads))
 
-        if unique_delegation_markers:
+        if spawned_agents:
+            signal_level = "confirmed"
             message = (
-                f"Detected {len(unique_delegation_markers)} explicit delegation marker(s) "
-                "in the Codex terminal output."
+                f"Observed {len(spawned_agents)} spawned agent(s) via collaboration tool calls; "
+                "this is confirmed sub-agent execution."
             )
-        elif unique_skill_refs or unique_agent_config_reads:
+        elif additional_thread_ids:
+            signal_level = "confirmed"
             message = (
-                "Codex referenced skills or agent configs during execution, "
-                "but no explicit delegation markers were detected."
+                f"Observed {len(additional_thread_ids)} additional Codex thread id(s); "
+                "this is strong evidence of sub-agent execution."
+            )
+        elif unique_delegation_markers:
+            signal_level = "confirmed"
+            message = (
+                f"Observed {len(unique_delegation_markers)} explicit sub-agent signal(s) "
+                "in Codex agent messages."
+            )
+        elif unique_agent_config_reads:
+            signal_level = "possible"
+            message = (
+                "Codex read agent config files during execution, "
+                "but no confirmed sub-agent spawn signals were captured."
+            )
+        elif unique_skill_refs:
+            signal_level = "none"
+            message = (
+                "Codex referenced skills during execution, "
+                "but no multi-agent signals were captured."
             )
         else:
+            signal_level = "none"
             message = (
-                "No explicit multi-agent or delegation markers were detected "
-                "in the Codex terminal output."
+                "No sub-agent execution signals were captured in the Codex terminal output."
             )
 
         return {
             "kind": "codex_execution_trace",
             "message": message,
+            "multi_agent_signal_level": signal_level,
             "chunk_count": len(session_events.items),
+            "thread_ids": unique_thread_ids[:10],
+            "additional_thread_ids": additional_thread_ids[:10],
+            "spawned_agents": spawned_agents[:10],
             "skill_refs": unique_skill_refs,
             "agent_config_reads": unique_agent_config_reads,
             "delegation_markers": unique_delegation_markers[:5],
@@ -968,6 +1273,85 @@ class RunService:
         """Return a compact, single-line preview for audit payloads."""
         normalized = " ".join(value.strip().split())
         return normalized[:240]
+
+    @classmethod
+    def _extract_role_from_prompt(cls, value: object) -> str | None:
+        """Return one role slug from a spawned-agent prompt when present."""
+        if not isinstance(value, str):
+            return None
+        match = cls._ROLE_PROMPT_PATTERN.search(value)
+        if not match:
+            return None
+        role = match.group(1).strip()
+        return role or None
+
+    @staticmethod
+    def _coerce_receiver_thread_ids(value: object) -> list[str]:
+        """Return one stable list of receiver thread ids."""
+        if not isinstance(value, list):
+            return []
+        thread_ids: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip()
+            if not normalized:
+                continue
+            thread_ids.append(normalized)
+        return thread_ids
+
+    @classmethod
+    def _merge_spawned_agent_states(
+        cls,
+        *,
+        spawned_agents_by_thread: dict[str, dict[str, str | None]],
+        receiver_thread_ids: list[str],
+        role: str | None,
+        agents_states: object,
+    ) -> None:
+        """Merge spawned-agent metadata from collab tool calls."""
+        agent_state_map = agents_states if isinstance(agents_states, dict) else {}
+        for thread_id in receiver_thread_ids:
+            agent = spawned_agents_by_thread.setdefault(
+                thread_id,
+                {
+                    "thread_id": thread_id,
+                    "role": None,
+                    "status": None,
+                    "result_preview": None,
+                },
+            )
+            if role and not agent.get("role"):
+                agent["role"] = role
+
+            state_payload = agent_state_map.get(thread_id)
+            if not isinstance(state_payload, dict):
+                continue
+            status = state_payload.get("status")
+            if isinstance(status, str) and status.strip():
+                agent["status"] = status.strip()
+            message = state_payload.get("message")
+            if isinstance(message, str) and message.strip():
+                agent["result_preview"] = cls._extract_agent_result_preview(message)
+
+    @classmethod
+    def _extract_agent_result_preview(cls, value: str) -> str:
+        """Extract one compact, user-facing preview from a structured sub-agent report."""
+        match = cls._AGENT_RESULT_SECTION_PATTERN.search(value)
+        candidate = match.group(1) if match else value
+
+        cleaned_lines: list[str] = []
+        for raw_line in candidate.splitlines():
+            normalized = " ".join(raw_line.strip().split())
+            if not normalized:
+                continue
+            normalized = cls._MARKDOWN_LINK_PATTERN.sub(r"\1", normalized)
+            if normalized.startswith("- "):
+                normalized = normalized[2:].strip()
+            cleaned_lines.append(normalized)
+
+        compact = " ".join(cleaned_lines) if cleaned_lines else value
+        return cls._truncate_audit_line(compact)
 
     @staticmethod
     def _dedupe_preserve_order(items: list[str]) -> list[str]:
@@ -1285,6 +1669,8 @@ class RunService:
             RunStatus.RUNNING_SETUP.value: "setup",
             RunStatus.STARTING_CODEX.value: "codex",
             RunStatus.RUNNING.value: "codex",
+            RunStatus.INTERRUPTED.value: "codex",
+            RunStatus.RESUMING.value: "codex",
             RunStatus.RUNNING_CHECKS.value: "checks",
             RunStatus.COMMITTING.value: "git_pr",
             RunStatus.PUSHING.value: "git_pr",
@@ -1303,7 +1689,11 @@ class RunService:
             status_value = payload.get("status") if isinstance(payload, dict) else None
             if not isinstance(status_value, str):
                 continue
-            if status_value in {RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
+            if status_value in {
+                RunStatus.INTERRUPTED.value,
+                RunStatus.FAILED.value,
+                RunStatus.CANCELLED.value,
+            }:
                 return last_phase
             phase = self._status_to_phase(status_value)
             if phase is not None:
@@ -1374,10 +1764,20 @@ class RunService:
                 return "completed"
             return "not_started"
 
+        if run_status == RunStatus.INTERRUPTED.value:
+            if failure_phase == phase_key:
+                return "interrupted"
+            if has_events:
+                return "completed"
+            return "not_started"
+
         if run_status == RunStatus.COMPLETED.value:
             if has_events or phase_key in {"setup", "checks"}:
                 return "completed"
             return "not_started"
+
+        if run_status == RunStatus.RESUMING.value and run_phase == phase_key:
+            return "resuming"
 
         if run_phase == phase_key:
             return "running"

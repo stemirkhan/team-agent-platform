@@ -98,11 +98,16 @@ def test_manage_draft_team_items_without_version_selection(client: TestClient) -
         "slug": "mvp-backend-team",
         "title": "MVP Backend Team",
         "description": "Core team for backend quality checks.",
+        "startup_prompt": "Start as the orchestrator and delegate to specialist roles when needed.",
     }
 
     create_team_response = client.post("/api/v1/teams", json=team_payload, headers=headers)
     assert create_team_response.status_code == 201
     assert create_team_response.json()["status"] == "draft"
+    assert (
+        create_team_response.json()["startup_prompt"]
+        == "Start as the orchestrator and delegate to specialist roles when needed."
+    )
 
     update_team_response = client.patch(
         "/api/v1/teams/mvp-backend-team",
@@ -110,10 +115,15 @@ def test_manage_draft_team_items_without_version_selection(client: TestClient) -
         json={
             "title": "MVP Backend Team Draft",
             "description": "Draft bundle for backend reviewers.",
+            "startup_prompt": "Use the orchestrator role first, then coordinate the specialists.",
         },
     )
     assert update_team_response.status_code == 200
     assert update_team_response.json()["title"] == "MVP Backend Team Draft"
+    assert (
+        update_team_response.json()["startup_prompt"]
+        == "Use the orchestrator role first, then coordinate the specialists."
+    )
 
     add_reviewer_response = client.post(
         "/api/v1/teams/mvp-backend-team/items",
@@ -345,6 +355,150 @@ def test_only_owner_can_modify_team(client: TestClient) -> None:
     publish_response = client.post("/api/v1/teams/owner-team/publish", headers=intruder_headers)
     assert publish_response.status_code == 403
     assert publish_response.json()["detail"] == "Only the author can modify this team."
+
+
+def test_published_team_allows_only_startup_prompt_updates(client: TestClient) -> None:
+    """Published teams keep composition locked but allow startup prompt edits."""
+    headers = _auth_headers(
+        client,
+        email="published-owner@example.com",
+        display_name="Published Owner",
+    )
+
+    agent_slug = _configure_agent(
+        client,
+        headers=headers,
+        slug="published-team-agent",
+        title="Published Team Agent",
+    )
+
+    create_response = client.post(
+        "/api/v1/teams",
+        json={
+            "slug": "published-team",
+            "title": "Published Team",
+            "description": "Published team used for startup prompt edits.",
+            "startup_prompt": "Initial startup prompt.",
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 201
+    assert create_response.json()["author_id"] is not None
+
+    add_item_response = client.post(
+        "/api/v1/teams/published-team/items",
+        json={
+            "agent_slug": agent_slug,
+            "role_name": "reviewer",
+        },
+        headers=headers,
+    )
+    assert add_item_response.status_code == 200
+
+    publish_response = client.post("/api/v1/teams/published-team/publish", headers=headers)
+    assert publish_response.status_code == 200
+    assert publish_response.json()["status"] == "published"
+
+    startup_prompt_response = client.patch(
+        "/api/v1/teams/published-team",
+        json={
+            "startup_prompt": (
+                "Act as the orchestrator first and delegate when the task spans "
+                "multiple roles."
+            ),
+        },
+        headers=headers,
+    )
+    assert startup_prompt_response.status_code == 200
+    assert (
+        startup_prompt_response.json()["startup_prompt"]
+        == "Act as the orchestrator first and delegate when the task spans multiple roles."
+    )
+    assert startup_prompt_response.json()["title"] == "Published Team"
+
+    title_response = client.patch(
+        "/api/v1/teams/published-team",
+        json={"title": "Renamed Published Team"},
+        headers=headers,
+    )
+    assert title_response.status_code == 400
+    assert (
+        title_response.json()["detail"]
+        == "Published teams only allow startup_prompt updates."
+    )
+
+    mixed_response = client.patch(
+        "/api/v1/teams/published-team",
+        json={
+            "startup_prompt": "Retry with a new startup prompt.",
+            "description": "Should stay locked after publish.",
+        },
+        headers=headers,
+    )
+    assert mixed_response.status_code == 400
+    assert (
+        mixed_response.json()["detail"]
+        == "Published teams only allow startup_prompt updates."
+    )
+
+
+def test_non_owner_cannot_update_published_team_startup_prompt(client: TestClient) -> None:
+    """Published startup prompt edits remain owner-only."""
+    owner_headers = _auth_headers(
+        client,
+        email="published-owner-2@example.com",
+        display_name="Published Owner Two",
+    )
+    intruder_headers = _auth_headers(
+        client,
+        email="published-intruder@example.com",
+        display_name="Published Intruder",
+    )
+
+    agent_slug = _configure_agent(
+        client,
+        headers=owner_headers,
+        slug="published-team-agent-two",
+        title="Published Team Agent Two",
+    )
+
+    create_response = client.post(
+        "/api/v1/teams",
+        json={
+            "slug": "owner-published-team",
+            "title": "Owner Published Team",
+            "description": "Published team with restricted startup prompt editing.",
+        },
+        headers=owner_headers,
+    )
+    assert create_response.status_code == 201
+
+    add_item_response = client.post(
+        "/api/v1/teams/owner-published-team/items",
+        json={
+            "agent_slug": agent_slug,
+            "role_name": "reviewer",
+        },
+        headers=owner_headers,
+    )
+    assert add_item_response.status_code == 200
+
+    publish_response = client.post(
+        "/api/v1/teams/owner-published-team/publish",
+        headers=owner_headers,
+    )
+    assert publish_response.status_code == 200
+
+    startup_prompt_response = client.patch(
+        "/api/v1/teams/owner-published-team",
+        json={"startup_prompt": "Intruder attempt."},
+        headers=intruder_headers,
+    )
+    assert startup_prompt_response.status_code == 403
+    assert (
+        startup_prompt_response.json()["detail"]
+        == "Only the author can modify this team."
+    )
 
 
 def test_get_my_teams_returns_only_current_user_teams(client: TestClient) -> None:

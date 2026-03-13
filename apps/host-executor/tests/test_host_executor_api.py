@@ -28,6 +28,7 @@ from host_executor_app.schemas.github import (
     GitHubRepoListResponse,
     GitHubRepoRead,
 )
+from host_executor_app.services.host_diagnostics_service import HostDiagnosticsService
 
 
 def test_host_executor_healthz() -> None:
@@ -51,6 +52,21 @@ def test_host_executor_diagnostics_shape() -> None:
     assert "ready" in payload
     assert "tools" in payload
     assert "codex" in payload["tools"]
+
+
+def test_host_executor_diagnostics_service_parses_tmux_two_part_version() -> None:
+    """tmux outputs without a patch segment should still be treated as valid versions."""
+    service = HostDiagnosticsService()
+
+    version, version_ok, error_message = service._resolve_version(
+        "/usr/bin/tmux",
+        ["-V"],
+        "3.2.0",
+    )
+
+    assert version == "3.4"
+    assert version_ok is True
+    assert error_message is None
 
 
 def test_host_executor_github_repo_endpoints(monkeypatch) -> None:
@@ -334,6 +350,11 @@ def test_host_executor_codex_session_endpoints(monkeypatch) -> None:
         "cancel_session",
         lambda run_id: session.model_copy(update={"status": "cancelled"}),
     )
+    monkeypatch.setattr(
+        codex_api.codex_session_service,
+        "resume_session",
+        lambda run_id: session.model_copy(update={"status": "resuming", "resume_attempt_count": 1}),
+    )
 
     start_response = client.post(
         "/codex/sessions/start",
@@ -357,3 +378,8 @@ def test_host_executor_codex_session_endpoints(monkeypatch) -> None:
     cancel_response = client.post("/codex/sessions/run-1/cancel")
     assert cancel_response.status_code == 200
     assert cancel_response.json()["status"] == "cancelled"
+
+    resume_response = client.post("/codex/sessions/run-1/resume")
+    assert resume_response.status_code == 200
+    assert resume_response.json()["status"] == "resuming"
+    assert resume_response.json()["resume_attempt_count"] == 1

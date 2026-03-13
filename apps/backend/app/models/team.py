@@ -40,6 +40,7 @@ class Team(Base):
     slug: Mapped[str] = mapped_column(String(120), index=True, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    startup_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     author_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

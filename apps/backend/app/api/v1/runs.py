@@ -77,6 +77,16 @@ def cancel_run(
     return service.cancel_run(run_id, user)
 
 
+@router.post("/{run_id}/resume", response_model=RunRead)
+def resume_run(
+    run_id: UUID,
+    user: User = Depends(get_current_user),
+    service: RunService = Depends(get_run_service),
+) -> RunRead:
+    """Resume one interrupted host-side Codex session."""
+    return service.resume_run(run_id, user)
+
+
 @router.get("/{run_id}/terminal/session", response_model=CodexSessionRead)
 def get_run_terminal_session(
     run_id: UUID,
@@ -155,7 +165,7 @@ async def stream_run_terminal(
                     }
                 )
             )
-            if status_value in {"completed", "failed", "cancelled"}:
+            if status_value in {"completed", "interrupted", "failed", "cancelled"}:
                 break
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:

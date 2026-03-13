@@ -14,7 +14,7 @@ import {
 } from "@/lib/api";
 import { t, type Locale } from "@/lib/i18n";
 
-const terminalStatuses = new Set<RunStatus | string>(["completed", "failed", "cancelled"]);
+const terminalStatuses = new Set<RunStatus | string>(["completed", "interrupted", "failed", "cancelled"]);
 
 type RunTerminalPanelProps = {
   locale: Locale;
@@ -405,6 +405,7 @@ export function RunTerminalPanel({ locale, runId, runStatus, token }: RunTermina
                 error_message: payload.error_message,
                 finished_at:
                   payload.status === "completed" ||
+                  payload.status === "interrupted" ||
                   payload.status === "failed" ||
                   payload.status === "cancelled"
                     ? new Date().toISOString()

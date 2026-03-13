@@ -1,13 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { Layers3, PlaySquare, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Layers3,
+  Pencil,
+  PlaySquare,
+  Save,
+  ShieldCheck,
+  Sparkles,
+  UsersRound,
+  X
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ExportControls } from "@/components/exports/export-controls";
 import { TeamBuilderControls } from "@/components/teams/team-builder-controls";
 import { Button } from "@/components/ui/button";
-import { type TeamDetails } from "@/lib/api";
+import { fetchCurrentUser, getAccessToken, type AuthUser } from "@/lib/auth-client";
+import { updateTeam, type TeamDetails } from "@/lib/api";
 import { formatStatus, t, type Locale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -18,16 +29,234 @@ type TeamDetailShowcaseProps = {
 
 type TeamPageTabId = "overview" | "composition" | "export";
 
+type StartupPromptCardProps = {
+  locale: Locale;
+  team: TeamDetails;
+  onTeamUpdated: (team: TeamDetails) => void;
+};
+
+function StartupPromptCard({ locale, team, onTeamUpdated }: StartupPromptCardProps) {
+  const router = useRouter();
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [draftValue, setDraftValue] = useState(team.startup_prompt ?? "");
+  const [editing, setEditing] = useState(false);
+  const [loadingUser, setLoadingUser] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftValue(team.startup_prompt ?? "");
+    setEditing(false);
+    setErrorMessage(null);
+  }, [team.startup_prompt, team.updated_at]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const token = getAccessToken();
+
+    if (!token) {
+      setCurrentUser(null);
+      setLoadingUser(false);
+      return;
+    }
+
+    const currentToken = token;
+    setLoadingUser(true);
+
+    async function resolveUser() {
+      try {
+        const nextUser = await fetchCurrentUser(currentToken);
+        if (!cancelled) {
+          setCurrentUser(nextUser);
+          setLoadingUser(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setCurrentUser(null);
+          setLoadingUser(false);
+        }
+      }
+    }
+
+    void resolveUser();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const canEditStartupPrompt =
+    team.status === "published" &&
+    Boolean(team.author_id) &&
+    currentUser?.id === team.author_id;
+
+  async function onSaveStartupPrompt(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const token = getAccessToken();
+    if (!token) {
+      router.push("/auth/login");
+      return;
+    }
+
+    setSaving(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const nextTeam = await updateTeam(
+        team.slug,
+        {
+          startup_prompt: draftValue.trim() || null
+        },
+        token
+      );
+      onTeamUpdated(nextTeam);
+      setEditing(false);
+      setSuccessMessage(
+        t(locale, {
+          ru: "Стартовый промт команды обновлен.",
+          en: "Team startup prompt updated."
+        })
+      );
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : t(locale, {
+              ru: "Не удалось обновить стартовый промт команды.",
+              en: "Failed to update the team startup prompt."
+            })
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function onCancelEditing() {
+    setDraftValue(team.startup_prompt ?? "");
+    setEditing(false);
+    setErrorMessage(null);
+  }
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <PlaySquare className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+          <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+            {t(locale, { ru: "Стартовый промт Codex", en: "Codex startup prompt" })}
+          </h2>
+        </div>
+        {canEditStartupPrompt ? (
+          editing ? (
+            <div className="flex items-center gap-2">
+              <Button
+                disabled={saving}
+                onClick={onCancelEditing}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                <X className="mr-2 h-4 w-4" />
+                {t(locale, { ru: "Отмена", en: "Cancel" })}
+              </Button>
+              <Button form="team-startup-prompt-form" disabled={saving} size="sm" type="submit">
+                <Save className="mr-2 h-4 w-4" />
+                {saving
+                  ? t(locale, { ru: "Сохранение...", en: "Saving..." })
+                  : t(locale, { ru: "Сохранить", en: "Save" })}
+              </Button>
+            </div>
+          ) : (
+            <Button onClick={() => setEditing(true)} size="sm" type="button" variant="secondary">
+              <Pencil className="mr-2 h-4 w-4" />
+              {t(locale, { ru: "Изменить промт", en: "Edit prompt" })}
+            </Button>
+          )
+        ) : null}
+      </div>
+
+      {editing ? (
+        <form className="mt-4 space-y-4" id="team-startup-prompt-form" onSubmit={onSaveStartupPrompt}>
+          <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
+            {t(locale, {
+              ru: "Этот стартовый промт добавляется в TASK.md и влияет на начальный prompt Codex для каждого нового run команды.",
+              en: "This startup prompt is added to TASK.md and becomes part of the initial Codex prompt for every new team run."
+            })}
+          </p>
+          <textarea
+            className="min-h-[200px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-100 dark:placeholder:text-slate-500"
+            disabled={saving}
+            onChange={(event) => setDraftValue(event.target.value)}
+            placeholder={t(locale, {
+              ru: "Например: Начни с orchestrator, разбей задачу на backend/frontend ветки и делегируй работу профильным ролям.",
+              en: "For example: Start as the orchestrator, split the task into backend/frontend tracks, and delegate work to specialist roles."
+            })}
+            value={draftValue}
+          />
+        </form>
+      ) : (
+        <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
+          {team.startup_prompt ??
+            t(locale, {
+              ru: "Для этой команды стартовый промт пока не задан.",
+              en: "No startup prompt has been configured for this team yet."
+            })}
+        </p>
+      )}
+
+      {team.status === "published" ? (
+        <p className="mt-4 text-xs leading-6 text-slate-500 dark:text-slate-400">
+          {canEditStartupPrompt
+            ? t(locale, {
+                ru: "Published-команду можно тонко подстроить через startup prompt без возврата к draft-композиции.",
+                en: "Published teams can be tuned through the startup prompt without reopening the draft composition."
+              })
+            : loadingUser
+              ? t(locale, {
+                  ru: "Проверяем, доступно ли редактирование стартового промта для текущего пользователя.",
+                  en: "Checking whether startup prompt editing is available for the current user."
+                })
+              : t(locale, {
+                  ru: "После публикации состав команды остаётся locked; startup prompt может менять только автор команды.",
+                  en: "After publish, the team composition stays locked; only the team author can update the startup prompt."
+                })}
+        </p>
+      ) : null}
+
+      {errorMessage ? (
+        <p className="mt-3 rounded-2xl border border-rose-300/70 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
+          {errorMessage}
+        </p>
+      ) : null}
+
+      {successMessage ? (
+        <p className="mt-3 rounded-2xl border border-emerald-300/70 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200">
+          {successMessage}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
+  const [teamState, setTeamState] = useState(team);
   const [activeTab, setActiveTab] = useState<TeamPageTabId>("overview");
 
+  useEffect(() => {
+    setTeamState(team);
+  }, [team]);
+
   const requiredItems = useMemo(
-    () => team.items.filter((item) => item.is_required),
-    [team.items]
+    () => teamState.items.filter((item) => item.is_required),
+    [teamState.items]
   );
   const optionalItems = useMemo(
-    () => team.items.filter((item) => !item.is_required),
-    [team.items]
+    () => teamState.items.filter((item) => !item.is_required),
+    [teamState.items]
   );
 
   const mainTabs = [
@@ -59,13 +288,15 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
             </h2>
           </div>
           <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
-            {team.description ??
+            {teamState.description ??
               t(locale, {
                 ru: "Описание команды пока не добавлено.",
                 en: "No team description has been added yet."
-              })}
+            })}
           </p>
         </div>
+
+        <StartupPromptCard locale={locale} onTeamUpdated={setTeamState} team={teamState} />
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex items-center justify-between gap-3">
@@ -76,11 +307,11 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
               </h2>
             </div>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-900 dark:text-slate-200 dark:ring-zinc-700">
-              {team.items.length}
+              {teamState.items.length}
             </span>
           </div>
 
-          {team.items.length === 0 ? (
+          {teamState.items.length === 0 ? (
             <div className="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500 dark:border-zinc-700 dark:text-slate-400">
               {t(locale, {
                 ru: "В этой команде пока нет агентов.",
@@ -89,7 +320,7 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
             </div>
           ) : (
             <div className="mt-4 space-y-3">
-              {team.items
+              {teamState.items
                 .slice()
                 .sort((left, right) => left.order_index - right.order_index)
                 .map((item) => (
@@ -155,21 +386,29 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
           <dl className="mt-4 space-y-3 text-sm">
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Автор", en: "Author" })}</dt>
-              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">{team.author_name}</dd>
+              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">{teamState.author_name}</dd>
             </div>
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Slug", en: "Slug" })}</dt>
-              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">{team.slug}</dd>
+              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">{teamState.slug}</dd>
             </div>
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Статус", en: "Status" })}</dt>
               <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">
-                {formatStatus(locale, team.status)}
+                {formatStatus(locale, teamState.status)}
               </dd>
             </div>
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Runtime", en: "Runtime" })}</dt>
               <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">codex</dd>
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Startup prompt", en: "Startup prompt" })}</dt>
+              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">
+                {teamState.startup_prompt
+                  ? t(locale, { ru: "configured", en: "configured" })
+                  : t(locale, { ru: "none", en: "none" })}
+              </dd>
             </div>
           </dl>
         </div>
@@ -184,7 +423,7 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
           <ul className="mt-4 space-y-3 text-sm text-slate-700 dark:text-slate-200">
             <li className="flex items-center justify-between gap-3">
               <span>{t(locale, { ru: "Всего ролей", en: "Total roles" })}</span>
-              <span className="font-semibold">{team.items.length}</span>
+              <span className="font-semibold">{teamState.items.length}</span>
             </li>
             <li className="flex items-center justify-between gap-3">
               <span>{t(locale, { ru: "Обязательные", en: "Required" })}</span>
@@ -211,7 +450,7 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
             })}
           </p>
           <div className="mt-4">
-            <Link href={`/runs/new?team=${encodeURIComponent(team.slug)}`}>
+            <Link href={`/runs/new?team=${encodeURIComponent(teamState.slug)}`}>
               <Button variant="secondary">
                 <PlaySquare className="mr-2 h-4 w-4" />
                 {t(locale, { ru: "Запустить эту команду", en: "Run this team" })}
@@ -232,11 +471,11 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
               <div className="flex flex-wrap gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-950/90 dark:text-slate-200 dark:ring-zinc-700">
                   <ShieldCheck className="h-3.5 w-3.5" />
-                  {formatStatus(locale, team.status)}
+                  {formatStatus(locale, teamState.status)}
                 </span>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-950/90 dark:text-slate-200 dark:ring-zinc-700">
                   <UsersRound className="h-3.5 w-3.5" />
-                  {team.items.length} {t(locale, { ru: "ролей", en: "roles" })}
+                  {teamState.items.length} {t(locale, { ru: "ролей", en: "roles" })}
                 </span>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-950/90 dark:text-slate-200 dark:ring-zinc-700">
                   <Sparkles className="h-3.5 w-3.5" />
@@ -249,10 +488,10 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
                   {t(locale, { ru: "Team profile", en: "Team profile" })}
                 </p>
                 <h1 className="text-3xl font-black tracking-tight text-slate-950 dark:text-slate-50">
-                  {team.title}
+                  {teamState.title}
                 </h1>
                 <p className="max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-                  {team.description ??
+                  {teamState.description ??
                     t(locale, {
                       ru: "Собранная команда агентов для локального Codex execution workflow.",
                       en: "An assembled agent team for the local Codex execution workflow."
@@ -265,13 +504,13 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
                     {t(locale, { ru: "Автор", en: "Author" })}
                   </p>
-                  <p className="font-semibold text-slate-900 dark:text-slate-100">{team.author_name}</p>
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">{teamState.author_name}</p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
                     {t(locale, { ru: "Slug", en: "Slug" })}
                   </p>
-                  <p className="font-semibold text-slate-900 dark:text-slate-100">{team.slug}</p>
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">{teamState.slug}</p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
@@ -287,7 +526,7 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
                   {t(locale, { ru: "Roles", en: "Roles" })}
                 </p>
-                <p className="mt-2 text-2xl font-black text-slate-950 dark:text-slate-50">{team.items.length}</p>
+                <p className="mt-2 text-2xl font-black text-slate-950 dark:text-slate-50">{teamState.items.length}</p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950/90">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
@@ -342,9 +581,14 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
 
         <div className="px-6 py-6">
           {activeTab === "overview" ? renderOverview() : null}
-          {activeTab === "composition" ? <TeamBuilderControls locale={locale} team={team} /> : null}
+          {activeTab === "composition" ? <TeamBuilderControls locale={locale} team={teamState} /> : null}
           {activeTab === "export" ? (
-            <ExportControls entityType="team" locale={locale} slug={team.slug} status={team.status} />
+            <ExportControls
+              entityType="team"
+              locale={locale}
+              slug={teamState.slug}
+              status={teamState.status}
+            />
           ) : null}
         </div>
       </div>

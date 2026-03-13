@@ -24,6 +24,7 @@ def test_host_diagnostics_endpoint_returns_snapshot(
         generated_at=datetime.now(UTC),
         ready=True,
         pty_supported=True,
+        durable_transport_ready=True,
         executor_context=HostExecutorContext(
             user="tester",
             home="/tmp/tester",
@@ -68,6 +69,18 @@ def test_host_diagnostics_endpoint_returns_snapshot(
                 status=HostToolStatus.READY,
                 message="Codex CLI is ready.",
             ),
+            tmux=HostToolDiagnostics(
+                name="tmux",
+                found=True,
+                path="/usr/bin/tmux",
+                version="3.4.0",
+                minimum_version="3.2.0",
+                version_ok=True,
+                auth_required=False,
+                auth_ok=None,
+                status=HostToolStatus.READY,
+                message="tmux is ready.",
+            ),
         ),
         warnings=[],
     )
@@ -79,6 +92,7 @@ def test_host_diagnostics_endpoint_returns_snapshot(
     assert response.status_code == 200
     assert response.json()["ready"] is True
     assert response.json()["tools"]["gh"]["status"] == "ready"
+    assert response.json()["tools"]["tmux"]["status"] == "ready"
 
     refresh_response = client.post("/api/v1/host/diagnostics/refresh")
     assert refresh_response.status_code == 200
@@ -113,11 +127,14 @@ def test_host_diagnostics_service_marks_missing_codex(monkeypatch) -> None:
             "git": "/usr/bin/git",
             "gh": "/usr/bin/gh",
             "codex": None,
+            "tmux": None,
         }[name]
 
     def fake_resolve_version(path: str, args: list[str], minimum_version: str):
         if path.endswith("git"):
             return "2.43.0", True, None
+        if path.endswith("tmux"):
+            return "3.4.0", True, None
         return "2.86.0", True, None
 
     monkeypatch.setattr(service, "_resolve_tool_path", fake_resolve_tool_path)
@@ -133,8 +150,89 @@ def test_host_diagnostics_service_marks_missing_codex(monkeypatch) -> None:
     assert snapshot.tools.git.status == HostToolStatus.READY
     assert snapshot.tools.gh.status == HostToolStatus.READY
     assert snapshot.tools.codex.status == HostToolStatus.MISSING
+    assert snapshot.tools.tmux.status == HostToolStatus.MISSING
     assert snapshot.executor_context.containerized is True
     assert any("podman" in warning.lower() for warning in snapshot.warnings)
+
+
+def test_host_diagnostics_service_parses_tmux_two_part_version() -> None:
+    """Version parsing should accept tmux outputs like `tmux 3.4`."""
+    service = HostDiagnosticsService()
+
+    version, version_ok, error_message = service._resolve_version(
+        "/usr/bin/tmux",
+        ["-V"],
+        "3.2.0",
+    )
+
+    assert version == "3.4"
+    assert version_ok is True
+    assert error_message is None
+
+
+def test_host_diagnostics_schema_normalizes_legacy_host_executor_payload() -> None:
+    """Legacy host-executor snapshots should be accepted and backfilled."""
+    snapshot = HostDiagnosticsResponse.model_validate(
+        {
+            "generated_at": "2026-03-11T17:50:44.431323Z",
+            "ready": True,
+            "pty_supported": True,
+            "executor_context": {
+                "user": "temirkhan",
+                "home": "/home/temirkhan",
+                "cwd": "/home/temirkhan/my-agent-marketplace",
+                "containerized": False,
+                "container_runtime": None,
+            },
+            "tools": {
+                "git": {
+                    "name": "git",
+                    "found": True,
+                    "path": "/usr/bin/git",
+                    "version": "2.43.0",
+                    "minimum_version": "2.39.0",
+                    "version_ok": True,
+                    "auth_required": False,
+                    "auth_ok": None,
+                    "status": "ready",
+                    "message": "Git is available in the current execution context.",
+                    "remediation_steps": [],
+                },
+                "gh": {
+                    "name": "gh",
+                    "found": True,
+                    "path": "/snap/bin/gh",
+                    "version": "2.86.0",
+                    "minimum_version": "2.80.0",
+                    "version_ok": True,
+                    "auth_required": True,
+                    "auth_ok": True,
+                    "status": "ready",
+                    "message": "GitHub CLI is ready and authenticated.",
+                    "remediation_steps": [],
+                },
+                "codex": {
+                    "name": "codex",
+                    "found": True,
+                    "path": "/home/temirkhan/.nvm/versions/node/v22.19.0/bin/codex",
+                    "version": "0.112.0",
+                    "minimum_version": "0.100.0",
+                    "version_ok": True,
+                    "auth_required": True,
+                    "auth_ok": True,
+                    "status": "ready",
+                    "message": "Codex CLI is ready and authenticated.",
+                    "remediation_steps": [],
+                },
+            },
+            "warnings": [],
+        }
+    )
+
+    assert snapshot.ready is True
+    assert snapshot.durable_transport_ready is False
+    assert snapshot.tools.tmux.status == HostToolStatus.MISSING
+    assert "older diagnostics schema" in snapshot.warnings[0].lower()
 
 
 def test_host_readiness_uses_host_executor_snapshot(
@@ -146,6 +244,7 @@ def test_host_readiness_uses_host_executor_snapshot(
         generated_at=datetime.now(UTC),
         ready=True,
         pty_supported=True,
+        durable_transport_ready=True,
         executor_context=HostExecutorContext(
             user="temirkhan",
             home="/home/temirkhan",
@@ -189,6 +288,18 @@ def test_host_readiness_uses_host_executor_snapshot(
                 auth_ok=True,
                 status=HostToolStatus.READY,
                 message="codex ready",
+            ),
+            tmux=HostToolDiagnostics(
+                name="tmux",
+                found=True,
+                path="/usr/bin/tmux",
+                version="3.4.0",
+                minimum_version="3.2.0",
+                version_ok=True,
+                auth_required=False,
+                auth_ok=None,
+                status=HostToolStatus.READY,
+                message="tmux ready",
             ),
         ),
         warnings=[],

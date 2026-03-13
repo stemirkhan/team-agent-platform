@@ -21,6 +21,11 @@ function getApiBaseUrl(): string {
 }
 
 function extractErrorMessage(payload: unknown): string | null {
+  if (typeof payload === "string") {
+    const normalized = payload.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
   if (!payload || typeof payload !== "object") {
     return null;
   }
@@ -31,6 +36,19 @@ function extractErrorMessage(payload: unknown): string | null {
   }
 
   return null;
+}
+
+async function readResponsePayload(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
 }
 
 export function getAccessToken(): string | null {
@@ -61,7 +79,7 @@ export async function registerWithPassword(payload: {
     body: JSON.stringify(payload)
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
 
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? options?.fallbackMessage ?? "Registration failed.");
@@ -82,7 +100,7 @@ export async function loginWithPassword(payload: {
     body: JSON.stringify(payload)
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
 
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? options?.fallbackMessage ?? "Login failed.");
@@ -97,7 +115,7 @@ export async function fetchCurrentUser(token: string): Promise<AuthUser> {
     cache: "no-store"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
 
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Unauthorized.");

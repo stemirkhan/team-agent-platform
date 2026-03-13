@@ -21,6 +21,8 @@ class RunStatus(StrEnum):
     RUNNING_SETUP = "running_setup"
     STARTING_CODEX = "starting_codex"
     RUNNING = "running"
+    INTERRUPTED = "interrupted"
+    RESUMING = "resuming"
     RUNNING_CHECKS = "running_checks"
     COMMITTING = "committing"
     PUSHING = "pushing"
@@ -74,6 +76,11 @@ class Run(Base):
     workspace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     workspace_path: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     repo_path: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    codex_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    transport_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    transport_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    resume_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    interrupted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=RunStatus.QUEUED.value)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     pr_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)

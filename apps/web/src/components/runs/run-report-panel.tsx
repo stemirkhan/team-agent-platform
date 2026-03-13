@@ -34,6 +34,10 @@ function phaseStatusLabel(locale: Locale, status: RunReportPhaseStatus): string 
       return t(locale, { ru: "Завершено", en: "Completed" });
     case "running":
       return t(locale, { ru: "Выполняется", en: "Running" });
+    case "resuming":
+      return t(locale, { ru: "Возобновляется", en: "Resuming" });
+    case "interrupted":
+      return t(locale, { ru: "Прервано", en: "Interrupted" });
     case "failed":
       return t(locale, { ru: "Ошибка", en: "Failed" });
     case "cancelled":
@@ -52,6 +56,10 @@ function statusClasses(status: RunReportPhaseStatus): string {
       return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200";
     case "running":
       return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200";
+    case "resuming":
+      return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200";
+    case "interrupted":
+      return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200";
     case "failed":
       return "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200";
     case "cancelled":
@@ -70,6 +78,10 @@ function StatusIcon({ status }: { status: RunReportPhaseStatus }) {
       return <CheckCircle2 className="h-4 w-4" />;
     case "running":
       return <Loader2 className="h-4 w-4 animate-spin" />;
+    case "resuming":
+      return <Loader2 className="h-4 w-4 animate-spin" />;
+    case "interrupted":
+      return <Clock3 className="h-4 w-4" />;
     case "failed":
       return <OctagonAlert className="h-4 w-4" />;
     case "cancelled":

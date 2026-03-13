@@ -26,6 +26,7 @@ const runFilters: RunsFilter[] = [
   "all",
   "queued",
   "running",
+  "interrupted",
   "completed",
   "failed",
   "cancelled"
@@ -39,6 +40,8 @@ function formatFilterLabel(locale: Locale, value: RunsFilter): string {
       return t(locale, { ru: "очередь", en: "queued" });
     case "running":
       return t(locale, { ru: "в работе", en: "running" });
+    case "interrupted":
+      return t(locale, { ru: "прерваны", en: "interrupted" });
     case "completed":
       return t(locale, { ru: "успех", en: "completed" });
     case "failed":

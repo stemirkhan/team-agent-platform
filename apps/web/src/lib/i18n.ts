@@ -65,6 +65,8 @@ export function formatRunStatus(
     | "running_setup"
     | "starting_codex"
     | "running"
+    | "interrupted"
+    | "resuming"
     | "running_checks"
     | "committing"
     | "pushing"
@@ -88,6 +90,10 @@ export function formatRunStatus(
       return t(locale, { ru: "старт Codex", en: "starting Codex" });
     case "running":
       return t(locale, { ru: "выполняется", en: "running" });
+    case "interrupted":
+      return t(locale, { ru: "прерван", en: "interrupted" });
+    case "resuming":
+      return t(locale, { ru: "возобновление", en: "resuming" });
     case "running_checks":
       return t(locale, { ru: "проверки", en: "running checks" });
     case "committing":

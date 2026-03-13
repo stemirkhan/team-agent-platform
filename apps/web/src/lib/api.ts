@@ -32,6 +32,8 @@ export type RunStatus =
   | "running_setup"
   | "starting_codex"
   | "running"
+  | "interrupted"
+  | "resuming"
   | "running_checks"
   | "committing"
   | "pushing"
@@ -46,6 +48,8 @@ export type Team = {
   slug: string;
   title: string;
   description: string | null;
+  startup_prompt: string | null;
+  author_id: string | null;
   author_name: string;
   status: "draft" | "published" | "archived" | "hidden";
   created_at: string;
@@ -111,11 +115,13 @@ export type HostDiagnosticsSnapshot = {
   generated_at: string;
   ready: boolean;
   pty_supported: boolean;
+  durable_transport_ready: boolean;
   executor_context: HostExecutorContext;
   tools: {
     git: HostToolDiagnostics;
     gh: HostToolDiagnostics;
     codex: HostToolDiagnostics;
+    tmux: HostToolDiagnostics;
   };
   warnings: string[];
 };
@@ -151,6 +157,11 @@ export type Run = {
   workspace_id: string | null;
   workspace_path: string | null;
   repo_path: string | null;
+  codex_session_id: string | null;
+  transport_kind: string | null;
+  transport_ref: string | null;
+  resume_attempt_count: number;
+  interrupted_at: string | null;
   status: RunStatus;
   error_message: string | null;
   pr_url: string | null;
@@ -198,7 +209,9 @@ export type RunReportPhaseKey = "preparation" | "setup" | "codex" | "checks" | "
 export type RunReportPhaseStatus =
   | "not_started"
   | "running"
+  | "resuming"
   | "completed"
+  | "interrupted"
   | "failed"
   | "cancelled"
   | "not_available";
@@ -258,7 +271,13 @@ export type FetchRunsOptions = {
   repo?: string;
 };
 
-export type CodexSessionStatus = "running" | "completed" | "failed" | "cancelled";
+export type CodexSessionStatus =
+  | "running"
+  | "resuming"
+  | "interrupted"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export type CodexSessionRead = {
   run_id: string;
@@ -270,6 +289,13 @@ export type CodexSessionRead = {
   exit_code: number | null;
   error_message: string | null;
   summary_text: string | null;
+  codex_session_id: string | null;
+  transport_kind: "pty" | "tmux";
+  transport_ref: string | null;
+  resume_attempt_count: number;
+  interrupted_at: string | null;
+  resumable: boolean;
+  recovered_from_restart: boolean;
   input_tokens: number | null;
   output_tokens: number | null;
   started_at: string;
@@ -475,11 +501,13 @@ export type TeamCreatePayload = {
   slug: string;
   title: string;
   description?: string;
+  startup_prompt?: string;
 };
 
 export type TeamUpdatePayload = {
   title?: string;
   description?: string | null;
+  startup_prompt?: string | null;
 };
 
 export type TeamItemCreatePayload = {
@@ -554,6 +582,11 @@ export function resolveDownloadUrl(resultUrl: string): string {
 }
 
 function extractErrorMessage(payload: unknown): string | null {
+  if (typeof payload === "string") {
+    const normalized = payload.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
   if (!payload || typeof payload !== "object") {
     return null;
   }
@@ -564,6 +597,19 @@ function extractErrorMessage(payload: unknown): string | null {
   }
 
   return null;
+}
+
+async function readResponsePayload(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
 }
 
 export async function fetchAgents(
@@ -667,7 +713,7 @@ export async function fetchHostDiagnostics(): Promise<HostDiagnosticsSnapshot> {
     cache: "no-store"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch host diagnostics.");
   }
@@ -680,7 +726,7 @@ export async function refreshHostDiagnostics(): Promise<HostDiagnosticsSnapshot>
     method: "POST"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to refresh host diagnostics.");
   }
@@ -693,7 +739,7 @@ export async function fetchHostReadiness(): Promise<HostExecutionReadiness> {
     cache: "no-store"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch host readiness.");
   }
@@ -706,7 +752,7 @@ export async function refreshHostReadiness(): Promise<HostExecutionReadiness> {
     method: "POST"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to refresh host readiness.");
   }
@@ -735,7 +781,7 @@ export async function fetchRuns(
     cache: "no-store"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch runs.");
   }
@@ -751,7 +797,7 @@ export async function fetchRun(runId: string, token: string): Promise<Run> {
     cache: "no-store"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch run.");
   }
@@ -767,7 +813,7 @@ export async function fetchWorkspace(workspaceId: string, token: string): Promis
     cache: "no-store"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch workspace.");
   }
@@ -783,7 +829,7 @@ export async function fetchRunEvents(runId: string, token: string): Promise<RunE
     cache: "no-store"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch run events.");
   }
@@ -801,7 +847,7 @@ export async function createRun(payload: RunCreatePayload, token: string): Promi
     body: JSON.stringify(payload)
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to create run.");
   }
@@ -817,9 +863,25 @@ export async function cancelRun(runId: string, token: string): Promise<Run> {
     }
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to cancel run.");
+  }
+
+  return json as Run;
+}
+
+export async function resumeRun(runId: string, token: string): Promise<Run> {
+  const response = await fetch(`${getApiBaseUrl()}/runs/${runId}/resume`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  const json = await readResponsePayload(response);
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to resume run.");
   }
 
   return json as Run;
@@ -896,7 +958,7 @@ export async function fetchGitHubRepos(
     cache: "no-store"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch GitHub repositories.");
   }
@@ -909,7 +971,7 @@ export async function fetchGitHubRepo(owner: string, repo: string): Promise<GitH
     cache: "no-store"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch GitHub repository.");
   }
@@ -929,7 +991,7 @@ export async function fetchGitHubRepoBranches(
     }
   );
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch GitHub branches.");
   }
@@ -956,7 +1018,7 @@ export async function fetchGitHubRepoIssues(
     }
   );
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch GitHub issues.");
   }
@@ -973,7 +1035,7 @@ export async function fetchGitHubIssue(
     cache: "no-store"
   });
 
-  const json = (await response.json()) as unknown;
+  const json = await readResponsePayload(response);
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch GitHub issue.");
   }

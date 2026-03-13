@@ -53,6 +53,11 @@ class CodexProxyService:
         data = self._request_json(f"codex/sessions/{run_id}/cancel", method="POST")
         return self._validate(data, CodexSessionRead, "Codex session")
 
+    def resume_session(self, run_id: str) -> CodexSessionRead:
+        """Resume one interrupted host-side Codex session."""
+        data = self._request_json(f"codex/sessions/{run_id}/resume", method="POST")
+        return self._validate(data, CodexSessionRead, "Codex session")
+
     def _request_json(
         self,
         path: str,

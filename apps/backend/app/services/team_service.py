@@ -92,10 +92,20 @@ class TeamService:
         return TeamDetailsRead(**payload, items=items)
 
     def update_team(self, slug: str, payload: TeamUpdate, current_user: User) -> TeamDetailsRead:
-        """Update mutable draft team fields."""
+        """Update mutable team fields with a published-team startup prompt exception."""
         team = self._get_team_entity(slug)
         self._ensure_owner(team.author_id, current_user.id)
-        self._ensure_draft(team.status)
+        if team.status == TeamStatus.DRAFT.value:
+            pass
+        elif team.status == TeamStatus.PUBLISHED.value:
+            mutable_fields = payload.model_fields_set
+            if mutable_fields and not mutable_fields.issubset({"startup_prompt"}):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Published teams only allow startup_prompt updates.",
+                )
+        else:
+            self._ensure_draft(team.status)
         self.team_repository.update(team, payload)
         return self.get_team(slug)
 

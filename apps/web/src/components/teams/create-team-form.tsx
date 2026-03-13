@@ -19,6 +19,7 @@ export function CreateTeamForm({ locale }: CreateTeamFormProps) {
   const [slug, setSlug] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [startupPrompt, setStartupPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -39,7 +40,8 @@ export function CreateTeamForm({ locale }: CreateTeamFormProps) {
         {
           slug: slug.trim(),
           title: title.trim(),
-          description: description.trim() || undefined
+          description: description.trim() || undefined,
+          startup_prompt: startupPrompt.trim() || undefined
         },
         token
       );
@@ -97,6 +99,25 @@ export function CreateTeamForm({ locale }: CreateTeamFormProps) {
             placeholder={t(locale, { ru: "Цели команды и рабочий процесс.", en: "Team goals and workflow." })}
             value={description}
           />
+        </label>
+
+        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+          {t(locale, { ru: "Стартовый промт Codex", en: "Codex startup prompt" })}
+          <textarea
+            className="mt-1 min-h-36 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            onChange={(event) => setStartupPrompt(event.target.value)}
+            placeholder={t(locale, {
+              ru: "Например: начни с роли orchestrator, при подходящей задаче делегируй backend/frontend роли и затем собери единый финальный результат.",
+              en: "For example: start as the orchestrator, delegate to backend/frontend roles when useful, then merge the result into one final delivery."
+            })}
+            value={startupPrompt}
+          />
+          <p className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
+            {t(locale, {
+              ru: "Этот текст будет включён в стартовый prompt каждого run, запущенного этой командой.",
+              en: "This text is injected into the initial prompt of every run launched with this team."
+            })}
+          </p>
         </label>
 
         {errorMessage ? (

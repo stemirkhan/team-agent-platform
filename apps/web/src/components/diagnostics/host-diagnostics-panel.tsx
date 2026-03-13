@@ -74,6 +74,11 @@ function getToolEntries(snapshot: HostDiagnosticsSnapshot) {
       key: "codex",
       icon: <Bot className="h-5 w-5" />,
       tool: snapshot.tools.codex
+    },
+    {
+      key: "tmux",
+      icon: <TerminalSquare className="h-5 w-5" />,
+      tool: snapshot.tools.tmux
     }
   ];
 }
@@ -230,6 +235,25 @@ function SnapshotOverview({
             {snapshot.pty_supported
               ? t(locale, { ru: "PTY доступен для live terminal.", en: "PTY is available for live terminal." })
               : t(locale, { ru: "PTY недоступен, live terminal не запустится.", en: "PTY is unavailable, so live terminal cannot start." })}
+          </span>
+        </div>
+
+        <div className="mb-4 flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+          {snapshot.durable_transport_ready ? (
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+          ) : (
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+          )}
+          <span>
+            {snapshot.durable_transport_ready
+              ? t(locale, {
+                  ru: "tmux доступен для durable transport и reattach.",
+                  en: "tmux is available for durable transport and reattach."
+                })
+              : t(locale, {
+                  ru: "tmux недоступен, поэтому live session recovery будет degraded.",
+                  en: "tmux is unavailable, so live session recovery is degraded."
+                })}
           </span>
         </div>
 

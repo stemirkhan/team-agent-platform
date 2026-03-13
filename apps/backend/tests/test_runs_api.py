@@ -20,6 +20,7 @@ from app.services.codex_proxy_service import CodexProxyService, CodexProxyServic
 from app.services.export_service import ExportService
 from app.services.github_proxy_service import GitHubProxyService
 from app.services.host_execution_service import HostExecutionReadinessService
+from app.services.run_service import RunService
 from app.services.workspace_proxy_service import WorkspaceProxyService, WorkspaceProxyServiceError
 
 
@@ -70,7 +71,13 @@ def _publish_agent(client: TestClient, *, headers: dict[str, str], slug: str, ti
     assert publish_response.status_code == 200
 
 
-def _publish_team(client: TestClient, *, headers: dict[str, str], slug: str) -> None:
+def _publish_team(
+    client: TestClient,
+    *,
+    headers: dict[str, str],
+    slug: str,
+    startup_prompt: str | None = None,
+) -> None:
     """Create and publish a minimal team."""
     create_response = client.post(
         "/api/v1/teams",
@@ -79,6 +86,7 @@ def _publish_team(client: TestClient, *, headers: dict[str, str], slug: str) -> 
             "slug": slug,
             "title": "Delivery Team",
             "description": "Run Codex over one repo task.",
+            "startup_prompt": startup_prompt,
         },
     )
     assert create_response.status_code == 201
@@ -159,7 +167,16 @@ def test_create_run_prepares_workspace_and_records_status_events(
         slug="delivery-orchestrator",
         title="Delivery Orchestrator",
     )
-    _publish_team(client, headers=headers, slug="delivery-team")
+    startup_prompt = (
+        "Begin as the delivery orchestrator. When the task spans backend and frontend concerns, "
+        "delegate to the appropriate team roles before producing the final result."
+    )
+    _publish_team(
+        client,
+        headers=headers,
+        slug="delivery-team",
+        startup_prompt=startup_prompt,
+    )
 
     monkeypatch.setattr(
         HostExecutionReadinessService,
@@ -231,10 +248,11 @@ def test_create_run_prepares_workspace_and_records_status_events(
             "application/zip",
         ),
     )
-    monkeypatch.setattr(
-        CodexProxyService,
-        "start_session",
-        lambda self, payload: CodexSessionRead(
+    captured_prompt: dict[str, str] = {}
+
+    def _start_session(self, payload):
+        captured_prompt["text"] = payload.prompt_text
+        return CodexSessionRead(
             run_id=payload.run_id,
             workspace_id=payload.workspace_id,
             repo_path="/tmp/ws-1/repo",
@@ -243,8 +261,9 @@ def test_create_run_prepares_workspace_and_records_status_events(
             pid=12345,
             started_at="2026-03-08T10:06:00Z",
             last_output_offset=0,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(CodexProxyService, "start_session", _start_session)
     monkeypatch.setattr(
         CodexProxyService,
         "get_session",
@@ -347,6 +366,9 @@ def test_create_run_prepares_workspace_and_records_status_events(
     assert bundle_events[0]["multi_agent_enabled"] is True
     assert bundle_events[0]["configured_agents"] == ["orchestrator"]
     assert bundle_events[0]["task_markdown"].startswith("# Fix run preparation flow")
+    assert "## Codex Startup Prompt" in bundle_events[0]["task_markdown"]
+    assert startup_prompt in bundle_events[0]["task_markdown"]
+    assert startup_prompt in captured_prompt["text"]
     statuses = [
         item["payload_json"]["status"]
         for item in events_response.json()["items"]
@@ -840,6 +862,7 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
         "frontend-product-engineer-frontend-ux-review",
         "frontend-ux-review",
     ]
+    assert trace_events[0]["multi_agent_signal_level"] == "none"
     assert trace_events[0]["delegation_markers"] == []
     statuses = [
         item["payload_json"]["status"]
@@ -858,6 +881,166 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
     cancel_response = client.post(f"/api/v1/runs/{run_id}/cancel", headers=headers)
     assert cancel_response.status_code == 200
     assert cancel_response.json()["status"] == "completed"
+
+
+def test_build_codex_terminal_audit_payload_ignores_multi_agent_doc_mentions() -> None:
+    """Doc text mentioning multi-agent should not be treated as delegation evidence."""
+    payload = RunService._build_codex_terminal_audit_payload(
+        CodexSessionEventsResponse(
+            session=CodexSessionRead(
+                run_id="run-docs",
+                workspace_id="ws-docs",
+                repo_path="/tmp/ws-docs/repo",
+                command=["codex", "exec", "--json"],
+                status="completed",
+                exit_code=0,
+                started_at="2026-03-08T10:00:00Z",
+                finished_at="2026-03-08T10:01:00Z",
+                last_output_offset=1,
+            ),
+            items=[
+                CodexTerminalChunk(
+                    offset=0,
+                    text=(
+                        '{"type":"item.completed","item":{"type":"command_execution",'
+                        '"command":"sed -n \\"1,120p\\" docs/PRD.md",'
+                        '"aggregated_output":"Today the product targets a '
+                        'multi-agent workflow."}}\n'
+                        '{"type":"item.completed","item":{"type":"agent_message",'
+                        '"text":"I reviewed the multi-agent docs and will now '
+                        'edit the frontend."}}\n'
+                    ),
+                    created_at="2026-03-08T10:00:30Z",
+                )
+            ],
+            next_offset=1,
+        )
+    )
+
+    assert payload["multi_agent_signal_level"] == "none"
+    assert payload["delegation_markers"] == []
+    assert payload["additional_thread_ids"] == []
+
+
+def test_build_codex_terminal_audit_payload_marks_agent_config_reads_as_possible() -> None:
+    """Reading agent config files is only a possible multi-agent signal."""
+    payload = RunService._build_codex_terminal_audit_payload(
+        CodexSessionEventsResponse(
+            session=CodexSessionRead(
+                run_id="run-agents",
+                workspace_id="ws-agents",
+                repo_path="/tmp/ws-agents/repo",
+                command=["codex", "exec", "--json"],
+                status="completed",
+                exit_code=0,
+                started_at="2026-03-08T10:00:00Z",
+                finished_at="2026-03-08T10:01:00Z",
+                last_output_offset=1,
+            ),
+            items=[
+                CodexTerminalChunk(
+                    offset=0,
+                    text=(
+                        '{"type":"item.completed","item":{"type":"command_execution",'
+                        '"command":"cat .codex/agents/frontend-engineer.toml",'
+                        '"aggregated_output":"description = \\"Frontend specialist\\""}}\n'
+                    ),
+                    created_at="2026-03-08T10:00:30Z",
+                )
+            ],
+            next_offset=1,
+        )
+    )
+
+    assert payload["multi_agent_signal_level"] == "possible"
+    assert payload["agent_config_reads"] == ["frontend-engineer"]
+    assert payload["delegation_markers"] == []
+
+
+def test_build_codex_terminal_audit_payload_confirms_additional_threads() -> None:
+    """Additional thread ids should be treated as strong sub-agent evidence."""
+    payload = RunService._build_codex_terminal_audit_payload(
+        CodexSessionEventsResponse(
+            session=CodexSessionRead(
+                run_id="run-threads",
+                workspace_id="ws-threads",
+                repo_path="/tmp/ws-threads/repo",
+                command=["codex", "exec", "--json"],
+                status="completed",
+                exit_code=0,
+                started_at="2026-03-08T10:00:00Z",
+                finished_at="2026-03-08T10:01:00Z",
+                last_output_offset=1,
+            ),
+            items=[
+                CodexTerminalChunk(
+                    offset=0,
+                    text=(
+                        '{"type":"thread.started","thread_id":"root-thread"}\n'
+                        '{"type":"thread.started","thread_id":"child-thread-1"}\n'
+                    ),
+                    created_at="2026-03-08T10:00:30Z",
+                )
+            ],
+            next_offset=1,
+        )
+    )
+
+    assert payload["multi_agent_signal_level"] == "confirmed"
+    assert payload["thread_ids"] == ["root-thread", "child-thread-1"]
+    assert payload["additional_thread_ids"] == ["child-thread-1"]
+    assert payload["spawned_agents"] == []
+
+
+def test_build_codex_terminal_audit_payload_confirms_spawned_agents() -> None:
+    """spawn_agent tool calls should be treated as confirmed sub-agent execution."""
+    payload = RunService._build_codex_terminal_audit_payload(
+        CodexSessionEventsResponse(
+            session=CodexSessionRead(
+                run_id="run-spawned-agents",
+                workspace_id="ws-spawned-agents",
+                repo_path="/tmp/ws-spawned-agents/repo",
+                command=["codex", "exec", "--json"],
+                status="completed",
+                exit_code=0,
+                started_at="2026-03-08T10:00:00Z",
+                finished_at="2026-03-08T10:01:00Z",
+                last_output_offset=2,
+            ),
+            items=[
+                CodexTerminalChunk(
+                    offset=0,
+                    text=(
+                        '{"type":"thread.started","thread_id":"root-thread"}\n'
+                        '{"type":"item.completed","item":{"type":"collab_tool_call",'
+                        '"tool":"spawn_agent","receiver_thread_ids":["child-thread-1"],'
+                        '"prompt":"Role: frontend-engineer.\\nTask: Inspect the board.",'
+                        '"agents_states":{"child-thread-1":{"status":"pending_init"}}}}\n'
+                        '{"type":"item.completed","item":{"type":"collab_tool_call",'
+                        '"tool":"wait","receiver_thread_ids":["child-thread-1"],'
+                        '"prompt":null,'
+                        '"agents_states":{"child-thread-1":{"status":"completed",'
+                        '"message":"1. Scope inspected\\n- execution-board-panel.tsx\\n\\n2. '
+                        'Risks or findings\\n- frontend-only change"}}}}\n'
+                    ),
+                    created_at="2026-03-08T10:00:30Z",
+                )
+            ],
+            next_offset=1,
+        )
+    )
+
+    assert payload["multi_agent_signal_level"] == "confirmed"
+    assert payload["thread_ids"] == ["root-thread"]
+    assert payload["additional_thread_ids"] == ["child-thread-1"]
+    assert payload["spawned_agents"] == [
+        {
+            "thread_id": "child-thread-1",
+            "role": "frontend-engineer",
+            "status": "completed",
+            "result_preview": "frontend-only change",
+        }
+    ]
 
 
 def test_get_run_completes_without_commit_when_only_materialized_files_changed(
@@ -1039,6 +1222,182 @@ def test_get_run_completes_without_commit_when_only_materialized_files_changed(
         if item["event_type"] == "status"
     ]
     assert "Codex session completed with no repository changes to commit." in messages
+
+
+def test_resume_run_recovers_interrupted_codex_session(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Interrupted runs should be resumable from the same run id."""
+    headers = _auth_headers(
+        client,
+        email="runner-resume@example.com",
+        display_name="Runner Resume",
+    )
+    _publish_agent(
+        client,
+        headers=headers,
+        slug="delivery-orchestrator",
+        title="Delivery Orchestrator",
+    )
+    _publish_team(client, headers=headers, slug="delivery-team-resume")
+
+    monkeypatch.setattr(
+        HostExecutionReadinessService,
+        "build_readiness",
+        lambda self: SimpleNamespace(effective_ready=True),
+    )
+    monkeypatch.setattr(
+        GitHubProxyService,
+        "get_repo",
+        lambda self, owner, repo: GitHubRepoRead(
+            owner=owner,
+            name=repo,
+            full_name=f"{owner}/{repo}",
+            description="Demo repo",
+            url=f"https://github.com/{owner}/{repo}",
+            is_private=False,
+            default_branch="main",
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "prepare_workspace",
+        lambda self, payload: _workspace(),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "materialize_workspace",
+        lambda self, workspace_id, payload: _workspace().model_copy(
+            update={"has_changes": True, "changed_files": ["TASK.md"]}
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(),
+    )
+    monkeypatch.setattr(
+        ExportService,
+        "build_download_artifact",
+        lambda self, **kwargs: (
+            "delivery-team-resume-codex.zip",
+            _bundle_bytes({".codex/config.toml": "[features]\nmulti_agent = true\n"}),
+            "application/zip",
+        ),
+    )
+
+    session_state = {"status": "running"}
+
+    def _session(run_id: str, status: str) -> CodexSessionRead:
+        interrupted_at = "2026-03-08T10:07:00Z" if status == "interrupted" else None
+        finished_at = interrupted_at if status == "interrupted" else None
+        pid = 54321 if status in {"resuming", "running"} else 12345
+        resume_attempt_count = 1 if status in {"resuming", "running"} else 0
+        return CodexSessionRead(
+            run_id=run_id,
+            workspace_id="ws-1",
+            repo_path="/tmp/ws-1/repo",
+            command=["codex", "exec", "--json"],
+            status=status,
+            pid=pid,
+            exit_code=None,
+            error_message=(
+                "Host executor restarted while Codex was running. The session can be resumed."
+                if status == "interrupted"
+                else None
+            ),
+            codex_session_id="019cdddb-4df9-7100-ae82-b8b061ad6cbb",
+            transport_kind="pty",
+            transport_ref=str(pid),
+            resume_attempt_count=resume_attempt_count,
+            interrupted_at=interrupted_at,
+            resumable=status == "interrupted",
+            recovered_from_restart=status == "interrupted",
+            started_at="2026-03-08T10:06:00Z",
+            finished_at=finished_at,
+            last_output_offset=1,
+        )
+
+    monkeypatch.setattr(
+        CodexProxyService,
+        "start_session",
+        lambda self, payload: _session(payload.run_id, "running"),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_session",
+        lambda self, run_id: _session(run_id, session_state["status"]),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "resume_session",
+        lambda self, run_id: session_state.__setitem__("status", "resuming")
+        or _session(run_id, "resuming"),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_events",
+        lambda self, run_id, offset: CodexSessionEventsResponse(
+            session=_session(run_id, session_state["status"]),
+            items=[
+                CodexTerminalChunk(
+                    offset=0,
+                    text='{"type":"thread.started","thread_id":"019cdddb-4df9-7100-ae82-b8b061ad6cbb"}\n',
+                    created_at="2026-03-08T10:06:01Z",
+                )
+            ]
+            if offset == 0
+            else [],
+            next_offset=1,
+        ),
+    )
+
+    create_response = client.post(
+        "/api/v1/runs",
+        headers=headers,
+        json={
+            "team_slug": "delivery-team-resume",
+            "repo_owner": "stemirkhan",
+            "repo_name": "team-agent-platform",
+            "task_text": "Run codex and then recover from interruption.",
+        },
+    )
+    assert create_response.status_code == 201
+    run_id = create_response.json()["id"]
+
+    session_state["status"] = "interrupted"
+    interrupted_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
+    assert interrupted_response.status_code == 200
+    assert interrupted_response.json()["status"] == "interrupted"
+    assert interrupted_response.json()["codex_session_id"] == "019cdddb-4df9-7100-ae82-b8b061ad6cbb"
+    assert interrupted_response.json()["resume_attempt_count"] == 0
+    assert interrupted_response.json()["run_report"]["phases"][2]["status"] == "interrupted"
+
+    resume_response = client.post(f"/api/v1/runs/{run_id}/resume", headers=headers)
+    assert resume_response.status_code == 200
+    assert resume_response.json()["status"] == "resuming"
+    assert resume_response.json()["resume_attempt_count"] == 1
+
+    session_state["status"] = "running"
+    resumed_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
+    assert resumed_response.status_code == 200
+    assert resumed_response.json()["status"] == "running"
+    assert resumed_response.json()["resume_attempt_count"] == 1
+    assert resumed_response.json()["run_report"]["phases"][2]["status"] == "running"
+
+    events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
+    assert events_response.status_code == 200
+    note_kinds = [
+        item["payload_json"].get("kind")
+        for item in events_response.json()["items"]
+        if item["event_type"] == "note" and item["payload_json"]
+    ]
+    assert "codex_session_interrupted" in note_kinds
+    assert "codex_resume_available" in note_kinds
+    assert "codex_resume_requested" in note_kinds
+    assert "codex_resume_started" in note_kinds
+    assert "codex_resume_completed" in note_kinds
 
 
 def test_get_run_fails_when_codex_session_state_is_lost(

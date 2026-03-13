@@ -20,13 +20,14 @@ from app.schemas.host import (
 
 
 class HostDiagnosticsService:
-    """Collect readiness diagnostics for git, gh, codex, and PTY support."""
+    """Collect readiness diagnostics for git, gh, codex, tmux, and PTY support."""
 
     command_timeout_seconds = 10
     minimum_versions = {
         "git": "2.39.0",
         "gh": "2.80.0",
         "codex": "0.100.0",
+        "tmux": "3.2.0",
     }
 
     def build_snapshot(self) -> HostDiagnosticsResponse:
@@ -34,12 +35,15 @@ class HostDiagnosticsService:
         git = self._inspect_git()
         gh = self._inspect_gh()
         codex = self._inspect_codex()
+        tmux = self._inspect_tmux()
         executor_context = self._build_executor_context()
         pty_supported = self._pty_supported()
+        durable_transport_ready = tmux.status == HostToolStatus.READY
         warnings = self._build_warnings(
             executor_context=executor_context,
             pty_supported=pty_supported,
-            tools=[git, gh, codex],
+            durable_transport_ready=durable_transport_ready,
+            tools=[git, gh, codex, tmux],
         )
 
         ready = pty_supported and all(
@@ -50,8 +54,9 @@ class HostDiagnosticsService:
             generated_at=datetime.now(UTC),
             ready=ready,
             pty_supported=pty_supported,
+            durable_transport_ready=durable_transport_ready,
             executor_context=executor_context,
-            tools=HostDiagnosticsTools(git=git, gh=gh, codex=codex),
+            tools=HostDiagnosticsTools(git=git, gh=gh, codex=codex, tmux=tmux),
             warnings=warnings,
         )
 
@@ -277,6 +282,63 @@ class HostDiagnosticsService:
             message="Codex CLI is ready and authenticated.",
         )
 
+    def _inspect_tmux(self) -> HostToolDiagnostics:
+        """Return tmux diagnostics for durable transport mode."""
+        path = self._resolve_tool_path("tmux")
+        minimum_version = self.minimum_versions["tmux"]
+        if not path:
+            return self._missing_tool(
+                name="tmux",
+                minimum_version=minimum_version,
+                steps=[
+                    "Install tmux on the host machine.",
+                    "Ensure the backend or host executor process can resolve `tmux` in PATH.",
+                ],
+            )
+
+        version, version_ok, error_message = self._resolve_version(
+            path,
+            ["-V"],
+            minimum_version,
+        )
+        if error_message:
+            return self._error_tool(
+                name="tmux",
+                path=path,
+                minimum_version=minimum_version,
+                message=error_message,
+                steps=[
+                    "Run `tmux -V` in the same environment as the backend process.",
+                    "Fix PATH or reinstall tmux if the command fails.",
+                ],
+            )
+
+        if not version_ok:
+            return self._outdated_tool(
+                name="tmux",
+                path=path,
+                version=version,
+                minimum_version=minimum_version,
+                message=f"tmux version {version} is older than required {minimum_version}.",
+                steps=[
+                    f"Update tmux to at least {minimum_version}.",
+                    "Restart the backend or host executor after upgrading.",
+                ],
+            )
+
+        return HostToolDiagnostics(
+            name="tmux",
+            found=True,
+            path=path,
+            version=version,
+            minimum_version=minimum_version,
+            version_ok=True,
+            auth_required=False,
+            auth_ok=None,
+            status=HostToolStatus.READY,
+            message="tmux is available for durable transport and reattach.",
+        )
+
     def _build_executor_context(self) -> HostExecutorContext:
         """Return runtime information for the current backend process."""
         container_runtime = self._detect_container_runtime()
@@ -403,7 +465,7 @@ class HostDiagnosticsService:
     @staticmethod
     def _extract_version(output: str) -> str | None:
         """Extract a semantic version from CLI output."""
-        match = re.search(r"(\d+\.\d+\.\d+)", output)
+        match = re.search(r"(\d+\.\d+(?:\.\d+)?)", output)
         if match is None:
             return None
         return match.group(1)
@@ -411,8 +473,11 @@ class HostDiagnosticsService:
     @staticmethod
     def _is_version_at_least(version: str, minimum_version: str) -> bool:
         """Compare simple semantic versions using their numeric parts."""
-        current = tuple(int(part) for part in version.split("."))
-        minimum = tuple(int(part) for part in minimum_version.split("."))
+        current_parts = [int(part) for part in version.split(".")]
+        minimum_parts = [int(part) for part in minimum_version.split(".")]
+        width = max(len(current_parts), len(minimum_parts))
+        current = tuple(current_parts + [0] * (width - len(current_parts)))
+        minimum = tuple(minimum_parts + [0] * (width - len(minimum_parts)))
         return current >= minimum
 
     def _build_warnings(
@@ -420,6 +485,7 @@ class HostDiagnosticsService:
         *,
         executor_context: HostExecutorContext,
         pty_supported: bool,
+        durable_transport_ready: bool,
         tools: list[HostToolDiagnostics],
     ) -> list[str]:
         """Collect global warnings that help explain degraded readiness."""
@@ -434,6 +500,11 @@ class HostDiagnosticsService:
 
         if not pty_supported:
             warnings.append("PTY support is unavailable, so live terminal streaming cannot start.")
+
+        if not durable_transport_ready:
+            warnings.append(
+                "tmux is unavailable, so durable transport and zero-loss reattach are disabled."
+            )
 
         if any(tool.status == HostToolStatus.MISSING for tool in tools):
             warnings.append(

@@ -37,7 +37,9 @@ RunReportPhaseKey = Literal["preparation", "setup", "codex", "checks", "git_pr"]
 RunReportPhaseStatus = Literal[
     "not_started",
     "running",
+    "resuming",
     "completed",
+    "interrupted",
     "failed",
     "cancelled",
     "not_available",
@@ -99,6 +101,11 @@ class RunRead(BaseModel):
     workspace_id: str | None = None
     workspace_path: str | None = None
     repo_path: str | None = None
+    codex_session_id: str | None = None
+    transport_kind: str | None = None
+    transport_ref: str | None = None
+    resume_attempt_count: int = 0
+    interrupted_at: datetime | None = None
     status: RunStatus
     error_message: str | None = None
     pr_url: str | None = None

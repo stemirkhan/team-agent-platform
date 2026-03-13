@@ -38,6 +38,7 @@ class HostDiagnosticsTools(BaseModel):
     git: HostToolDiagnostics
     gh: HostToolDiagnostics
     codex: HostToolDiagnostics
+    tmux: HostToolDiagnostics
 
 
 class HostExecutorContext(BaseModel):
@@ -56,6 +57,7 @@ class HostDiagnosticsResponse(BaseModel):
     generated_at: datetime
     ready: bool
     pty_supported: bool
+    durable_transport_ready: bool
     executor_context: HostExecutorContext
     tools: HostDiagnosticsTools
     warnings: list[str] = Field(default_factory=list)

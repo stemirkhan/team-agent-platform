@@ -17,6 +17,7 @@ class TeamBase(BaseModel):
     slug: str = Field(min_length=2, max_length=120)
     title: str = Field(min_length=2, max_length=255)
     description: str | None = Field(default=None)
+    startup_prompt: str | None = Field(default=None, max_length=8000)
 
 
 class TeamCreate(TeamBase):
@@ -32,6 +33,7 @@ class TeamUpdate(BaseModel):
 
     title: str | None = Field(default=None, min_length=2, max_length=255)
     description: str | None = None
+    startup_prompt: str | None = Field(default=None, max_length=8000)
 
 
 class TeamRead(TeamBase):
@@ -40,6 +42,7 @@ class TeamRead(TeamBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    author_id: UUID | None
     author_name: str
     status: TeamStatus
     created_at: datetime

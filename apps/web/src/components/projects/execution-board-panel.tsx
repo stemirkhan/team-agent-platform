@@ -40,10 +40,10 @@ type BoardMetricPillProps = {
 
 const laneStatusMap: Record<RunsBoardLane, RunStatus[]> = {
   queued: ["queued", "preparing", "cloning_repo", "materializing_team"],
-  active: ["running_setup", "starting_codex", "running", "running_checks"],
+  active: ["running_setup", "starting_codex", "resuming", "running", "running_checks"],
   finalizing: ["committing", "pushing", "creating_pr"],
   completed: ["completed"],
-  failed: ["failed", "cancelled"]
+  failed: ["interrupted", "failed", "cancelled"]
 };
 
 function buildBoardColumns(locale: Locale): BoardColumn[] {
@@ -112,12 +112,12 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       key: "failed",
       title: t(locale, { ru: "Сбой", en: "Failed" }),
       description: t(locale, {
-        ru: "Запуски с ошибкой или ручной отменой.",
-        en: "Runs that failed or were cancelled."
+        ru: "Прерванные, упавшие или отмененные запуски.",
+        en: "Runs that were interrupted, failed, or cancelled."
       }),
       emptyLabel: t(locale, {
-        ru: "Нет упавших или отмененных запусков.",
-        en: "No failed or cancelled runs."
+        ru: "Нет прерванных, упавших или отмененных запусков.",
+        en: "No interrupted, failed, or cancelled runs."
       }),
       statuses: laneStatusMap.failed,
       columnClassName:
@@ -473,13 +473,24 @@ function ExecutionBoardCard({
   run: Run;
   showRepository: boolean;
 }) {
-  const showErrorMarker = Boolean(run.error_message && (run.status === "failed" || run.status === "cancelled"));
+  const showErrorMarker = Boolean(
+    run.error_message &&
+      (run.status === "interrupted" || run.status === "failed" || run.status === "cancelled")
+  );
   const timestampLabel =
-    run.finished_at && (run.status === "completed" || run.status === "failed" || run.status === "cancelled")
+    run.finished_at &&
+    (run.status === "completed" ||
+      run.status === "interrupted" ||
+      run.status === "failed" ||
+      run.status === "cancelled")
       ? t(locale, { ru: "Завершен", en: "Finished" })
       : t(locale, { ru: "Создан", en: "Created" });
   const timestampValue =
-    run.finished_at && (run.status === "completed" || run.status === "failed" || run.status === "cancelled")
+    run.finished_at &&
+    (run.status === "completed" ||
+      run.status === "interrupted" ||
+      run.status === "failed" ||
+      run.status === "cancelled")
       ? run.finished_at
       : run.created_at;
 

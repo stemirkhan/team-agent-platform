@@ -88,6 +88,20 @@ function dedupeRepos(repos: GitHubRepo[]): GitHubRepo[] {
   });
 }
 
+function isReadinessErrorMessage(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes("local execution is not ready") ||
+    normalized.includes("host execution is not ready") ||
+    normalized.includes("host execution is not ready yet") ||
+    normalized.includes("host execution пока не готов")
+  );
+}
+
 const CODEX_MODEL_OPTIONS = [
   "gpt-5.3-codex",
   "gpt-5.2-codex",
@@ -283,6 +297,14 @@ export function RunLaunchForm({
     codexModel.trim().length > 0 ||
     reasoningEffort !== "medium" ||
     sandboxMode !== "workspace-write";
+
+  useEffect(() => {
+    if (!effectiveReadiness?.effective_ready) {
+      return;
+    }
+
+    setErrorMessage((current) => (isReadinessErrorMessage(current) ? null : current));
+  }, [effectiveReadiness?.effective_ready]);
 
   useEffect(() => {
     let cancelled = false;

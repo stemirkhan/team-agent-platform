@@ -11,6 +11,7 @@ import {
   Loader2,
   PlaySquare,
   RefreshCcw,
+  RotateCcw,
   ScrollText,
   ShieldCheck,
   Square,
@@ -35,6 +36,7 @@ import {
   fetchRun,
   fetchRunEvents,
   fetchWorkspace,
+  resumeRun,
   type CodexSessionRead,
   type Run,
   type RunEvent,
@@ -50,7 +52,7 @@ type RunDetailsPanelProps = {
 
 type RunPageTabId = "overview" | "activity" | "report" | "terminal";
 
-const terminalStatuses = new Set<Run["status"]>(["completed", "failed", "cancelled"]);
+const terminalStatuses = new Set<Run["status"]>(["completed", "interrupted", "failed", "cancelled"]);
 
 function isTemporaryExecutionPath(path: string): boolean {
   return path === "TASK.md" || path === ".codex" || path.startsWith(".codex/") || path.startsWith("agents/");
@@ -177,6 +179,46 @@ function readStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
+type TraceSpawnedAgent = {
+  thread_id: string;
+  role: string | null;
+  status: string | null;
+  result_preview: string | null;
+};
+
+function readSpawnedAgents(value: unknown): TraceSpawnedAgent[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+
+    const payload = item as Record<string, unknown>;
+    const threadId = typeof payload.thread_id === "string" ? payload.thread_id.trim() : "";
+    if (!threadId) {
+      return [];
+    }
+
+    const role =
+      typeof payload.role === "string" && payload.role.trim().length > 0
+        ? payload.role.trim()
+        : null;
+    const status =
+      typeof payload.status === "string" && payload.status.trim().length > 0
+        ? payload.status.trim()
+        : null;
+    const resultPreview =
+      typeof payload.result_preview === "string" && payload.result_preview.trim().length > 0
+        ? payload.result_preview.trim()
+        : null;
+
+    return [{ thread_id: threadId, role, status, result_preview: resultPreview }];
+  });
+}
+
 function renderEventAuditDetails(event: RunEvent, locale: Locale): JSX.Element | null {
   const payload = event.payload_json;
   if (!payload || typeof payload.kind !== "string") {
@@ -218,13 +260,101 @@ function renderEventAuditDetails(event: RunEvent, locale: Locale): JSX.Element |
     const skillRefs = readStringArray(payload.skill_refs);
     const agentConfigReads = readStringArray(payload.agent_config_reads);
     const delegationMarkers = readStringArray(payload.delegation_markers);
+    const additionalThreadIds = readStringArray(payload.additional_thread_ids);
+    const spawnedAgents = readSpawnedAgents(payload.spawned_agents);
     const traceCaptureError =
       typeof payload.trace_capture_error === "string" ? payload.trace_capture_error : null;
+    const signalLevel =
+      typeof payload.multi_agent_signal_level === "string" ? payload.multi_agent_signal_level : "none";
 
     return (
       <div className="mt-3 space-y-3 rounded-2xl border border-slate-200 bg-white/80 p-3 dark:border-zinc-700 dark:bg-zinc-950/70">
         {traceCaptureError ? (
           <p className="text-xs text-rose-600 dark:text-rose-300">{traceCaptureError}</p>
+        ) : null}
+
+        <div className="flex flex-wrap gap-2">
+          <span
+            className={
+              signalLevel === "confirmed"
+                ? "rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200"
+                : signalLevel === "possible"
+                  ? "rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-200"
+                  : "rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 dark:bg-zinc-800 dark:text-slate-300"
+            }
+          >
+            {signalLevel === "confirmed"
+              ? t(locale, { ru: "sub-agent confirmed", en: "sub-agent confirmed" })
+              : signalLevel === "possible"
+                ? t(locale, { ru: "sub-agent possible", en: "sub-agent possible" })
+                : t(locale, { ru: "no sub-agent signal", en: "no sub-agent signal" })}
+          </span>
+        </div>
+
+        {spawnedAgents.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+              {t(locale, { ru: "Spawned Agents", en: "Spawned agents" })}
+            </p>
+            <div className="space-y-2">
+              {spawnedAgents.map((agent) => (
+                <div
+                  className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-100"
+                  key={agent.thread_id}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-emerald-100 px-2 py-1 font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100">
+                      {agent.role ?? t(locale, { ru: "sub-agent", en: "sub-agent" })}
+                    </span>
+                    {agent.status ? (
+                      <span className="rounded-full bg-white/80 px-2 py-1 font-medium text-emerald-700 dark:bg-zinc-950/60 dark:text-emerald-200">
+                        {agent.status}
+                      </span>
+                    ) : null}
+                    <span className="font-mono text-[11px] text-emerald-700/90 dark:text-emerald-200/90">
+                      {agent.thread_id}
+                    </span>
+                  </div>
+                  <div className="space-y-2 border-l border-emerald-300/70 pl-3 dark:border-emerald-500/30">
+                    <div className="relative">
+                      <span className="absolute -left-[1.05rem] top-1.5 h-2 w-2 rounded-full bg-emerald-500" />
+                      <p className="font-semibold text-emerald-900 dark:text-emerald-100">
+                        {t(locale, { ru: "Spawned", en: "Spawned" })}
+                      </p>
+                      <p className="text-[11px] leading-5 text-emerald-800/90 dark:text-emerald-100/90">
+                        {t(locale, {
+                          ru: "Root agent создал specialist thread через collaboration tool.",
+                          en: "Root agent created a specialist thread via the collaboration tool."
+                        })}
+                      </p>
+                    </div>
+                    {agent.status ? (
+                      <div className="relative">
+                        <span className="absolute -left-[1.05rem] top-1.5 h-2 w-2 rounded-full bg-emerald-400" />
+                        <p className="font-semibold text-emerald-900 dark:text-emerald-100">
+                          {t(locale, { ru: "State", en: "State" })}
+                        </p>
+                        <p className="text-[11px] leading-5 text-emerald-800/90 dark:text-emerald-100/90">
+                          {agent.status}
+                        </p>
+                      </div>
+                    ) : null}
+                    {agent.result_preview ? (
+                      <div className="relative">
+                        <span className="absolute -left-[1.05rem] top-1.5 h-2 w-2 rounded-full bg-emerald-300" />
+                        <p className="font-semibold text-emerald-900 dark:text-emerald-100">
+                          {t(locale, { ru: "Summary", en: "Summary" })}
+                        </p>
+                        <p className="line-clamp-3 text-[11px] leading-5 text-emerald-800/90 dark:text-emerald-100/90">
+                          {agent.result_preview}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         ) : null}
 
         {skillRefs.length > 0 ? (
@@ -263,10 +393,28 @@ function renderEventAuditDetails(event: RunEvent, locale: Locale): JSX.Element |
           </div>
         ) : null}
 
+        {additionalThreadIds.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+              {t(locale, { ru: "Additional Threads", en: "Additional threads" })}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {additionalThreadIds.map((threadId) => (
+                <span
+                  className="rounded-full bg-fuchsia-100 px-3 py-1 text-xs font-semibold text-fuchsia-800 dark:bg-fuchsia-500/15 dark:text-fuchsia-200"
+                  key={threadId}
+                >
+                  {threadId}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {delegationMarkers.length > 0 ? (
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-              {t(locale, { ru: "Delegation Markers", en: "Delegation markers" })}
+              {t(locale, { ru: "Sub-agent Signals", en: "Sub-agent signals" })}
             </p>
             <div className="space-y-2">
               {delegationMarkers.map((marker) => (
@@ -351,6 +499,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
   const [loadingRun, setLoadingRun] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [resumingRun, setResumingRun] = useState(false);
   const [activeTab, setActiveTab] = useState<RunPageTabId>("overview");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -489,8 +638,14 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     if (!run) {
       return false;
     }
-    return run.status === "running" || run.status === "starting_codex";
+    return run.status === "running" || run.status === "starting_codex" || run.status === "resuming";
   }, [run]);
+  const canResume = useMemo(() => {
+    if (!run || !terminalSession) {
+      return false;
+    }
+    return run.status === "interrupted" && terminalSession.resumable;
+  }, [run, terminalSession]);
   const displaySummary = useMemo(() => {
     const normalized = tryExtractNestedMessage(run?.summary ?? null);
     if (!normalized) {
@@ -555,6 +710,29 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
           ? error.message
           : t(locale, { ru: "Не удалось обновить run.", en: "Failed to refresh run." })
       );
+    }
+  }
+
+  async function onResume() {
+    if (!token || !run) {
+      router.push("/auth/login");
+      return;
+    }
+
+    setResumingRun(true);
+    setErrorMessage(null);
+    try {
+      const nextRun = await resumeRun(run.id, token);
+      setRun(nextRun);
+      await loadRunData();
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : t(locale, { ru: "Не удалось возобновить run.", en: "Failed to resume run." })
+      );
+    } finally {
+      setResumingRun(false);
     }
   }
 
@@ -1054,7 +1232,17 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                   {t(locale, { ru: "Automation", en: "Automation" })}
                 </p>
                 <p className="mt-3 text-2xl font-black text-slate-950 dark:text-slate-50">
-                  {run.pr_url ? t(locale, { ru: "draft PR готов", en: "draft PR ready" }) : t(locale, { ru: "в работе", en: "in progress" })}
+                  {run.status === "resuming"
+                    ? t(locale, { ru: "возобновление", en: "resuming" })
+                    : run.status === "interrupted"
+                      ? t(locale, { ru: "прерван", en: "interrupted" })
+                      : run.pr_url
+                        ? t(locale, { ru: "draft PR готов", en: "draft PR ready" })
+                        : run.status === "completed"
+                          ? t(locale, { ru: "завершен", en: "completed" })
+                          : run.status === "failed" || run.status === "cancelled"
+                            ? t(locale, { ru: "остановлен", en: "halted" })
+                            : t(locale, { ru: "в работе", en: "in progress" })}
                 </p>
                 <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                   {t(locale, {
@@ -1106,6 +1294,16 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                   <RefreshCcw className="mr-2 h-4 w-4" />
                   {t(locale, { ru: "Обновить", en: "Refresh" })}
                 </Button>
+                {canResume ? (
+                  <Button disabled={resumingRun} onClick={() => void onResume()} type="button" variant="secondary">
+                    {resumingRun ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                    )}
+                    {t(locale, { ru: "Возобновить Codex", en: "Resume Codex session" })}
+                  </Button>
+                ) : null}
                 {canCancel ? (
                   <Button disabled={cancelling} onClick={() => void onCancel()} type="button" variant="ghost">
                     {cancelling ? (

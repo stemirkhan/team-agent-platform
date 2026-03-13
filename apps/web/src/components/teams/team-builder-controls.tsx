@@ -69,6 +69,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
 
   const [settingsTitle, setSettingsTitle] = useState(team.title);
   const [settingsDescription, setSettingsDescription] = useState(team.description ?? "");
+  const [settingsStartupPrompt, setSettingsStartupPrompt] = useState(team.startup_prompt ?? "");
 
   const [roleName, setRoleName] = useState("");
   const [isRequired, setIsRequired] = useState(true);
@@ -94,6 +95,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
     setTeamState(team);
     setSettingsTitle(team.title);
     setSettingsDescription(team.description ?? "");
+    setSettingsStartupPrompt(team.startup_prompt ?? "");
     setEditingItemId(null);
   }, [team]);
 
@@ -204,6 +206,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
     setTeamState(nextTeam);
     setSettingsTitle(nextTeam.title);
     setSettingsDescription(nextTeam.description ?? "");
+    setSettingsStartupPrompt(nextTeam.startup_prompt ?? "");
     setSuccessMessage(message);
     setErrorMessage(null);
     router.refresh();
@@ -234,7 +237,8 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
         teamState.slug,
         {
           title: settingsTitle.trim(),
-          description: settingsDescription.trim() || null
+          description: settingsDescription.trim() || null,
+          startup_prompt: settingsStartupPrompt.trim() || null
         },
         token
       );
@@ -700,6 +704,25 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
                   onChange={(event) => setSettingsDescription(event.target.value)}
                   value={settingsDescription}
                 />
+              </label>
+
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                {t(locale, { ru: "Стартовый промт Codex", en: "Codex startup prompt" })}
+                <textarea
+                  className="mt-1 min-h-36 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  onChange={(event) => setSettingsStartupPrompt(event.target.value)}
+                  placeholder={t(locale, {
+                    ru: "Например: сначала действуй как orchestrator, при необходимости делегируй backend/frontend ролям и затем собери единый результат.",
+                    en: "For example: begin as the orchestrator, delegate to backend/frontend roles when needed, then merge the work into one final result."
+                  })}
+                  value={settingsStartupPrompt}
+                />
+                <p className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
+                  {t(locale, {
+                    ru: "Этот текст будет вставлен в стартовый prompt каждого run для этой команды.",
+                    en: "This text is inserted into the initial prompt of every run for this team."
+                  })}
+                </p>
               </label>
 
               <Button disabled={savingSettings} type="submit" variant="secondary">
