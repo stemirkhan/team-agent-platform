@@ -1586,3 +1586,125 @@ def test_get_run_fails_when_codex_session_state_is_lost(
     assert get_response.status_code == 200
     assert get_response.json()["status"] == "failed"
     assert "session state was lost" in get_response.json()["error_message"].lower()
+
+
+def test_rerun_creates_new_run_with_same_context(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Rerun should produce a fresh run with the same team/repo/task context."""
+    headers = _auth_headers(
+        client,
+        email="runner-rerun@example.com",
+        display_name="Runner Rerun",
+    )
+    _publish_agent(
+        client,
+        headers=headers,
+        slug="delivery-orchestrator",
+        title="Delivery Orchestrator",
+    )
+    _publish_team(client, headers=headers, slug="delivery-team-rerun")
+
+    monkeypatch.setattr(
+        HostExecutionReadinessService,
+        "build_readiness",
+        lambda self: SimpleNamespace(effective_ready=True),
+    )
+    monkeypatch.setattr(
+        GitHubProxyService,
+        "get_repo",
+        lambda self, owner, repo: GitHubRepoRead(
+            owner=owner,
+            name=repo,
+            full_name=f"{owner}/{repo}",
+            description="Demo repo",
+            url=f"https://github.com/{owner}/{repo}",
+            is_private=False,
+            default_branch="main",
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "prepare_workspace",
+        lambda self, payload: _workspace(),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "materialize_workspace",
+        lambda self, workspace_id, payload: _workspace().model_copy(
+            update={"has_changes": True, "changed_files": [file.path for file in payload.files]}
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(source_path=".team-agent-platform.toml"),
+    )
+    monkeypatch.setattr(
+        ExportService,
+        "build_download_artifact",
+        lambda self, **kwargs: (
+            "delivery-team-rerun-codex.zip",
+            _bundle_bytes(
+                {
+                    ".codex/config.toml": "[features]\nmulti_agent = true\n",
+                    ".codex/agents/orchestrator.toml": 'description = "Orchestrator"\n',
+                }
+            ),
+            "application/zip",
+        ),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "start_session",
+        lambda self, payload: CodexSessionRead(
+            run_id=payload.run_id,
+            workspace_id=payload.workspace_id,
+            repo_path="/tmp/ws-1/repo",
+            command=["codex", "exec", "--json"],
+            status="running",
+            pid=12345,
+            started_at="2026-03-08T10:06:00Z",
+            last_output_offset=0,
+        ),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_session",
+        lambda self, run_id: CodexSessionRead(
+            run_id=run_id,
+            workspace_id="ws-1",
+            repo_path="/tmp/ws-1/repo",
+            command=["codex", "exec", "--json"],
+            status="running",
+            pid=12345,
+            started_at="2026-03-08T10:06:00Z",
+            last_output_offset=0,
+        ),
+    )
+
+    create_response = client.post(
+        "/api/v1/runs",
+        headers=headers,
+        json={
+            "team_slug": "delivery-team-rerun",
+            "repo_owner": "stemirkhan",
+            "repo_name": "team-agent-platform",
+            "task_text": "Run delivery workflow and verify rerun produces a fresh run.",
+        },
+    )
+    assert create_response.status_code == 201
+    original = create_response.json()
+    original_run_id = original["id"]
+
+    rerun_response = client.post(f"/api/v1/runs/{original_run_id}/rerun", headers=headers)
+    assert rerun_response.status_code == 200
+    new_run = rerun_response.json()
+
+    assert new_run["id"] != original_run_id
+    assert new_run["team_slug"] == original["team_slug"]
+    assert new_run["repo_owner"] == original["repo_owner"]
+    assert new_run["repo_name"] == original["repo_name"]
+    assert new_run["base_branch"] == original["base_branch"]
+    assert new_run["task_text"] == original["task_text"]

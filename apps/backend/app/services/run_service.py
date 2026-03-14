@@ -446,6 +446,24 @@ class RunService:
         )
         return run
 
+    def rerun_run(self, run_id, current_user: User):
+        """Create a fresh run with the same team/repo/task context as an existing run."""
+        existing = self.run_repository.get_by_id(run_id)
+        if existing is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+        self._ensure_owner(existing.created_by, current_user.id)
+        payload = RunCreate(
+            team_slug=existing.team_slug,
+            repo_owner=existing.repo_owner,
+            repo_name=existing.repo_name,
+            base_branch=existing.base_branch,
+            issue_number=existing.issue_number,
+            task_text=existing.task_text,
+            title=existing.title,
+            summary=existing.summary,
+        )
+        return self.create_run(payload, current_user)
+
     def get_terminal_session(self, run_id, current_user: User) -> CodexSessionRead:
         """Return current host-side terminal session for one run."""
         run = self.get_run(run_id, current_user)

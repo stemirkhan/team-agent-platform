@@ -87,6 +87,16 @@ def resume_run(
     return service.resume_run(run_id, user)
 
 
+@router.post("/{run_id}/rerun", response_model=RunRead)
+def rerun_run(
+    run_id: UUID,
+    user: User = Depends(get_current_user),
+    service: RunService = Depends(get_run_service),
+) -> RunRead:
+    """Create a fresh run with the same team/repo/task context as an existing run."""
+    return service.rerun_run(run_id, user)
+
+
 @router.get("/{run_id}/terminal/session", response_model=CodexSessionRead)
 def get_run_terminal_session(
     run_id: UUID,

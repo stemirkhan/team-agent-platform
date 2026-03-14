@@ -36,6 +36,7 @@ import {
   fetchRun,
   fetchRunEvents,
   fetchWorkspace,
+  rerunRun,
   resumeRun,
   type CodexSessionRead,
   type Run,
@@ -420,6 +421,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [resumingRun, setResumingRun] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const activeTab = parseRunPageTab(searchParams.get("tab"));
@@ -567,6 +569,12 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     }
     return run.status === "interrupted" && terminalSession.resumable;
   }, [run, terminalSession]);
+  const canRerun = useMemo(() => {
+    if (!run) {
+      return false;
+    }
+    return run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+  }, [run]);
   const displaySummary = useMemo(() => {
     return normalizeRunSummaryText(run?.summary ?? null);
   }, [run?.summary]);
@@ -647,6 +655,28 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
       );
     } finally {
       setResumingRun(false);
+    }
+  }
+
+  async function onRerun() {
+    if (!token || !run) {
+      router.push("/auth/login");
+      return;
+    }
+
+    setRerunning(true);
+    setErrorMessage(null);
+    try {
+      const newRun = await rerunRun(run.id, token);
+      router.push(`/runs/${newRun.id}`);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : t(locale, { ru: "Не удалось запустить run повторно.", en: "Failed to run again." })
+      );
+    } finally {
+      setRerunning(false);
     }
   }
 
@@ -1229,6 +1259,16 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                       <RotateCcw className="mr-2 h-4 w-4" />
                     )}
                     {t(locale, { ru: "Возобновить Codex", en: "Resume Codex session" })}
+                  </Button>
+                ) : null}
+                {canRerun ? (
+                  <Button disabled={rerunning} onClick={() => void onRerun()} type="button" variant="secondary">
+                    {rerunning ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <PlaySquare className="mr-2 h-4 w-4" />
+                    )}
+                    {t(locale, { ru: "Запустить снова", en: "Run again" })}
                   </Button>
                 ) : null}
                 {canCancel ? (
