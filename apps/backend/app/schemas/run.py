@@ -106,6 +106,8 @@ class RunRead(BaseModel):
     transport_ref: str | None = None
     resume_attempt_count: int = 0
     interrupted_at: datetime | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     status: RunStatus
     error_message: str | None = None
     pr_url: str | None = None

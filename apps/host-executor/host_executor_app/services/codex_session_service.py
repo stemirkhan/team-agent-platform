@@ -1228,14 +1228,19 @@ class CodexSessionService:
         cls,
         chunks: list[CodexTerminalChunk],
     ) -> tuple[int | None, int | None]:
-        """Return the latest token usage reported by Codex turn completion events."""
+        """Return the latest token usage from structured Codex events."""
         input_tokens: int | None = None
         output_tokens: int | None = None
+        strongest_source = 0
 
         for payload in cls._iter_json_objects(chunks):
             parsed = cls._extract_usage_from_payload(payload)
             if parsed is not None:
-                input_tokens, output_tokens = parsed
+                source_rank, next_input_tokens, next_output_tokens = parsed
+                if source_rank < strongest_source:
+                    continue
+                strongest_source = source_rank
+                input_tokens, output_tokens = next_input_tokens, next_output_tokens
 
         return input_tokens, output_tokens
 
@@ -1252,16 +1257,17 @@ class CodexSessionService:
 
         if not isinstance(payload, dict):
             return None
-        return cls._extract_usage_from_payload(payload)
+        parsed = cls._extract_usage_from_payload(payload)
+        if parsed is None:
+            return None
+        _, input_tokens, output_tokens = parsed
+        return input_tokens, output_tokens
 
     @staticmethod
     def _extract_usage_from_payload(
         payload: dict[str, object]
-    ) -> tuple[int | None, int | None] | None:
-        """Return token usage from one parsed turn.completed payload when available."""
-        if payload.get("type") != "turn.completed":
-            return None
-
+    ) -> tuple[int, int | None, int | None] | None:
+        """Return token usage from one parsed payload when structured usage exists."""
         usage = payload.get("usage")
         if not isinstance(usage, dict):
             return None
@@ -1274,7 +1280,8 @@ class CodexSessionService:
 
         if input_tokens is None and output_tokens is None:
             return None
-        return input_tokens, output_tokens
+        source_rank = 2 if payload.get("type") == "turn.completed" else 1
+        return source_rank, input_tokens, output_tokens
 
     @classmethod
     def _derive_codex_session_id(cls, chunks: list[CodexTerminalChunk]) -> str | None:

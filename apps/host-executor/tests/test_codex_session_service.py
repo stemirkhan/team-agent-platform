@@ -300,6 +300,66 @@ def test_get_session_exposes_latest_token_usage(tmp_path, monkeypatch) -> None:
     assert session.output_tokens == 23804
 
 
+def test_get_session_falls_back_to_structured_usage_without_turn_completed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Structured usage payloads should backfill token usage when turn.completed is absent."""
+    monkeypatch.setattr(
+        workspace_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=str(tmp_path / "workspaces")),
+    )
+    service = CodexSessionService()
+
+    storage_dir = service.sessions_root / "run-usage-fallback"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "session.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-usage-fallback",
+                "workspace_id": "ws-usage-fallback",
+                "repo_path": "/tmp/ws-usage-fallback/repo",
+                "command": ["codex", "exec", "--json"],
+                "status": "completed",
+                "pid": 101,
+                "exit_code": 0,
+                "error_message": None,
+                "summary_text": "done",
+                "codex_session_id": None,
+                "transport_kind": "pty",
+                "transport_ref": "101",
+                "resume_attempt_count": 0,
+                "interrupted_at": None,
+                "resumable": False,
+                "recovered_from_restart": False,
+                "started_at": "2026-03-09T10:00:00Z",
+                "finished_at": "2026-03-09T10:05:00Z",
+                "last_output_offset": 1,
+            },
+            ensure_ascii=True,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    with (storage_dir / "chunks.jsonl").open("w", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                CodexTerminalChunk(
+                    offset=0,
+                    text='{"type":"session.completed","usage":{"input_tokens":987,"output_tokens":65}}\n',
+                    created_at="2026-03-09T10:05:00Z",
+                ).model_dump(),
+                ensure_ascii=True,
+            )
+        )
+        handle.write("\n")
+
+    session = service.get_session("run-usage-fallback")
+    assert session.input_tokens == 987
+    assert session.output_tokens == 65
+
+
 def test_resume_session_restarts_interrupted_session(tmp_path, monkeypatch) -> None:
     """Interrupted sessions should restart through `codex exec resume`."""
     monkeypatch.setattr(

@@ -787,10 +787,12 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
   ];
   const durationLabel = formatRunDuration(locale, run.started_at, run.finished_at, nowMs);
   const latestEvent = events[0] ?? null;
-  const inputTokensLabel = formatCompactNumber(locale, terminalSession?.input_tokens ?? null);
-  const outputTokensLabel = formatCompactNumber(locale, terminalSession?.output_tokens ?? null);
-  const inputTokensCompactLabel = formatAbbreviatedNumber(locale, terminalSession?.input_tokens ?? null);
-  const outputTokensCompactLabel = formatAbbreviatedNumber(locale, terminalSession?.output_tokens ?? null);
+  const inputTokens = run.input_tokens ?? terminalSession?.input_tokens ?? null;
+  const outputTokens = run.output_tokens ?? terminalSession?.output_tokens ?? null;
+  const inputTokensLabel = formatCompactNumber(locale, inputTokens);
+  const outputTokensLabel = formatCompactNumber(locale, outputTokens);
+  const inputTokensCompactLabel = formatAbbreviatedNumber(locale, inputTokens);
+  const outputTokensCompactLabel = formatAbbreviatedNumber(locale, outputTokens);
 
   const renderOverview = () => (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -1279,8 +1281,8 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                 <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                   {terminalSession
                     ? t(locale, {
-                        ru: "Берется из последнего turn.completed в terminal stream.",
-                        en: "Derived from the latest turn.completed event in the terminal stream."
+                        ru: "Берется из структурированных данных использования Codex-сессии.",
+                        en: "Derived from structured Codex session usage data."
                       })
                     : t(locale, {
                         ru: "Появится после старта Codex-сессии.",

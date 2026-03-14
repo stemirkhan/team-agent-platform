@@ -325,7 +325,7 @@ class RunService:
             status=status_value,
             repo_full_name=normalized_repo_full_name,
         )
-        items = [self._sync_run_with_codex_session(item) for item in items]
+        items = [self._enrich_run_for_read(item) for item in items]
         return RunListResponse(items=items, total=total, limit=limit, offset=offset)
 
     def get_run(self, run_id, current_user: User):
@@ -334,7 +334,7 @@ class RunService:
         if run is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
         self._ensure_owner(run.created_by, current_user.id)
-        run = self._sync_run_with_codex_session(run)
+        run = self._enrich_run_for_read(run)
         run.run_report = self._build_run_report(run)
         return run
 
@@ -1114,6 +1114,31 @@ class RunService:
             payload={"detail": updated.error_message},
         )
         return updated
+
+    def _enrich_run_for_read(self, run):
+        """Attach best-effort session usage before serializing a run."""
+        run = self._sync_run_with_codex_session(run)
+        session = self._best_effort_get_session(run)
+        if session is not None:
+            self._attach_run_usage(run, session)
+        else:
+            self._attach_run_usage(run, None)
+        return run
+
+    def _best_effort_get_session(self, run) -> CodexSessionRead | None:
+        """Return host-side session metadata when it is available for one run."""
+        if not run.workspace_id:
+            return None
+        try:
+            return self.codex_proxy_service.get_session(str(run.id))
+        except CodexProxyServiceError:
+            return None
+
+    @staticmethod
+    def _attach_run_usage(run, session: CodexSessionRead | None) -> None:
+        """Mirror token usage onto the run read model for API serialization."""
+        run.input_tokens = session.input_tokens if session is not None else None
+        run.output_tokens = session.output_tokens if session is not None else None
 
     @staticmethod
     def _build_run_session_fields(session: CodexSessionRead) -> dict[str, object]:

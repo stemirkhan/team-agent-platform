@@ -162,6 +162,8 @@ export type Run = {
   transport_ref: string | null;
   resume_attempt_count: number;
   interrupted_at: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
   status: RunStatus;
   error_message: string | null;
   pr_url: string | null;

@@ -104,6 +104,24 @@ class Run(Base):
         lazy="selectin",
     )
 
+    @property
+    def input_tokens(self) -> int | None:
+        """Transient token-usage value attached during read serialization."""
+        return getattr(self, "_input_tokens", None)
+
+    @input_tokens.setter
+    def input_tokens(self, value: int | None) -> None:
+        self._input_tokens = value
+
+    @property
+    def output_tokens(self) -> int | None:
+        """Transient token-usage value attached during read serialization."""
+        return getattr(self, "_output_tokens", None)
+
+    @output_tokens.setter
+    def output_tokens(self, value: int | None) -> None:
+        self._output_tokens = value
+
 
 class RunEvent(Base):
     """Persistent non-terminal event emitted during run orchestration."""
