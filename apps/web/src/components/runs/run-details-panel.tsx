@@ -12,6 +12,7 @@ import {
   PlaySquare,
   RefreshCcw,
   RotateCcw,
+  RotateCw,
   ScrollText,
   ShieldCheck,
   Square,
@@ -32,6 +33,7 @@ import {
 } from "@/lib/auth-client";
 import {
   cancelRun,
+  createRun,
   fetchRunTerminalSession,
   fetchRun,
   fetchRunEvents,
@@ -420,6 +422,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [resumingRun, setResumingRun] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const activeTab = parseRunPageTab(searchParams.get("tab"));
@@ -567,6 +570,12 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     }
     return run.status === "interrupted" && terminalSession.resumable;
   }, [run, terminalSession]);
+  const canRerun = useMemo(() => {
+    if (!run) {
+      return false;
+    }
+    return run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+  }, [run]);
   const displaySummary = useMemo(() => {
     return normalizeRunSummaryText(run?.summary ?? null);
   }, [run?.summary]);
@@ -647,6 +656,39 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
       );
     } finally {
       setResumingRun(false);
+    }
+  }
+
+  async function onRerun() {
+    if (!token || !run) {
+      router.push("/auth/login");
+      return;
+    }
+
+    setRerunning(true);
+    setErrorMessage(null);
+    try {
+      const newRun = await createRun(
+        {
+          team_slug: run.team_slug,
+          repo_owner: run.repo_owner,
+          repo_name: run.repo_name,
+          base_branch: run.base_branch,
+          issue_number: run.issue_number ?? undefined,
+          task_text: run.task_text ?? undefined,
+          title: run.title,
+        },
+        token,
+      );
+      router.push(`/runs/${newRun.id}`);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : t(locale, { ru: "Не удалось повторить run.", en: "Failed to rerun." })
+      );
+    } finally {
+      setRerunning(false);
     }
   }
 
@@ -1229,6 +1271,16 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                       <RotateCcw className="mr-2 h-4 w-4" />
                     )}
                     {t(locale, { ru: "Возобновить Codex", en: "Resume Codex session" })}
+                  </Button>
+                ) : null}
+                {canRerun ? (
+                  <Button disabled={rerunning} onClick={() => void onRerun()} type="button" variant="secondary">
+                    {rerunning ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCw className="mr-2 h-4 w-4" />
+                    )}
+                    {t(locale, { ru: "Запустить снова", en: "Run again" })}
                   </Button>
                 ) : null}
                 {canCancel ? (

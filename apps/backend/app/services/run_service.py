@@ -446,6 +446,50 @@ class RunService:
         )
         return run
 
+    def rerun_run(self, run_id, current_user: User):
+        """Create a fresh run from an existing terminal run, reusing its execution context."""
+        source_run = self.run_repository.get_by_id(run_id)
+        if source_run is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+        self._ensure_owner(source_run.created_by, current_user.id)
+        if source_run.status not in {
+            RunStatus.COMPLETED.value,
+            RunStatus.FAILED.value,
+            RunStatus.CANCELLED.value,
+        }:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only completed, failed, or cancelled runs can be rerun.",
+            )
+
+        codex_options: CodexExportOptions | None = None
+        if source_run.runtime_config_json:
+            codex_cfg = source_run.runtime_config_json.get("codex")
+            if codex_cfg:
+                codex_options = CodexExportOptions.model_validate(codex_cfg)
+
+        payload = RunCreate(
+            team_slug=source_run.team_slug,
+            repo_owner=source_run.repo_owner,
+            repo_name=source_run.repo_name,
+            base_branch=source_run.base_branch,
+            issue_number=source_run.issue_number,
+            task_text=source_run.task_text,
+            title=source_run.title,
+            codex=codex_options,
+        )
+        new_run = self.create_run(payload, current_user)
+        self._append_event(
+            run_id=new_run.id,
+            event_type=RunEventType.NOTE,
+            payload={
+                "kind": "rerun_source",
+                "message": f"This run was created from run {source_run.id}.",
+                "source_run_id": str(source_run.id),
+            },
+        )
+        return new_run
+
     def get_terminal_session(self, run_id, current_user: User) -> CodexSessionRead:
         """Return current host-side terminal session for one run."""
         run = self.get_run(run_id, current_user)
