@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Activity,
   Clock3,
@@ -52,7 +52,16 @@ type RunDetailsPanelProps = {
 
 type RunPageTabId = "overview" | "activity" | "report" | "terminal";
 
+const runPageTabs = ["overview", "activity", "report", "terminal"] as const satisfies ReadonlyArray<RunPageTabId>;
+
 const terminalStatuses = new Set<Run["status"]>(["completed", "interrupted", "failed", "cancelled"]);
+
+function parseRunPageTab(value: string | null): RunPageTabId {
+  if (value && runPageTabs.includes(value as RunPageTabId)) {
+    return value as RunPageTabId;
+  }
+  return "overview";
+}
 
 function isTemporaryExecutionPath(path: string): boolean {
   return path === "TASK.md" || path === ".codex" || path.startsWith(".codex/") || path.startsWith("agents/");
@@ -487,7 +496,9 @@ function tryExtractNestedMessage(value: string | null): string | null {
 }
 
 export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
+  const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -500,8 +511,9 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [resumingRun, setResumingRun] = useState(false);
-  const [activeTab, setActiveTab] = useState<RunPageTabId>("overview");
   const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const activeTab = parseRunPageTab(searchParams.get("tab"));
 
   useEffect(() => {
     let cancelled = false;
@@ -734,6 +746,19 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     } finally {
       setResumingRun(false);
     }
+  }
+
+  function onTabChange(tabId: RunPageTabId) {
+    const nextParams = new URLSearchParams(searchParams.toString());
+
+    if (tabId === "overview") {
+      nextParams.delete("tab");
+    } else {
+      nextParams.set("tab", tabId);
+    }
+
+    const nextQuery = nextParams.toString();
+    router.push(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
   }
 
   if (loadingUser || loadingRun) {
@@ -1332,7 +1357,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                       : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-zinc-800 dark:bg-zinc-950 dark:text-slate-200 dark:hover:border-zinc-700"
                   )}
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => onTabChange(tab.id)}
                   type="button"
                 >
                   <div className="text-sm font-semibold">{tab.label}</div>
