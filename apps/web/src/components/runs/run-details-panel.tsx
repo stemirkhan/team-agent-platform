@@ -37,6 +37,7 @@ import {
   fetchRunEvents,
   fetchWorkspace,
   resumeRun,
+  rerunRun,
   type CodexSessionRead,
   type Run,
   type RunEvent,
@@ -500,6 +501,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [resumingRun, setResumingRun] = useState(false);
+  const [rerunningRun, setRerunningRun] = useState(false);
   const [activeTab, setActiveTab] = useState<RunPageTabId>("overview");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -646,6 +648,12 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     }
     return run.status === "interrupted" && terminalSession.resumable;
   }, [run, terminalSession]);
+  const canRerun = useMemo(() => {
+    if (!run) {
+      return false;
+    }
+    return run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+  }, [run]);
   const displaySummary = useMemo(() => {
     const normalized = tryExtractNestedMessage(run?.summary ?? null);
     if (!normalized) {
@@ -733,6 +741,27 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
       );
     } finally {
       setResumingRun(false);
+    }
+  }
+
+  async function onRerun() {
+    if (!token || !run) {
+      router.push("/auth/login");
+      return;
+    }
+
+    setRerunningRun(true);
+    setErrorMessage(null);
+    try {
+      const nextRun = await rerunRun(run.id, token);
+      router.push(`/runs/${nextRun.id}`);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : t(locale, { ru: "Не удалось запустить run повторно.", en: "Failed to run again." })
+      );
+      setRerunningRun(false);
     }
   }
 
@@ -1304,6 +1333,16 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                     {t(locale, { ru: "Возобновить Codex", en: "Resume Codex session" })}
                   </Button>
                 ) : null}
+                {canRerun ? (
+                  <Button disabled={rerunningRun} onClick={() => void onRerun()} type="button">
+                    {rerunningRun ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <PlaySquare className="mr-2 h-4 w-4" />
+                    )}
+                    {t(locale, { ru: "Запустить снова", en: "Run again" })}
+                  </Button>
+                ) : null}
                 {canCancel ? (
                   <Button disabled={cancelling} onClick={() => void onCancel()} type="button" variant="ghost">
                     {cancelling ? (
@@ -1315,6 +1354,19 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                   </Button>
                 ) : null}
               </div>
+              {canResume || canRerun ? (
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  {canResume
+                    ? t(locale, {
+                        ru: "Resume продолжит прерванную Codex-сессию в этом же run. Run again создаст новый run с новым workspace и branch.",
+                        en: "Resume continues the interrupted Codex session in this same run. Run again creates a fresh run with a new workspace and branch."
+                      })
+                    : t(locale, {
+                        ru: "Run again создает новый run с тем же team, repo и task context, но с новым workspace и branch.",
+                        en: "Run again creates a fresh run with the same team, repo, and task context, but a new workspace and branch."
+                      })}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>

@@ -466,6 +466,34 @@ class RunService:
         )
         return run
 
+    def rerun_run(self, run_id, current_user: User):
+        """Create a fresh run from one finished run context."""
+        run = self.get_run(run_id, current_user)
+        if run.status not in {
+            RunStatus.COMPLETED.value,
+            RunStatus.FAILED.value,
+            RunStatus.CANCELLED.value,
+        }:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Only completed, failed, or cancelled runs can be run again. "
+                    "Use resume for interrupted runs."
+                ),
+            )
+
+        rerun = self.create_run(self._build_rerun_payload(run), current_user)
+        self._append_event(
+            run_id=rerun.id,
+            event_type=RunEventType.NOTE,
+            payload={
+                "kind": "rerun",
+                "message": "This run was created from an earlier run context.",
+                "source_run_id": str(run.id),
+            },
+        )
+        return rerun
+
     def get_terminal_session(self, run_id, current_user: User) -> CodexSessionRead:
         """Return current host-side terminal session for one run."""
         run = self.get_run(run_id, current_user)
@@ -732,6 +760,27 @@ class RunService:
             first_line = payload.task_text.strip().splitlines()[0]
             return first_line[:4000]
         return None
+
+    @staticmethod
+    def _build_rerun_payload(run) -> RunCreate:
+        """Reconstruct one fresh run payload from persisted run context."""
+        codex_config = None
+        if isinstance(run.runtime_config_json, dict):
+            raw_codex = run.runtime_config_json.get("codex")
+            if isinstance(raw_codex, dict):
+                codex_config = CodexExportOptions.model_validate(raw_codex)
+
+        return RunCreate(
+            team_slug=run.team_slug,
+            repo_owner=run.repo_owner,
+            repo_name=run.repo_name,
+            base_branch=run.base_branch,
+            issue_number=run.issue_number,
+            task_text=run.task_text,
+            title=run.title,
+            summary=run.summary,
+            codex=codex_config,
+        )
 
     def _append_event(
         self,

@@ -887,6 +887,22 @@ export async function resumeRun(runId: string, token: string): Promise<Run> {
   return json as Run;
 }
 
+export async function rerunRun(runId: string, token: string): Promise<Run> {
+  const response = await fetch(`${getApiBaseUrl()}/runs/${runId}/rerun`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  const json = await readResponsePayload(response);
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to rerun run.");
+  }
+
+  return json as Run;
+}
+
 export async function fetchRunTerminalSession(
   runId: string,
   token: string

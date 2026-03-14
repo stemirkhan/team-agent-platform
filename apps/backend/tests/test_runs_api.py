@@ -435,6 +435,19 @@ def test_create_run_returns_failed_state_when_workspace_prepare_breaks(
         "get_execution_config",
         lambda self, workspace_id: _execution_config(),
     )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_workspace",
+        lambda self, workspace_id: _workspace().model_copy(
+            update={
+                "id": workspace_id,
+                "workspace_path": f"/tmp/{workspace_id}",
+                "repo_path": f"/tmp/{workspace_id}/repo",
+                "working_branch": f"tap/team-agent-platform/{workspace_id}",
+                "current_branch": f"tap/team-agent-platform/{workspace_id}",
+            }
+        ),
+    )
 
     create_response = client.post(
         "/api/v1/runs",
@@ -1098,6 +1111,17 @@ def test_get_run_completes_without_commit_when_only_materialized_files_changed(
     )
     monkeypatch.setattr(
         WorkspaceProxyService,
+        "get_workspace",
+        lambda self, workspace_id: _workspace().model_copy(
+            update={
+                "id": workspace_id,
+                "workspace_path": f"/tmp/{workspace_id}",
+                "repo_path": f"/tmp/{workspace_id}/repo",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
         "cleanup_workspace",
         lambda self, workspace_id: _workspace().model_copy(
             update={"has_changes": False, "changed_files": []}
@@ -1398,6 +1422,330 @@ def test_resume_run_recovers_interrupted_codex_session(
     assert "codex_resume_requested" in note_kinds
     assert "codex_resume_started" in note_kinds
     assert "codex_resume_completed" in note_kinds
+
+
+def test_rerun_run_creates_fresh_run_from_cancelled_context(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Rerun should create a new run with the same task context and a fresh workspace."""
+    headers = _auth_headers(
+        client,
+        email="runner-rerun@example.com",
+        display_name="Runner Rerun",
+    )
+    _publish_agent(
+        client,
+        headers=headers,
+        slug="delivery-orchestrator",
+        title="Delivery Orchestrator",
+    )
+    _publish_team(client, headers=headers, slug="delivery-team-rerun")
+
+    monkeypatch.setattr(
+        HostExecutionReadinessService,
+        "build_readiness",
+        lambda self: SimpleNamespace(effective_ready=True),
+    )
+    monkeypatch.setattr(
+        GitHubProxyService,
+        "get_repo",
+        lambda self, owner, repo: GitHubRepoRead(
+            owner=owner,
+            name=repo,
+            full_name=f"{owner}/{repo}",
+            description="Demo repo",
+            url=f"https://github.com/{owner}/{repo}",
+            is_private=False,
+            default_branch="main",
+        ),
+    )
+
+    workspace_counter = {"value": 0}
+
+    def _next_workspace() -> WorkspaceRead:
+        workspace_counter["value"] += 1
+        index = workspace_counter["value"]
+        return _workspace().model_copy(
+            update={
+                "id": f"ws-{index}",
+                "workspace_path": f"/tmp/ws-{index}",
+                "repo_path": f"/tmp/ws-{index}/repo",
+                "working_branch": f"tap/team-agent-platform/rerun-{index}",
+                "current_branch": f"tap/team-agent-platform/rerun-{index}",
+            }
+        )
+
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "prepare_workspace",
+        lambda self, payload: _next_workspace(),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "materialize_workspace",
+        lambda self, workspace_id, payload: _workspace().model_copy(
+            update={
+                "id": workspace_id,
+                "workspace_path": f"/tmp/{workspace_id}",
+                "repo_path": f"/tmp/{workspace_id}/repo",
+                "working_branch": f"tap/team-agent-platform/{workspace_id}",
+                "current_branch": f"tap/team-agent-platform/{workspace_id}",
+                "has_changes": True,
+                "changed_files": [file.path for file in payload.files],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(),
+    )
+    monkeypatch.setattr(
+        ExportService,
+        "build_download_artifact",
+        lambda self, **kwargs: (
+            "delivery-team-rerun-codex.zip",
+            _bundle_bytes({".codex/config.toml": "[features]\nmulti_agent = true\n"}),
+            "application/zip",
+        ),
+    )
+
+    def _running_session(run_id: str, workspace_id: str) -> CodexSessionRead:
+        return CodexSessionRead(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            repo_path=f"/tmp/{workspace_id}/repo",
+            command=["codex", "exec", "--json"],
+            status="running",
+            pid=12345,
+            codex_session_id=f"session-{run_id}",
+            transport_kind="pty",
+            transport_ref=f"pty-{run_id}",
+            started_at="2026-03-08T10:06:00Z",
+            last_output_offset=0,
+        )
+
+    monkeypatch.setattr(
+        CodexProxyService,
+        "start_session",
+        lambda self, payload: _running_session(payload.run_id, payload.workspace_id),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_session",
+        lambda self, run_id: _running_session(run_id, "ws-source"),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_events",
+        lambda self, run_id, offset: CodexSessionEventsResponse(
+            session=_running_session(run_id, "ws-source"),
+            items=[],
+            next_offset=offset,
+        ),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "cancel_session",
+        lambda self, run_id: CodexSessionRead(
+            run_id=run_id,
+            workspace_id="ws-source",
+            repo_path="/tmp/ws-source/repo",
+            command=["codex", "exec", "--json"],
+            status="cancelled",
+            pid=12345,
+            codex_session_id=f"session-{run_id}",
+            transport_kind="pty",
+            transport_ref=f"pty-{run_id}",
+            started_at="2026-03-08T10:06:00Z",
+            finished_at="2026-03-08T10:10:00Z",
+            last_output_offset=0,
+        ),
+    )
+
+    create_response = client.post(
+        "/api/v1/runs",
+        headers=headers,
+        json={
+            "team_slug": "delivery-team-rerun",
+            "repo_owner": "stemirkhan",
+            "repo_name": "team-agent-platform",
+            "task_text": "Repeat this task with a fresh run context.",
+            "title": "Repeat run from history",
+            "summary": "Carry the same repo, team, and task context into a new run.",
+            "codex": {
+                "model": "gpt-5.3-codex-spark",
+                "model_reasoning_effort": "high",
+                "sandbox_mode": "workspace-write",
+            },
+        },
+    )
+    assert create_response.status_code == 201
+    source_run = create_response.json()
+    source_run_id = source_run["id"]
+    assert source_run["workspace_id"] == "ws-1"
+
+    cancel_response = client.post(f"/api/v1/runs/{source_run_id}/cancel", headers=headers)
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "cancelled"
+
+    rerun_response = client.post(f"/api/v1/runs/{source_run_id}/rerun", headers=headers)
+    assert rerun_response.status_code == 201
+    rerun_payload = rerun_response.json()
+    assert rerun_payload["id"] != source_run_id
+    assert rerun_payload["status"] == "running"
+    assert rerun_payload["workspace_id"] == "ws-2"
+    assert rerun_payload["working_branch"] == "tap/team-agent-platform/rerun-2"
+    assert rerun_payload["team_slug"] == source_run["team_slug"]
+    assert rerun_payload["repo_full_name"] == source_run["repo_full_name"]
+    assert rerun_payload["task_text"] == source_run["task_text"]
+    assert rerun_payload["title"] == source_run["title"]
+    assert rerun_payload["summary"] == source_run["summary"]
+    assert (
+        rerun_payload["runtime_config_json"]["codex"] == source_run["runtime_config_json"]["codex"]
+    )
+    assert rerun_payload["codex_session_id"] != source_run["codex_session_id"]
+
+    rerun_events_response = client.get(
+        f"/api/v1/runs/{rerun_payload['id']}/events",
+        headers=headers,
+    )
+    assert rerun_events_response.status_code == 200
+    rerun_event = next(
+        item["payload_json"]
+        for item in rerun_events_response.json()["items"]
+        if item["event_type"] == "note"
+        and item["payload_json"]
+        and item["payload_json"].get("kind") == "rerun"
+    )
+    assert rerun_event["source_run_id"] == source_run_id
+
+
+def test_rerun_run_rejects_interrupted_source_run(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Interrupted runs must use resume instead of rerun."""
+    headers = _auth_headers(
+        client,
+        email="runner-rerun-blocked@example.com",
+        display_name="Runner Rerun Blocked",
+    )
+    _publish_agent(
+        client,
+        headers=headers,
+        slug="delivery-orchestrator",
+        title="Delivery Orchestrator",
+    )
+    _publish_team(client, headers=headers, slug="delivery-team-rerun-blocked")
+
+    monkeypatch.setattr(
+        HostExecutionReadinessService,
+        "build_readiness",
+        lambda self: SimpleNamespace(effective_ready=True),
+    )
+    monkeypatch.setattr(
+        GitHubProxyService,
+        "get_repo",
+        lambda self, owner, repo: GitHubRepoRead(
+            owner=owner,
+            name=repo,
+            full_name=f"{owner}/{repo}",
+            description="Demo repo",
+            url=f"https://github.com/{owner}/{repo}",
+            is_private=False,
+            default_branch="main",
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "prepare_workspace",
+        lambda self, payload: _workspace(),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "materialize_workspace",
+        lambda self, workspace_id, payload: _workspace().model_copy(
+            update={"has_changes": True, "changed_files": ["TASK.md"]}
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(),
+    )
+    monkeypatch.setattr(
+        ExportService,
+        "build_download_artifact",
+        lambda self, **kwargs: (
+            "delivery-team-rerun-blocked-codex.zip",
+            _bundle_bytes({".codex/config.toml": "[features]\nmulti_agent = true\n"}),
+            "application/zip",
+        ),
+    )
+
+    def _session(run_id: str, status: str) -> CodexSessionRead:
+        return CodexSessionRead(
+            run_id=run_id,
+            workspace_id="ws-1",
+            repo_path="/tmp/ws-1/repo",
+            command=["codex", "exec", "--json"],
+            status=status,
+            pid=12345,
+            error_message="Codex session was interrupted.",
+            codex_session_id="session-interrupted",
+            transport_kind="pty",
+            transport_ref="pty-interrupted",
+            interrupted_at="2026-03-08T10:07:00Z" if status == "interrupted" else None,
+            resumable=status == "interrupted",
+            started_at="2026-03-08T10:06:00Z",
+            finished_at="2026-03-08T10:07:00Z" if status == "interrupted" else None,
+            last_output_offset=0,
+        )
+
+    session_state = {"status": "running"}
+    monkeypatch.setattr(
+        CodexProxyService,
+        "start_session",
+        lambda self, payload: _session(payload.run_id, "running"),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_session",
+        lambda self, run_id: _session(run_id, session_state["status"]),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_events",
+        lambda self, run_id, offset: CodexSessionEventsResponse(
+            session=_session(run_id, session_state["status"]),
+            items=[],
+            next_offset=offset,
+        ),
+    )
+
+    create_response = client.post(
+        "/api/v1/runs",
+        headers=headers,
+        json={
+            "team_slug": "delivery-team-rerun-blocked",
+            "repo_owner": "stemirkhan",
+            "repo_name": "team-agent-platform",
+            "task_text": "This run should be resumed, not rerun.",
+        },
+    )
+    assert create_response.status_code == 201
+    run_id = create_response.json()["id"]
+
+    session_state["status"] = "interrupted"
+    interrupted_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
+    assert interrupted_response.status_code == 200
+    assert interrupted_response.json()["status"] == "interrupted"
+
+    rerun_response = client.post(f"/api/v1/runs/{run_id}/rerun", headers=headers)
+    assert rerun_response.status_code == 409
+    assert "Use resume for interrupted runs." in rerun_response.json()["detail"]
 
 
 def test_get_run_auto_recovers_codex_session_after_host_restart(
