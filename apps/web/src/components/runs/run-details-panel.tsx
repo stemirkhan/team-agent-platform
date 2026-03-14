@@ -192,7 +192,6 @@ type TraceSpawnedAgent = {
   thread_id: string;
   role: string | null;
   status: string | null;
-  result_preview: string | null;
 };
 
 function readSpawnedAgents(value: unknown): TraceSpawnedAgent[] {
@@ -219,12 +218,8 @@ function readSpawnedAgents(value: unknown): TraceSpawnedAgent[] {
       typeof payload.status === "string" && payload.status.trim().length > 0
         ? payload.status.trim()
         : null;
-    const resultPreview =
-      typeof payload.result_preview === "string" && payload.result_preview.trim().length > 0
-        ? payload.result_preview.trim()
-        : null;
 
-    return [{ thread_id: threadId, role, status, result_preview: resultPreview }];
+    return [{ thread_id: threadId, role, status }];
   });
 }
 
@@ -266,10 +261,6 @@ function renderEventAuditDetails(event: RunEvent, locale: Locale): JSX.Element |
   }
 
   if (payload.kind === "codex_execution_trace") {
-    const skillRefs = readStringArray(payload.skill_refs);
-    const agentConfigReads = readStringArray(payload.agent_config_reads);
-    const delegationMarkers = readStringArray(payload.delegation_markers);
-    const additionalThreadIds = readStringArray(payload.additional_thread_ids);
     const spawnedAgents = readSpawnedAgents(payload.spawned_agents);
     const traceCaptureError =
       typeof payload.trace_capture_error === "string" ? payload.trace_capture_error : null;
@@ -348,91 +339,8 @@ function renderEventAuditDetails(event: RunEvent, locale: Locale): JSX.Element |
                         </p>
                       </div>
                     ) : null}
-                    {agent.result_preview ? (
-                      <div className="relative">
-                        <span className="absolute -left-[1.05rem] top-1.5 h-2 w-2 rounded-full bg-emerald-300" />
-                        <p className="font-semibold text-emerald-900 dark:text-emerald-100">
-                          {t(locale, { ru: "Summary", en: "Summary" })}
-                        </p>
-                        <p className="line-clamp-3 text-[11px] leading-5 text-emerald-800/90 dark:text-emerald-100/90">
-                          {agent.result_preview}
-                        </p>
-                      </div>
-                    ) : null}
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {skillRefs.length > 0 ? (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-              {t(locale, { ru: "Skills", en: "Skills" })}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {skillRefs.map((skill) => (
-                <span
-                  className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200"
-                  key={skill}
-                >
-                  {skill}
-                </span>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {agentConfigReads.length > 0 ? (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-              {t(locale, { ru: "Agent Config Reads", en: "Agent config reads" })}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {agentConfigReads.map((agent) => (
-                <span
-                  className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-200"
-                  key={agent}
-                >
-                  {agent}
-                </span>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {additionalThreadIds.length > 0 ? (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-              {t(locale, { ru: "Additional Threads", en: "Additional threads" })}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {additionalThreadIds.map((threadId) => (
-                <span
-                  className="rounded-full bg-fuchsia-100 px-3 py-1 text-xs font-semibold text-fuchsia-800 dark:bg-fuchsia-500/15 dark:text-fuchsia-200"
-                  key={threadId}
-                >
-                  {threadId}
-                </span>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {delegationMarkers.length > 0 ? (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-              {t(locale, { ru: "Sub-agent Signals", en: "Sub-agent signals" })}
-            </p>
-            <div className="space-y-2">
-              {delegationMarkers.map((marker) => (
-                <p
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300"
-                  key={marker}
-                >
-                  {marker}
-                </p>
               ))}
             </div>
           </div>

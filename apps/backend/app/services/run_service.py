@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import tomllib
 from datetime import UTC, datetime
 from io import BytesIO
@@ -50,25 +49,6 @@ from app.services.workspace_proxy_service import WorkspaceProxyService, Workspac
 class RunService:
     """Create and inspect local-first Codex runs."""
 
-    _SKILL_PATH_PATTERN = re.compile(r"\.codex/skills/([^/\s]+)/SKILL\.md")
-    _AGENT_CONFIG_PATH_PATTERN = re.compile(r"\.codex/agents/([^/\s]+)\.toml")
-    _SKILL_MENTION_PATTERN = re.compile(r"(?:skill|скилл)[^`]*`([^`]+)`", re.IGNORECASE)
-    _BACKTICK_SLUG_PATTERN = re.compile(r"`([a-z0-9][a-z0-9_-]{1,80})`", re.IGNORECASE)
-    _ROLE_PROMPT_PATTERN = re.compile(
-        r"^\s*Role:\s*([a-z0-9][a-z0-9_-]{1,80})\.?\s*$",
-        re.IGNORECASE | re.MULTILINE,
-    )
-    _MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\([^)]+\)")
-    _SUBAGENT_SIGNAL_PATTERN = re.compile(
-        r"\b(spawn(?:ed|ing)?|launch(?:ed|ing)?|delegat(?:e|ed|ing)|handoff|hand off)\b"
-        r"[^.\n\r]{0,120}\b(subagent|sub-agent|child agent|agent)\b",
-        re.IGNORECASE,
-    )
-    _AGENT_RESULT_SECTION_PATTERN = re.compile(
-        r"(?:^|\n)(?:2\.\s*Risks or findings|3\.\s*Proposed changes|"
-        r"2\.\s*Риски или находки|3\.\s*Предлагаемые изменения)\s*(.*?)(?=\n\d+\.\s|\Z)",
-        re.IGNORECASE | re.DOTALL,
-    )
     _READY_MESSAGE = (
         "Workspace is prepared and `.codex` plus `TASK.md` are materialized. "
         "Codex PTY execution is the next layer."
@@ -1167,12 +1147,7 @@ class RunService:
         cls,
         session_events: CodexSessionEventsResponse,
     ) -> dict[str, object]:
-        """Summarize Codex terminal output into one audit-friendly payload."""
-        skill_reads: set[str] = set()
-        skill_mentions: set[str] = set()
-        agent_config_reads: set[str] = set()
-        delegation_markers: list[str] = []
-        thread_ids: list[str] = []
+        """Summarize structured collaboration events into one audit-friendly payload."""
         spawned_agents_by_thread: dict[str, dict[str, str | None]] = {}
         item_type_counts: dict[str, int] = {}
 
@@ -1187,11 +1162,6 @@ class RunService:
             except json.JSONDecodeError:
                 continue
 
-            if payload.get("type") == "thread.started":
-                thread_id = payload.get("thread_id")
-                if isinstance(thread_id, str) and thread_id.strip():
-                    thread_ids.append(thread_id.strip())
-
             item = payload.get("item")
             if not isinstance(item, dict):
                 continue
@@ -1200,28 +1170,6 @@ class RunService:
             if not isinstance(item_type, str):
                 continue
             item_type_counts[item_type] = item_type_counts.get(item_type, 0) + 1
-
-            if item_type == "command_execution":
-                for value in (item.get("command"), item.get("aggregated_output")):
-                    if not isinstance(value, str):
-                        continue
-                    skill_reads.update(cls._SKILL_PATH_PATTERN.findall(value))
-                    agent_config_reads.update(cls._AGENT_CONFIG_PATH_PATTERN.findall(value))
-                continue
-
-            if item_type == "agent_message":
-                text = item.get("text")
-                if not isinstance(text, str):
-                    continue
-                skill_mentions.update(
-                    match.group(1) for match in cls._SKILL_MENTION_PATTERN.finditer(text)
-                )
-                skill_mentions.update(
-                    match.group(1) for match in cls._BACKTICK_SLUG_PATTERN.finditer(text)
-                )
-                if cls._SUBAGENT_SIGNAL_PATTERN.search(text):
-                    delegation_markers.append(cls._truncate_audit_line(text))
-                continue
 
             if item_type != "collab_tool_call":
                 continue
@@ -1232,11 +1180,10 @@ class RunService:
                 continue
 
             if tool == "spawn_agent":
-                role = cls._extract_role_from_prompt(item.get("prompt"))
                 cls._merge_spawned_agent_states(
                     spawned_agents_by_thread=spawned_agents_by_thread,
                     receiver_thread_ids=receiver_thread_ids,
-                    role=role,
+                    role=cls._read_structured_role(item),
                     agents_states=item.get("agents_states"),
                 )
                 continue
@@ -1249,21 +1196,7 @@ class RunService:
                     agents_states=item.get("agents_states"),
                 )
 
-        unique_thread_ids = cls._dedupe_preserve_order(thread_ids)
         spawned_agents = list(spawned_agents_by_thread.values())
-        spawned_thread_ids = [
-            thread_id
-            for agent in spawned_agents
-            if isinstance(thread_id := agent.get("thread_id"), str) and thread_id
-        ]
-        additional_thread_ids = cls._dedupe_preserve_order(
-            [*unique_thread_ids[1:], *spawned_thread_ids]
-        )
-        unique_delegation_markers = cls._dedupe_preserve_order(delegation_markers)
-        unique_skill_refs = cls._dedupe_preserve_order(
-            [*sorted(skill_reads), *sorted(skill_mentions)]
-        )
-        unique_agent_config_reads = cls._dedupe_preserve_order(sorted(agent_config_reads))
 
         if spawned_agents:
             signal_level = "confirmed"
@@ -1271,34 +1204,10 @@ class RunService:
                 f"Observed {len(spawned_agents)} spawned agent(s) via collaboration tool calls; "
                 "this is confirmed sub-agent execution."
             )
-        elif additional_thread_ids:
-            signal_level = "confirmed"
-            message = (
-                f"Observed {len(additional_thread_ids)} additional Codex thread id(s); "
-                "this is strong evidence of sub-agent execution."
-            )
-        elif unique_delegation_markers:
-            signal_level = "confirmed"
-            message = (
-                f"Observed {len(unique_delegation_markers)} explicit sub-agent signal(s) "
-                "in Codex agent messages."
-            )
-        elif unique_agent_config_reads:
-            signal_level = "possible"
-            message = (
-                "Codex read agent config files during execution, "
-                "but no confirmed sub-agent spawn signals were captured."
-            )
-        elif unique_skill_refs:
-            signal_level = "none"
-            message = (
-                "Codex referenced skills during execution, "
-                "but no multi-agent signals were captured."
-            )
         else:
             signal_level = "none"
             message = (
-                "No sub-agent execution signals were captured in the Codex terminal output."
+                "No confirmed sub-agent spawn signals were captured in the Codex terminal output."
             )
 
         return {
@@ -1306,12 +1215,7 @@ class RunService:
             "message": message,
             "multi_agent_signal_level": signal_level,
             "chunk_count": len(session_events.items),
-            "thread_ids": unique_thread_ids[:10],
-            "additional_thread_ids": additional_thread_ids[:10],
             "spawned_agents": spawned_agents[:10],
-            "skill_refs": unique_skill_refs,
-            "agent_config_reads": unique_agent_config_reads,
-            "delegation_markers": unique_delegation_markers[:5],
             "item_type_counts": item_type_counts,
         }
 
@@ -1331,21 +1235,15 @@ class RunService:
         return lines
 
     @staticmethod
-    def _truncate_audit_line(value: str) -> str:
-        """Return a compact, single-line preview for audit payloads."""
-        normalized = " ".join(value.strip().split())
-        return normalized[:240]
-
-    @classmethod
-    def _extract_role_from_prompt(cls, value: object) -> str | None:
-        """Return one role slug from a spawned-agent prompt when present."""
-        if not isinstance(value, str):
+    def _read_structured_role(value: object) -> str | None:
+        """Return one explicit role slug when it is present in structured tool payloads."""
+        if not isinstance(value, dict):
             return None
-        match = cls._ROLE_PROMPT_PATTERN.search(value)
-        if not match:
-            return None
-        role = match.group(1).strip()
-        return role or None
+        for key in ("role", "role_name", "agent_role"):
+            role = value.get(key)
+            if isinstance(role, str) and role.strip():
+                return role.strip()
+        return None
 
     @staticmethod
     def _coerce_receiver_thread_ids(value: object) -> list[str]:
@@ -1380,7 +1278,6 @@ class RunService:
                     "thread_id": thread_id,
                     "role": None,
                     "status": None,
-                    "result_preview": None,
                 },
             )
             if role and not agent.get("role"):
@@ -1389,43 +1286,12 @@ class RunService:
             state_payload = agent_state_map.get(thread_id)
             if not isinstance(state_payload, dict):
                 continue
+            structured_role = cls._read_structured_role(state_payload)
+            if structured_role and not agent.get("role"):
+                agent["role"] = structured_role
             status = state_payload.get("status")
             if isinstance(status, str) and status.strip():
                 agent["status"] = status.strip()
-            message = state_payload.get("message")
-            if isinstance(message, str) and message.strip():
-                agent["result_preview"] = cls._extract_agent_result_preview(message)
-
-    @classmethod
-    def _extract_agent_result_preview(cls, value: str) -> str:
-        """Extract one compact, user-facing preview from a structured sub-agent report."""
-        match = cls._AGENT_RESULT_SECTION_PATTERN.search(value)
-        candidate = match.group(1) if match else value
-
-        cleaned_lines: list[str] = []
-        for raw_line in candidate.splitlines():
-            normalized = " ".join(raw_line.strip().split())
-            if not normalized:
-                continue
-            normalized = cls._MARKDOWN_LINK_PATTERN.sub(r"\1", normalized)
-            if normalized.startswith("- "):
-                normalized = normalized[2:].strip()
-            cleaned_lines.append(normalized)
-
-        compact = " ".join(cleaned_lines) if cleaned_lines else value
-        return cls._truncate_audit_line(compact)
-
-    @staticmethod
-    def _dedupe_preserve_order(items: list[str]) -> list[str]:
-        """Return one stable list with duplicates removed."""
-        unique: list[str] = []
-        seen: set[str] = set()
-        for item in items:
-            if not item or item in seen:
-                continue
-            seen.add(item)
-            unique.append(item)
-        return unique
 
     def _finalize_completed_run(self, run, session: CodexSessionRead):
         """Convert a completed Codex session into commit, push, and draft-PR artifacts."""

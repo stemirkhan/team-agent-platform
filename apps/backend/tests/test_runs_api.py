@@ -858,12 +858,8 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
         and item["payload_json"].get("kind") == "codex_execution_trace"
     ]
     assert len(trace_events) == 1
-    assert trace_events[0]["skill_refs"] == [
-        "frontend-product-engineer-frontend-ux-review",
-        "frontend-ux-review",
-    ]
     assert trace_events[0]["multi_agent_signal_level"] == "none"
-    assert trace_events[0]["delegation_markers"] == []
+    assert trace_events[0]["spawned_agents"] == []
     statuses = [
         item["payload_json"]["status"]
         for item in events_response.json()["items"]
@@ -883,8 +879,8 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
     assert cancel_response.json()["status"] == "completed"
 
 
-def test_build_codex_terminal_audit_payload_ignores_multi_agent_doc_mentions() -> None:
-    """Doc text mentioning multi-agent should not be treated as delegation evidence."""
+def test_build_codex_terminal_audit_payload_ignores_non_structured_mentions() -> None:
+    """Plain text should not become sub-agent evidence without structured tool calls."""
     payload = RunService._build_codex_terminal_audit_payload(
         CodexSessionEventsResponse(
             session=CodexSessionRead(
@@ -918,77 +914,6 @@ def test_build_codex_terminal_audit_payload_ignores_multi_agent_doc_mentions() -
     )
 
     assert payload["multi_agent_signal_level"] == "none"
-    assert payload["delegation_markers"] == []
-    assert payload["additional_thread_ids"] == []
-
-
-def test_build_codex_terminal_audit_payload_marks_agent_config_reads_as_possible() -> None:
-    """Reading agent config files is only a possible multi-agent signal."""
-    payload = RunService._build_codex_terminal_audit_payload(
-        CodexSessionEventsResponse(
-            session=CodexSessionRead(
-                run_id="run-agents",
-                workspace_id="ws-agents",
-                repo_path="/tmp/ws-agents/repo",
-                command=["codex", "exec", "--json"],
-                status="completed",
-                exit_code=0,
-                started_at="2026-03-08T10:00:00Z",
-                finished_at="2026-03-08T10:01:00Z",
-                last_output_offset=1,
-            ),
-            items=[
-                CodexTerminalChunk(
-                    offset=0,
-                    text=(
-                        '{"type":"item.completed","item":{"type":"command_execution",'
-                        '"command":"cat .codex/agents/frontend-engineer.toml",'
-                        '"aggregated_output":"description = \\"Frontend specialist\\""}}\n'
-                    ),
-                    created_at="2026-03-08T10:00:30Z",
-                )
-            ],
-            next_offset=1,
-        )
-    )
-
-    assert payload["multi_agent_signal_level"] == "possible"
-    assert payload["agent_config_reads"] == ["frontend-engineer"]
-    assert payload["delegation_markers"] == []
-
-
-def test_build_codex_terminal_audit_payload_confirms_additional_threads() -> None:
-    """Additional thread ids should be treated as strong sub-agent evidence."""
-    payload = RunService._build_codex_terminal_audit_payload(
-        CodexSessionEventsResponse(
-            session=CodexSessionRead(
-                run_id="run-threads",
-                workspace_id="ws-threads",
-                repo_path="/tmp/ws-threads/repo",
-                command=["codex", "exec", "--json"],
-                status="completed",
-                exit_code=0,
-                started_at="2026-03-08T10:00:00Z",
-                finished_at="2026-03-08T10:01:00Z",
-                last_output_offset=1,
-            ),
-            items=[
-                CodexTerminalChunk(
-                    offset=0,
-                    text=(
-                        '{"type":"thread.started","thread_id":"root-thread"}\n'
-                        '{"type":"thread.started","thread_id":"child-thread-1"}\n'
-                    ),
-                    created_at="2026-03-08T10:00:30Z",
-                )
-            ],
-            next_offset=1,
-        )
-    )
-
-    assert payload["multi_agent_signal_level"] == "confirmed"
-    assert payload["thread_ids"] == ["root-thread", "child-thread-1"]
-    assert payload["additional_thread_ids"] == ["child-thread-1"]
     assert payload["spawned_agents"] == []
 
 
@@ -1031,14 +956,11 @@ def test_build_codex_terminal_audit_payload_confirms_spawned_agents() -> None:
     )
 
     assert payload["multi_agent_signal_level"] == "confirmed"
-    assert payload["thread_ids"] == ["root-thread"]
-    assert payload["additional_thread_ids"] == ["child-thread-1"]
     assert payload["spawned_agents"] == [
         {
             "thread_id": "child-thread-1",
-            "role": "frontend-engineer",
+            "role": None,
             "status": "completed",
-            "result_preview": "frontend-only change",
         }
     ]
 
