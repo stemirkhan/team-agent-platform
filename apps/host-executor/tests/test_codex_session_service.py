@@ -80,6 +80,85 @@ def test_get_session_recovers_persisted_running_session_as_interrupted(
     assert events.items[0].text == '{"type":"turn.started"}\n'
 
 
+def test_get_session_auto_resumes_persisted_running_session_after_restart(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A recoverable PTY session should auto-resume after host executor restart."""
+    monkeypatch.setattr(
+        workspace_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=str(tmp_path / "workspaces")),
+    )
+    service = CodexSessionService()
+
+    repo_path = tmp_path / "workspaces" / "ws-auto" / "repo"
+    repo_path.mkdir(parents=True, exist_ok=True)
+    codex_home = repo_path.parent / "codex-home"
+    codex_home.mkdir(parents=True, exist_ok=True)
+
+    storage_dir = service.sessions_root / "run-auto"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "session.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-auto",
+                "workspace_id": "ws-auto",
+                "repo_path": str(repo_path),
+                "command": ["codex", "exec", "--json"],
+                "status": "running",
+                "pid": 999999,
+                "exit_code": None,
+                "error_message": None,
+                "summary_text": None,
+                "codex_session_id": "019cdddb-4df9-7100-ae82-b8b061ad6cbb",
+                "transport_kind": "pty",
+                "transport_ref": "999999",
+                "resume_attempt_count": 0,
+                "interrupted_at": None,
+                "resumable": False,
+                "recovered_from_restart": False,
+                "started_at": "2026-03-09T10:00:00Z",
+                "finished_at": None,
+                "last_output_offset": 0,
+            },
+            ensure_ascii=True,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    class _FakeProcess:
+        pid = 43210
+
+        @staticmethod
+        def poll():
+            return None
+
+    started_threads: list[str] = []
+    monkeypatch.setattr(service, "_tmux_available", lambda: False)
+    monkeypatch.setattr(service, "_process_exists", lambda pid: False)
+    monkeypatch.setattr(
+        service,
+        "_start_background_threads",
+        lambda run_id: started_threads.append(run_id),
+    )
+    monkeypatch.setattr(service, "_spawn_process", lambda **kwargs: (_FakeProcess(), 77))
+
+    session = service.get_session("run-auto")
+    assert session.status == "resuming"
+    assert session.resume_attempt_count == 1
+    assert session.resumable is False
+    assert session.pid == 43210
+    assert session.transport_ref == "43210"
+    assert started_threads == ["run-auto"]
+    assert "automatic semantic resume started" in (session.error_message or "").lower()
+
+    persisted = json.loads((storage_dir / "session.json").read_text(encoding="utf-8"))
+    assert persisted["status"] == "resuming"
+    assert persisted["resume_attempt_count"] == 1
+
+
 def test_build_command_enables_colorized_terminal_output(tmp_path, monkeypatch) -> None:
     """Codex sessions should keep ANSI colors and multi-agent enabled."""
     monkeypatch.setattr(
@@ -388,13 +467,17 @@ def test_get_session_marks_tmux_session_interrupted_when_transport_disappears(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """tmux session loss should fall back to interrupted resumable state."""
+    """tmux session loss should auto-resume from the persisted Codex session id."""
     monkeypatch.setattr(
         workspace_service_module,
         "get_settings",
         lambda: SimpleNamespace(workspace_root=str(tmp_path / "workspaces")),
     )
     service = CodexSessionService()
+    repo_path = tmp_path / "ws-tmux-lost" / "repo"
+    repo_path.mkdir(parents=True, exist_ok=True)
+    codex_home = repo_path.parent / "codex-home"
+    codex_home.mkdir(parents=True, exist_ok=True)
     storage_dir = service.sessions_root / "run-tmux-lost"
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "session.json").write_text(
@@ -402,7 +485,7 @@ def test_get_session_marks_tmux_session_interrupted_when_transport_disappears(
             {
                 "run_id": "run-tmux-lost",
                 "workspace_id": "ws-tmux-lost",
-                "repo_path": "/tmp/ws-tmux-lost/repo",
+                "repo_path": str(repo_path),
                 "command": ["codex", "exec", "--json"],
                 "status": "running",
                 "pid": None,
@@ -426,9 +509,21 @@ def test_get_session_marks_tmux_session_interrupted_when_transport_disappears(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(service, "_tmux_session_exists", lambda session_name: False)
+    def _tmux_session_exists(session_name: str) -> bool:
+        return session_name == "tap-run-run-tmux-lost-resumed"
+
+    monkeypatch.setattr(service, "_tmux_session_exists", _tmux_session_exists)
+    monkeypatch.setattr(service, "_tmux_available", lambda: True)
+    monkeypatch.setattr(
+        service,
+        "_spawn_tmux_session",
+        lambda **kwargs: "tap-run-run-tmux-lost-resumed",
+    )
 
     session = service.get_session("run-tmux-lost")
-    assert session.status == "interrupted"
-    assert session.resumable is True
-    assert "semantic resume" in (session.error_message or "").lower()
+    assert session.status == "running"
+    assert session.resumable is False
+    assert session.transport_kind == "tmux"
+    assert session.transport_ref == "tap-run-run-tmux-lost-resumed"
+    assert session.resume_attempt_count == 1
+    assert session.error_message is None

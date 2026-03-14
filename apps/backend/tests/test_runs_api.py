@@ -1400,6 +1400,168 @@ def test_resume_run_recovers_interrupted_codex_session(
     assert "codex_resume_completed" in note_kinds
 
 
+def test_get_run_auto_recovers_codex_session_after_host_restart(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Automatic recovery should surface resuming and completed events without manual resume."""
+    headers = _auth_headers(
+        client,
+        email="runner-auto-recover@example.com",
+        display_name="Runner Auto Recover",
+    )
+    _publish_agent(
+        client,
+        headers=headers,
+        slug="delivery-orchestrator",
+        title="Delivery Orchestrator",
+    )
+    _publish_team(client, headers=headers, slug="delivery-team-auto-recover")
+
+    monkeypatch.setattr(
+        HostExecutionReadinessService,
+        "build_readiness",
+        lambda self: SimpleNamespace(effective_ready=True),
+    )
+    monkeypatch.setattr(
+        GitHubProxyService,
+        "get_repo",
+        lambda self, owner, repo: GitHubRepoRead(
+            owner=owner,
+            name=repo,
+            full_name=f"{owner}/{repo}",
+            description="Demo repo",
+            url=f"https://github.com/{owner}/{repo}",
+            is_private=False,
+            default_branch="main",
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "prepare_workspace",
+        lambda self, payload: _workspace(),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "materialize_workspace",
+        lambda self, workspace_id, payload: _workspace().model_copy(
+            update={"has_changes": True, "changed_files": ["TASK.md"]}
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(),
+    )
+    monkeypatch.setattr(
+        ExportService,
+        "build_download_artifact",
+        lambda self, **kwargs: (
+            "delivery-team-auto-recover-codex.zip",
+            _bundle_bytes({".codex/config.toml": "[features]\nmulti_agent = true\n"}),
+            "application/zip",
+        ),
+    )
+
+    session_state = {"status": "running"}
+
+    def _session(run_id: str, status: str) -> CodexSessionRead:
+        pid = 777 if status in {"resuming", "running"} else 123
+        resume_attempt_count = (
+            1
+            if status in {"resuming", "running"}
+            and session_state["status"] != "running-initial"
+            else 0
+        )
+        return CodexSessionRead(
+            run_id=run_id,
+            workspace_id="ws-1",
+            repo_path="/tmp/ws-1/repo",
+            command=["codex", "exec", "--json"],
+            status="running" if status == "running-initial" else status,
+            pid=pid,
+            exit_code=None,
+            error_message=(
+                "Host executor restarted and automatic recovery is in progress."
+                if status == "resuming"
+                else None
+            ),
+            codex_session_id="019cdddb-4df9-7100-ae82-b8b061ad6cbb",
+            transport_kind="tmux",
+            transport_ref=f"tap-run-{run_id}",
+            resume_attempt_count=0 if status == "running-initial" else resume_attempt_count,
+            interrupted_at=None,
+            resumable=False,
+            recovered_from_restart=status in {"resuming", "running"},
+            started_at="2026-03-08T10:06:00Z",
+            finished_at=None,
+            last_output_offset=1,
+        )
+
+    monkeypatch.setattr(
+        CodexProxyService,
+        "start_session",
+        lambda self, payload: _session(payload.run_id, "running-initial"),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_session",
+        lambda self, run_id: _session(run_id, session_state["status"]),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_events",
+        lambda self, run_id, offset: CodexSessionEventsResponse(
+            session=_session(run_id, session_state["status"]),
+            items=[
+                CodexTerminalChunk(
+                    offset=0,
+                    text='{"type":"thread.started","thread_id":"019cdddb-4df9-7100-ae82-b8b061ad6cbb"}\n',
+                    created_at="2026-03-08T10:06:01Z",
+                )
+            ]
+            if offset == 0
+            else [],
+            next_offset=1,
+        ),
+    )
+
+    create_response = client.post(
+        "/api/v1/runs",
+        headers=headers,
+        json={
+            "team_slug": "delivery-team-auto-recover",
+            "repo_owner": "stemirkhan",
+            "repo_name": "team-agent-platform",
+            "task_text": "Run codex and recover automatically after restart.",
+        },
+    )
+    assert create_response.status_code == 201
+    run_id = create_response.json()["id"]
+
+    session_state["status"] = "resuming"
+    resuming_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
+    assert resuming_response.status_code == 200
+    assert resuming_response.json()["status"] == "resuming"
+    assert resuming_response.json()["resume_attempt_count"] == 1
+
+    session_state["status"] = "running"
+    resumed_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
+    assert resumed_response.status_code == 200
+    assert resumed_response.json()["status"] == "running"
+    assert resumed_response.json()["resume_attempt_count"] == 1
+
+    events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
+    assert events_response.status_code == 200
+    note_kinds = [
+        item["payload_json"].get("kind")
+        for item in events_response.json()["items"]
+        if item["event_type"] == "note" and item["payload_json"]
+    ]
+    assert "codex_auto_resume_started" in note_kinds
+    assert "codex_auto_resume_completed" in note_kinds
+
+
 def test_get_run_fails_when_codex_session_state_is_lost(
     client: TestClient,
     monkeypatch,

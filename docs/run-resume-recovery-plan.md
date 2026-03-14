@@ -2,9 +2,37 @@
 
 ## Статус
 
-- Дата: 11 марта 2026
-- Статус: draft
-- Цель документа: зафиксировать детальный план реализации recovery/resume для run-сессий после падения host executor
+- Дата: 13 марта 2026
+- Статус: in progress
+- Цель документа: зафиксировать план и текущий статус реализации recovery/resume для run-сессий после падения host executor
+
+### Фактический статус реализации
+
+- `V0 spike`: по сути подтвержден в коде и живых прогонах, но не оформлен отдельным engineering note.
+- `V1 manual semantic resume`: реализован.
+- `V2 durable transport via tmux`: реализован.
+- `V3 auto-recovery`: реализован.
+
+### Что уже работает
+
+- Codex запускается без `--ephemeral` в resumable flow.
+- На run сохраняются `codex_session_id`, `resume_attempt_count`, `interrupted_at`, `transport_kind`, `transport_ref`.
+- После потери host executor run может перейти в `interrupted`, а не только в `failed`.
+- Есть `POST /runs/{id}/resume` и UI action `Resume Codex session`.
+- Host executor умеет `codex exec resume` для того же run.
+- Для durable transport используется `tmux`.
+- При живой `tmux` session после рестарта executor возможен reattach без полного rerun.
+- Если transport потерян, но `codex_session_id` сохранен, host executor может автоматически запустить semantic resume после рестарта.
+- Diagnostics показывают готовность `tmux`.
+- Activity/trace теперь показывает multi-agent bundle, startup prompt usage и подтвержденные sub-agent signals.
+- Activity показывает auto-recovery события для resumed run.
+
+### Что еще не закрыто
+
+- Нет отдельного engineering note по `V0 spike`.
+- Не все lifecycle edges вокруг interrupted/resume/push-checkpoint cleanup доведены до финального polish.
+- Не добавлена отдельная recovery telemetry/metrics аналитика.
+- Документ ниже частично сохраняет исторический план, поэтому некоторые разделы описывают уже пройденные этапы.
 
 ## 1. Контекст
 
@@ -64,7 +92,7 @@
 
 ## 5. Текущее состояние и ограничения
 
-### 5.1 Что мешает resume сейчас
+### 5.1 Что мешало resume на момент старта плана
 
 1. Codex запускается с `--ephemeral`.
    Это отключает native persistence session state, на который можно было бы опереться для `codex exec resume`.
@@ -80,9 +108,19 @@
 
 4. После рестарта host executor текущая логика намеренно переводит interrupted running session в `failed`.
 
-### 5.2 Вывод
+### 5.2 Вывод на момент старта плана
 
 В текущем MVP recovery невозможен не "случайно", а потому что реализация прямо сделана как non-resumable.
+
+### 5.3 Что изменилось после реализации
+
+Сейчас эти ограничения больше не являются базовым состоянием системы:
+
+- resumable run больше не использует `--ephemeral`;
+- есть persisted `codex_session_id`;
+- host executor не обязан терять живой Codex transport при рестарте, если `tmux` session жива;
+- backend и UI различают `failed` и `interrupted`;
+- manual semantic resume уже доступен пользователю.
 
 ## 6. Два режима recovery
 
@@ -590,6 +628,7 @@ Mitigation:
 
 ### Для V1
 
+- Статус: done
 - Если host executor упал во время `running`, run может перейти в `interrupted`, а не только в `failed`.
 - Если у run есть `codex_session_id`, пользователь может нажать `Resume Codex session`.
 - После resume terminal history сохраняется и дополняется.
@@ -598,60 +637,73 @@ Mitigation:
 
 ### Для V2
 
+- Статус: done
 - Если host executor упал, а `tmux` session жива, Codex процесс продолжает работать.
 - После восстановления executor UI может reconnect-нуться к той же live session.
 - В этом сценарии нет полного semantic resume и нет полного rerun.
+
+### Для V3
+
+- Статус: done
+- Auto-reattach для живой `tmux` session реализован через durable transport recovery.
+- Automatic semantic resume после рестарта executor реализован для recoverable cases.
+- Run timeline показывает auto-recovery через отдельные recovery/resume events.
 
 ## 17. Детальный backlog
 
 ### Phase 0
 
-- spike: non-ephemeral `codex exec`
-- spike: discover `session_id`
-- spike: validate `codex exec resume`
-- spike: validate `tmux` survival and reattach
+- done: validate non-ephemeral `codex exec`
+- done: discover `session_id`
+- done: validate `codex exec resume`
+- done: validate `tmux` survival and reattach
+- todo: зафиксировать результаты отдельным коротким engineering note
 
 ### Phase 1
 
-- migration для новых полей `runs`
-- расширение `RunStatus`
-- host executor: сохранить `codex_session_id`
-- host executor: interrupted вместо forced failed при recoverable case
-- backend: `resume_run`
-- backend API: `POST /runs/{id}/resume`
-- web API client: `resumeRun`
-- web status badges
-- web run details action
-- tests: host executor service
-- tests: backend run service/API
+- done: migration для новых полей `runs`
+- done: расширение `RunStatus`
+- done: host executor сохраняет `codex_session_id`
+- done: host executor переводит session в recoverable interrupted state
+- done: backend `resume_run`
+- done: backend API `POST /runs/{id}/resume`
+- done: web API client `resumeRun`
+- done: web status badges
+- done: web run details action
+- done: tests для host executor service
+- done: tests для backend run service/API
 
 ### Phase 2
 
-- host diagnostics: `tmux`
-- host executor: `tmux` transport
-- reattach on restart
-- terminal stream over durable transport
-- tests: `tmux` lifecycle and reconnect
+- done: host diagnostics `tmux`
+- done: host executor `tmux` transport
+- done: reattach on restart
+- done: terminal stream over durable transport
+- done: tests для `tmux` lifecycle and reconnect
 
 ### Phase 3
 
-- auto-reattach for live `tmux` session
-- manual fallback for semantic resume
-- UX polish and metrics
+- done: auto-reattach for live `tmux` session
+- done: automatic semantic resume fallback for recoverable restart cases
+- done: manual fallback for semantic resume
+- in progress: UX polish
+- todo: metrics / explicit recovery telemetry
+- todo: формализовать guardrails и retry policy в отдельной note
 
-## 18. Рекомендуемый старт реализации
+## 18. Следующий этап реализации
 
-Рекомендуемый первый implementation slice:
+Ближайший implementation slice после уже сделанных `V1` и `V2`:
 
-1. провести `V0 spike`;
-2. реализовать `V1 manual semantic resume`;
-3. только потом входить в `tmux`.
+1. оформить `V0 spike` выводы отдельной engineering note;
+2. дополировать recovery UX и редкие state transitions;
+3. добавить recovery telemetry/metrics;
+4. при необходимости сузить или формализовать policy автоматического semantic resume.
 
 Причина:
 
-- `V1` уже даст большую пользовательскую ценность;
-- кодовая сложность существенно меньше;
-- можно валидировать UX recovery до транспортного усложнения.
+- базовая ценность уже доставлена;
+- теперь основной риск не в отсутствии recovery, а в качестве и наблюдаемости recovery path;
+- следующий этап должен уменьшать операционную неопределенность, а не просто добавлять еще один механизм.
 
 ## 19. Что будем считать успехом
 

@@ -912,6 +912,10 @@ class RunService:
 
         if session.status == "running":
             fields = self._build_run_session_fields(session)
+            auto_resume_advanced = (
+                session.recovered_from_restart
+                and session.resume_attempt_count > run.resume_attempt_count
+            )
             if run.status == RunStatus.RESUMING.value:
                 updated = self.run_repository.update(
                     run,
@@ -934,8 +938,39 @@ class RunService:
                     run_id=updated.id,
                     event_type=RunEventType.NOTE,
                     payload={
-                        "kind": "codex_resume_completed",
-                        "message": "Resume completed and terminal output is live again.",
+                        "kind": (
+                            "codex_auto_resume_completed"
+                            if session.recovered_from_restart
+                            else "codex_resume_completed"
+                        ),
+                        "message": (
+                            "Automatic recovery completed and terminal output is live again."
+                            if session.recovered_from_restart
+                            else "Resume completed and terminal output is live again."
+                        ),
+                        "resume_attempt_count": session.resume_attempt_count,
+                    },
+                )
+                return updated
+            if auto_resume_advanced:
+                updated = self.run_repository.update(
+                    run,
+                    fields={
+                        **fields,
+                        "status": RunStatus.RUNNING.value,
+                        "error_message": None,
+                        "finished_at": None,
+                    },
+                )
+                self._append_event(
+                    run_id=updated.id,
+                    event_type=RunEventType.NOTE,
+                    payload={
+                        "kind": "codex_auto_resume_completed",
+                        "message": (
+                            "Host executor recovered the Codex session automatically "
+                            "before the next poll and terminal output is live again."
+                        ),
                         "resume_attempt_count": session.resume_attempt_count,
                     },
                 )
@@ -945,7 +980,8 @@ class RunService:
             return run
 
         if session.status == "resuming":
-            return self.run_repository.update(
+            previous_status = run.status
+            updated = self.run_repository.update(
                 run,
                 fields={
                     **self._build_run_session_fields(session),
@@ -954,6 +990,32 @@ class RunService:
                     "finished_at": None,
                 },
             )
+            if previous_status != RunStatus.RESUMING.value and session.recovered_from_restart:
+                self._append_event(
+                    run_id=updated.id,
+                    event_type=RunEventType.STATUS,
+                    payload={
+                        "status": RunStatus.RESUMING.value,
+                        "message": (
+                            "Host executor restarted and automatic Codex recovery "
+                            "is in progress."
+                        ),
+                    },
+                )
+                self._append_event(
+                    run_id=updated.id,
+                    event_type=RunEventType.NOTE,
+                    payload={
+                        "kind": "codex_auto_resume_started",
+                        "message": (
+                            "Host executor restarted and semantic resume started automatically "
+                            "from the persisted Codex session."
+                        ),
+                        "resume_attempt_count": session.resume_attempt_count,
+                        "codex_session_id": session.codex_session_id,
+                    },
+                )
+            return updated
 
         self._append_codex_terminal_audit_event(run_id=run.id)
 

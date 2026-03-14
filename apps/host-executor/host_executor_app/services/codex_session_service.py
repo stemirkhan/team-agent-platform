@@ -414,7 +414,11 @@ class CodexSessionService:
         if session_is_alive:
             if state.status == "resuming":
                 state.status = "running"
-                self._persist_state(state)
+            state.resumable = False
+            state.interrupted_at = None
+            if state.finished_at and state.status in {"running", "resuming"}:
+                state.finished_at = None
+            self._persist_state(state)
             return
 
         exit_code = self._read_exit_code(state)
@@ -480,12 +484,15 @@ class CodexSessionService:
         state.interrupted_at = state.finished_at
 
         if state.codex_session_id:
-            state.status = "interrupted"
-            state.resumable = True
-            state.error_message = (
-                "tmux transport is no longer attached to the Codex session. "
-                "Semantic resume is available from the persisted Codex session id."
+            resumed = self._attempt_auto_semantic_resume(
+                state,
+                reason=(
+                    "tmux transport is no longer attached to the Codex session "
+                    "after host executor recovery."
+                ),
             )
+            if resumed.status in {"running", "resuming"}:
+                return
         else:
             state.status = "failed"
             state.resumable = False
@@ -819,6 +826,12 @@ class CodexSessionService:
             if existing is not None:
                 return existing
             self._sessions[run_id] = state
+            if (
+                state.transport_kind == "pty"
+                and state.process is not None
+                and state.status in {"running", "resuming"}
+            ):
+                self._start_background_threads(run_id)
             return state
 
     def _load_persisted_state(self, run_id: str) -> _SessionState | None:
@@ -909,11 +922,12 @@ class CodexSessionService:
                 "duplicate execution."
             )
         elif state.codex_session_id:
-            state.resumable = True
-            state.error_message = (
-                "Host executor restarted while Codex was running. "
-                "The live PTY session was interrupted, "
-                "but the persisted Codex session can be resumed."
+            return self._attempt_auto_semantic_resume(
+                state,
+                reason=(
+                    "Host executor restarted while Codex was running. "
+                    "The live PTY session was interrupted."
+                ),
             )
         else:
             state.status = "failed"
@@ -937,6 +951,91 @@ class CodexSessionService:
         if state.status in {"running", "resuming"}:
             state.error_message = None
             self._persist_state(state)
+        return state
+
+    def _attempt_auto_semantic_resume(
+        self,
+        state: _SessionState,
+        *,
+        reason: str,
+    ) -> _SessionState:
+        """Try to auto-resume one interrupted session after host executor restart."""
+        if not state.codex_session_id:
+            state.resumable = False
+            state.error_message = f"{reason} No resumable Codex session id was captured."
+            if state.summary_text is None:
+                state.summary_text = self._derive_summary(state.chunks)
+            self._persist_state(state)
+            return state
+
+        repo_path = Path(state.repo_path)
+        codex_home = self._codex_home_path(repo_path=repo_path)
+        if not codex_home.exists():
+            state.resumable = True
+            state.error_message = (
+                f"{reason} Automatic semantic resume is unavailable because CODEX_HOME is missing."
+            )
+            if state.summary_text is None:
+                state.summary_text = self._derive_summary(state.chunks)
+            self._persist_state(state)
+            return state
+
+        command = self._build_resume_command(state.codex_session_id)
+        use_tmux = self._tmux_available()
+        process: subprocess.Popen[bytes] | None = None
+        master_fd: int | None = None
+        pid: int | None = None
+        transport_kind = "tmux" if use_tmux else "pty"
+        transport_ref: str | None = None
+
+        self._reset_transport_files(Path(state.storage_dir), preserve_chunks=True)
+        try:
+            if use_tmux:
+                transport_ref = self._spawn_tmux_session(
+                    run_id=state.run_id,
+                    command=command,
+                    repo_path=repo_path,
+                    codex_home=codex_home,
+                    storage_dir=Path(state.storage_dir),
+                    stdin_payload=None,
+                )
+            else:
+                process, master_fd = self._spawn_process(
+                    command=command,
+                    repo_path=repo_path,
+                    codex_home=codex_home,
+                    stdin_payload=None,
+                )
+                pid = process.pid
+                transport_ref = str(process.pid)
+        except CodexSessionServiceError as exc:
+            state.resumable = True
+            state.error_message = (
+                f"{reason} Automatic semantic resume could not start: {exc.detail}"
+            )
+            if state.summary_text is None:
+                state.summary_text = self._derive_summary(state.chunks)
+            self._persist_state(state)
+            return state
+
+        state.command = command
+        state.process = process
+        state.master_fd = master_fd
+        state.status = "resuming"
+        state.pid = pid
+        state.transport_kind = transport_kind
+        state.transport_ref = transport_ref
+        state.exit_code = None
+        state.error_message = (
+            f"{reason} Automatic semantic resume started from the persisted Codex session."
+        )
+        state.finished_at = None
+        state.interrupted_at = None
+        state.cancel_requested = False
+        state.resume_attempt_count += 1
+        state.resumable = False
+        state.output_bytes_read = 0
+        self._persist_state(state)
         return state
 
     def _persist_state(self, state: _SessionState) -> None:
