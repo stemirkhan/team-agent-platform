@@ -220,6 +220,61 @@ def test_derive_summary_uses_agent_message_before_turn_completed() -> None:
     )
 
 
+def test_derive_summary_trims_verbose_agent_report() -> None:
+    """Verbose final reports should be reduced to a concise summary sentence."""
+    chunks = [
+        CodexTerminalChunk(
+            offset=0,
+            text='{"type":"turn.started"}\n',
+            created_at="2026-03-09T10:00:00Z",
+        ),
+        CodexTerminalChunk(
+            offset=1,
+            text=(
+                '{"type":"item.completed","item":{"id":"item_0","type":"agent_message",'
+                '"text":"Added a fresh rerun flow that stays separate from resume. '
+                "Backend now exposes `POST /runs/{id}/rerun`, rebuilds a `RunCreate` "
+                "payload from the original run context, and creates a brand-new "
+                'run/workspace/branch/session. Main files changed: '
+                '[run_service.py](/tmp/run_service.py). Validation: `pytest -q`."}}\n'
+                '{"type":"turn.completed","usage":{"input_tokens":123,"output_tokens":45}}\n'
+            ),
+            created_at="2026-03-09T10:05:00Z",
+        ),
+    ]
+
+    assert (
+        CodexSessionService._derive_summary(chunks)
+        == "Added a fresh rerun flow that stays separate from resume. "
+        "Backend now exposes POST /runs/{id}/rerun, rebuilds a RunCreate payload "
+        "from the original run context, and creates a brand-new "
+        "run/workspace/branch/session."
+    )
+
+
+def test_derive_summary_ignores_code_like_agent_message() -> None:
+    """Code-like final messages should not become the stored run summary."""
+    chunks = [
+        CodexTerminalChunk(
+            offset=0,
+            text='{"type":"turn.started"}\n',
+            created_at="2026-03-09T10:00:00Z",
+        ),
+        CodexTerminalChunk(
+            offset=1,
+            text=(
+                '{"type":"item.completed","item":{"id":"item_0","type":"agent_message",'
+                '"text":"<div className=\\"rounded-2xl\\">'
+                'const summary = value => value;</div>"}}\n'
+                '{"type":"turn.completed","usage":{"input_tokens":123,"output_tokens":45}}\n'
+            ),
+            created_at="2026-03-09T10:05:00Z",
+        ),
+    ]
+
+    assert CodexSessionService._derive_summary(chunks) is None
+
+
 def test_derive_summary_ignores_raw_command_output_without_turn_completed() -> None:
     """Raw terminal tails should not become summary text when no turn completed event exists."""
     chunks = [

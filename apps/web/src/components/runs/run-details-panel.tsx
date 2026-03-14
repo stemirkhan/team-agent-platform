@@ -43,6 +43,7 @@ import {
   type Workspace
 } from "@/lib/api";
 import { formatAuthLoading, t, type Locale } from "@/lib/i18n";
+import { normalizeRunSummaryText } from "@/lib/run-summary";
 import { cn } from "@/lib/utils";
 
 type RunDetailsPanelProps = {
@@ -567,14 +568,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     return run.status === "interrupted" && terminalSession.resumable;
   }, [run, terminalSession]);
   const displaySummary = useMemo(() => {
-    const normalized = tryExtractNestedMessage(run?.summary ?? null);
-    if (!normalized) {
-      return null;
-    }
-    if (normalized.startsWith("{\"type\":") || normalized.startsWith("{\"type\":")) {
-      return null;
-    }
-    return normalized;
+    return normalizeRunSummaryText(run?.summary ?? null);
   }, [run?.summary]);
   const displayError = useMemo(
     () => tryExtractNestedMessage(run?.error_message ?? null),
@@ -1106,7 +1100,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                 <h1 className="text-3xl font-black tracking-tight text-slate-950 dark:text-slate-50">
                   {run.title}
                 </h1>
-                <p className="max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-300">
+                <p className="max-w-3xl line-clamp-4 text-sm leading-7 text-slate-600 dark:text-slate-300">
                   {displaySummary ??
                     t(locale, {
                       ru: "Summary для run не был задан явно; детали смотри в TASK.md и terminal output.",

@@ -15,6 +15,7 @@ import {
 } from "@/lib/auth-client";
 import { fetchRuns, type Run, type RunStatus } from "@/lib/api";
 import { formatAuthLoading, t, type Locale } from "@/lib/i18n";
+import { normalizeRunSummaryText } from "@/lib/run-summary";
 
 type RunsListPanelProps = {
   locale: Locale;
@@ -263,8 +264,8 @@ export function RunsListPanel({ locale }: RunsListPanelProps) {
                   </div>
                   <div>
                     <h3 className="text-lg font-black text-slate-900 dark:text-slate-50">{run.title}</h3>
-                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                      {run.summary ??
+                    <p className="mt-1 line-clamp-3 text-sm text-slate-600 dark:text-slate-300">
+                      {normalizeRunSummaryText(run.summary) ??
                         t(locale, {
                           ru: "Краткое summary пока не задано.",
                           en: "No short summary was provided yet."

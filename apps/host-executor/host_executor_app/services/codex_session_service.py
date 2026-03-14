@@ -66,6 +66,14 @@ class CodexSessionService:
     """Manage in-memory host-side Codex sessions keyed by run id."""
 
     _MULTI_AGENT_FEATURE = "multi_agent"
+    _SUMMARY_MAX_LENGTH = 320
+    _SUMMARY_SECTION_MARKERS = (
+        "Main files changed:",
+        "Validation:",
+        "Most logical next step:",
+        "Notes:",
+        "## Notes",
+    )
     _RESUME_PROMPT = (
         "Host executor restarted. Continue the previous task from the current repository state. "
         "First inspect git status and pending work. "
@@ -1098,9 +1106,13 @@ class CodexSessionService:
 
             explicit_summary = CodexSessionService._extract_turn_completed_summary(payload)
             if explicit_summary:
-                last_completed_turn_summary = explicit_summary
+                last_completed_turn_summary = CodexSessionService._normalize_summary_candidate(
+                    explicit_summary
+                )
             elif last_agent_message:
-                last_completed_turn_summary = last_agent_message
+                last_completed_turn_summary = CodexSessionService._normalize_summary_candidate(
+                    last_agent_message
+                )
 
         return last_completed_turn_summary
 
@@ -1112,6 +1124,64 @@ class CodexSessionService:
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
+
+    @classmethod
+    def _normalize_summary_candidate(cls, value: str) -> str | None:
+        """Return a concise run summary suitable for UI and PR body display."""
+        normalized = value.strip()
+        if not normalized:
+            return None
+
+        normalized = re.sub(r"\x1b\[[0-9;]*m", "", normalized)
+        normalized = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", normalized)
+        normalized = re.sub(r"`([^`]+)`", r"\1", normalized)
+
+        paragraph_break = re.search(r"\n\s*\n", normalized)
+        if paragraph_break:
+            normalized = normalized[: paragraph_break.start()]
+
+        for marker in cls._SUMMARY_SECTION_MARKERS:
+            marker_index = normalized.find(marker)
+            if marker_index > 0:
+                normalized = normalized[:marker_index]
+                break
+
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        if not normalized or cls._looks_like_code_summary(normalized):
+            return None
+
+        if len(normalized) <= cls._SUMMARY_MAX_LENGTH:
+            return normalized
+
+        sentence_boundary = max(
+            normalized.rfind(". ", 0, cls._SUMMARY_MAX_LENGTH),
+            normalized.rfind("! ", 0, cls._SUMMARY_MAX_LENGTH),
+            normalized.rfind("? ", 0, cls._SUMMARY_MAX_LENGTH),
+        )
+        if sentence_boundary >= 120:
+            return normalized[: sentence_boundary + 1].strip()
+
+        clipped = normalized[: cls._SUMMARY_MAX_LENGTH - 3].rstrip(" ,;:-")
+        return f"{clipped}..."
+
+    @staticmethod
+    def _looks_like_code_summary(value: str) -> bool:
+        """Return whether the candidate looks like code or a raw file dump instead of prose."""
+        lowered = value.lower()
+        code_markers = (
+            "classname=",
+            "<div",
+            "</div",
+            "function ",
+            "const ",
+            "return ",
+            "=>",
+            "import ",
+            "export ",
+        )
+        if any(marker in lowered for marker in code_markers):
+            return True
+        return False
 
     @staticmethod
     def _iter_json_objects(chunks: list[CodexTerminalChunk]):
