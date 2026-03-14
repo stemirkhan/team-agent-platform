@@ -899,7 +899,7 @@ def test_build_codex_terminal_audit_payload_ignores_non_structured_mentions() ->
                     offset=0,
                     text=(
                         '{"type":"item.completed","item":{"type":"command_execution",'
-                        '"command":"sed -n \\"1,120p\\" docs/PRD.md",'
+                        '"command":"sed -n \\"1,120p\\" docs/architecture-overview.md",'
                         '"aggregated_output":"Today the product targets a '
                         'multi-agent workflow."}}\n'
                         '{"type":"item.completed","item":{"type":"agent_message",'

@@ -1,131 +1,122 @@
-# Team Agent Platform Monorepo
+# Team Agent Platform
 
-Монорепозиторий local-first платформы для запуска команд Codex над пользовательскими GitHub-репозиториями.
+Team Agent Platform is a local-first execution platform for running Codex-powered agent teams against real GitHub repositories.
 
-Текущий продуктовый фокус:
-- не marketplace агентов;
-- не публичный каталог и не social/discovery платформа;
-- а рабочая среда, где пользователь:
-  - собирает свои agent profiles и teams;
-  - выбирает GitHub-репозиторий и задачу;
-  - запускает Codex над проектом через локально установленный `codex` CLI;
-  - использует локально настроенный `gh` CLI для веток, PR, issues и комментариев.
+The project is intentionally opinionated:
 
-Главные документы:
-- `docs/TZ.md`
-- `docs/PRD.md`
-
-Если код и документация расходятся, ориентироваться нужно на текущие `docs/TZ.md` и `docs/PRD.md`. Кодовая база сейчас находится в переходном состоянии после изначального marketplace-направления.
-
-## Текущая продуктовая рамка
-
-Целевой MVP:
 - `Codex-first`
 - `local-first`
 - `single-user / self-hosted`
 - `host tools driven`
 
-Ключевая идея:
-- backend и frontend дают control plane;
-- выполнение задачи идет через host `codex`, `gh` и `git`;
-- пользовательские креды не хранятся в приложении, а берутся из уже настроенных CLI-сессий пользователя;
-- для Codex в первой итерации не используется `OPENAI_API_KEY`: ожидается уже выполненный browser login / ChatGPT subscription login в `codex`;
-- в браузере пользователь видит диагностику окружения, живой терминал run-сессии, статус шагов и итоговый PR.
+It is not a hosted agent marketplace, a public catalog, or a social discovery product. The current product focus is execution: diagnostics, repository selection, issue/task input, live terminal visibility, and branch/PR delivery.
 
-## Структура монорепозитория
+## What the platform does
 
-- `apps/backend` — FastAPI + SQLAlchemy + Alembic
-- `apps/web` — Next.js + TypeScript + Tailwind + shadcn/ui base
-- `docs` — продуктовая и техническая документация
-- `infra` — Docker Compose и инфраструктурные заготовки
-- `scripts` — локальные dev-скрипты и сиды
+With the current platform you can:
 
-## Что уже есть в кодовой базе
+- define agent profiles and combine them into teams;
+- select a GitHub repository and base branch;
+- launch a run from an issue or a manual task;
+- materialize a `.codex` bundle and `TASK.md` inside a prepared workspace;
+- run `codex`, `git`, and `gh` through a host-side execution layer;
+- watch terminal output and run events in the browser;
+- create a branch, push it, and open a draft PR;
+- recover interrupted runs through resume and auto-recovery flows.
 
-Фундамент:
-- backend/frontend приложения в одной монорепе;
-- локальный стек `PostgreSQL + Redis + backend + web` через Compose;
-- auth, health checks, базовые CRUD-сценарии;
-- модели agent profiles и teams;
-- экспорт в `codex`;
-- UI для редактирования agent profiles и сборки команд;
-- diagnostics для `git`, `gh`, `codex`;
-- GitHub browser и tracker actions через host `gh`:
-  - список репозиториев;
-  - просмотр repo metadata;
-  - список issues;
-  - просмотр отдельного issue;
-  - добавление комментариев в issue;
-  - добавление и удаление labels;
-  - список pull requests;
-  - просмотр pull request metadata;
-  - просмотр normalized checks summary.
-- workspace lifecycle foundation через host `git` + `gh`:
-  - prepare workspace (`clone + checkout base + create branch`);
-  - inspect git status;
-  - local commit;
-  - push branch;
-  - create draft PR.
+## High-level architecture
 
-Важно:
-- часть текущей реализации still legacy от старой идеи marketplace;
-- документация уже переведена на новый вектор: local Codex execution platform;
-- следующие итерации должны смещать backend/frontend от catalog/export-only UX к `diagnostics + repo run + terminal + PR flow`.
+The system has two main layers:
 
-## Целевые следующие блоки
+1. `Control Plane`
+   - Next.js frontend
+   - FastAPI backend
+   - PostgreSQL
+   - Redis
 
-- host diagnostics для `git`, `gh`, `codex`;
-- GitHub SCM adapter (`branches`, `PR`, `checks`, `merge state`);
-- workspace lifecycle UI поверх нового host workspace layer;
-- запуск Codex в отдельной PTY-сессии;
-- WebSocket terminal в браузере;
-- run lifecycle и логи;
-- branch + draft PR flow.
+2. `Host Execution Layer`
+   - Host Executor
+   - `codex` CLI
+   - `gh` CLI
+   - `git`
+   - PTY / `tmux`
+   - local workspaces
 
-## Быстрый старт
+The browser talks to the backend. The backend orchestrates runs and stores state. The host executor runs in the host user context, where `git`, `gh`, and `codex` are already installed and authenticated.
 
-1. Создать `.env`:
+See:
+
+- [Architecture Overview](docs/architecture-overview.md)
+- [Run Resume and Recovery](docs/run-resume-recovery-plan.md)
+- [Live-Fire Validation Plan](docs/live-fire-validation-plan.md)
+- [Contributing](CONTRIBUTING.md)
+
+## Repository layout
+
+- `apps/backend` — FastAPI, SQLAlchemy, Alembic
+- `apps/web` — Next.js, TypeScript, Tailwind, shadcn/ui
+- `apps/host-executor` — host-side execution bridge for `codex`, `gh`, `git`, PTY, and `tmux`
+- `docs` — architecture and operational documentation
+- `infra` — local compose setup and infrastructure assets
+- `scripts` — local development and operational scripts
+- `memory` — historical engineering notes and internal memory files
+
+## Requirements
+
+The platform assumes these host tools are available:
+
+```bash
+git --version
+gh --version
+gh auth status
+gh auth setup-git
+codex --help
+codex login status
+```
+
+Minimum expectations:
+
+- `git` is installed
+- `gh` is installed and already authenticated
+- `codex` is installed and already authenticated
+- the host executor runs under the same OS user that owns those CLI sessions
+
+## Quick start
+
+1. Create a local environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-2. Поднять стек:
+2. Start the control plane:
 
 ```bash
 ./scripts/dev/up.sh
 ```
 
-3. В отдельном терминале поднять host executor:
+3. Start the host executor in a separate terminal:
 
 ```bash
 ./scripts/setup/host-executor-local.sh
 ./scripts/dev/run-host-executor.sh
 ```
 
-4. Открыть:
+4. Open the application:
+
 - frontend: `http://localhost:3000`
 - backend docs: `http://localhost:8000/docs`
 - diagnostics: `http://localhost:3000/diagnostics`
-- repos: `http://localhost:3000/repos`
-- example PR detail: `http://localhost:3000/repos/cli/cli/pulls/12870`
+- runs: `http://localhost:3000/runs`
+- repositories: `http://localhost:3000/repos`
 
-5. Остановить compose-стек:
+5. Stop the control plane:
 
 ```bash
 ./scripts/dev/down.sh
 ```
 
-Если запускаешь вручную через `podman-compose` из окружения, где нужен явный `XDG_DATA_HOME`, используй:
-
-```bash
-XDG_DATA_HOME=$HOME/.local/share podman-compose -f infra/compose/docker-compose.yml up -d --build
-```
-
-Host executor работает отдельно от compose и должен быть запущен в host user-context, где уже доступны `gh auth` и `codex login`.
-В compose-режиме backend-контейнер ходит к нему через `host.containers.internal`, поэтому bridge должен слушать `0.0.0.0`, а не только `127.0.0.1`.
-
-## Локальные проверки
+## Local validation
 
 Backend:
 
@@ -147,67 +138,46 @@ npm run lint
 npm run build
 ```
 
-## Host tools для целевого MVP
+## Run flow
 
-Для следующей продуктовой итерации на хосте пользователя должны быть доступны:
+At a high level, one run goes through these stages:
 
-```bash
-git --version
-gh --version
-gh auth status
-gh auth setup-git
-codex --help
-codex login status
-```
+1. create a run from the UI;
+2. prepare a workspace;
+3. clone the repository and create a working branch;
+4. materialize `.codex` and `TASK.md`;
+5. start Codex in the host execution layer;
+6. stream terminal output and run events;
+7. run repository checks;
+8. create a commit;
+9. push the branch;
+10. create a draft PR.
 
-Минимальное ожидание от окружения:
-- `git` установлен;
-- `gh` установлен и уже авторизован под пользователем;
-- `gh auth setup-git` выполнен, если clone/push идут по HTTPS;
-- `codex` установлен и уже авторизован под пользователем;
-- host executor запускается в том же user-context, где доступны эти CLI-сессии.
+If the host executor or transport is interrupted, the platform supports resume and auto-recovery for recoverable sessions.
 
-## Repo Execution Config
+## Current status
 
-Для стабилизации run flow репозиторий может хранить `.team-agent-platform.toml` в корне.
+The platform already includes:
 
-Минимальный контракт:
+- diagnostics for `git`, `gh`, `codex`, and host readiness;
+- agent profile and team management;
+- GitHub repository, issue, and PR browsing through `gh`;
+- run history and run details;
+- live terminal output;
+- workspace lifecycle and draft PR creation;
+- multi-agent bundle materialization;
+- run resume and recovery via persisted Codex sessions and `tmux`.
 
-```toml
-[run]
-working_directory = "."
+## Open-source direction
 
-[setup]
-commands = [
-  "cd apps/backend && .venv/bin/python -m pip install -e '.[dev]'",
-]
+This repository is being prepared for open development.
 
-[checks]
-commands = [
-  "cd apps/backend && .venv/bin/python -m pytest -q",
-]
-```
+That means:
 
-Что делает платформа:
-- читает config после clone;
-- запускает `setup.commands` до старта Codex;
-- встраивает `checks.commands` в `TASK.md`;
-- запускает `checks.commands` после Codex и до `commit -> push -> draft PR`.
+- public-facing documentation should be in English;
+- product and architecture intent should live in versioned docs inside the repository;
+- historical internal notes may remain in `memory/`, but current guidance should come from this README and the docs listed above.
 
-## Host Executor
+## License
 
-Текущая архитектура:
-- `backend` в compose — это control plane;
-- `host executor` на `127.0.0.1:8765` — это execution layer;
-- backend ходит к нему по `HOST_EXECUTOR_BASE_URL`;
-- в compose по умолчанию используется `http://host.containers.internal:8765`.
-
-Если `Host Executor` не поднят, `/diagnostics` честно покажет, что execution source недоступен, даже если сам backend жив.
-
-## Сид демо-данных
-
-```bash
-./scripts/dev/reset-marketplace-demo.sh
-```
-
-Скрипт пока использует текущие модели agents/teams и нужен только для локальной демонстрации UI и export-среза. В следующих итерациях он должен быть адаптирован под новый execution-first сценарий.
+This project is released under the [MIT License](LICENSE).
