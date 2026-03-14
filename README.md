@@ -83,6 +83,37 @@ Minimum expectations:
 
 ## Quick start
 
+### Fastest way to launch everything
+
+If you want a copy-paste startup flow, use:
+
+```bash
+cp .env.example .env
+./scripts/dev/up.sh
+./scripts/setup/host-executor-local.sh
+tmux new-session -d -s tap-host-executor 'cd /absolute/path/to/team-agent-platform && HOST_EXECUTOR_RELOAD=0 ./scripts/dev/run-host-executor.sh'
+```
+
+Then open:
+
+- frontend: `http://localhost:3000`
+- backend docs: `http://localhost:8000/docs`
+- diagnostics: `http://localhost:3000/diagnostics`
+- runs: `http://localhost:3000/runs`
+
+To stop everything:
+
+```bash
+tmux kill-session -t tap-host-executor || true
+./scripts/dev/down.sh
+```
+
+If you want to inspect the host executor directly:
+
+```bash
+tmux attach -t tap-host-executor
+```
+
 1. Create a local environment file:
 
 ```bash
