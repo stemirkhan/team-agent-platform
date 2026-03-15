@@ -13,7 +13,6 @@ from app.schemas.workspace import (
     WorkspaceCommandsRun,
     WorkspaceCommandsRunResponse,
     WorkspaceCommit,
-    WorkspaceExecutionConfigRead,
     WorkspaceListResponse,
     WorkspaceMaterialize,
     WorkspacePrepare,
@@ -25,7 +24,6 @@ SchemaModel = TypeVar(
     "SchemaModel",
     WorkspaceRead,
     WorkspaceListResponse,
-    WorkspaceExecutionConfigRead,
     WorkspaceCommandsRunResponse,
 )
 
@@ -59,11 +57,6 @@ class WorkspaceProxyService:
         """Return one workspace from the host executor bridge."""
         data = self._request_json(f"workspaces/{workspace_id}")
         return self._validate(data, WorkspaceRead, "workspace")
-
-    def get_execution_config(self, workspace_id: str) -> WorkspaceExecutionConfigRead:
-        """Return repo-level execution config from the host executor bridge."""
-        data = self._request_json(f"workspaces/{workspace_id}/execution-config")
-        return self._validate(data, WorkspaceExecutionConfigRead, "workspace execution config")
 
     def commit_workspace(self, workspace_id: str, payload: WorkspaceCommit) -> WorkspaceRead:
         """Commit a workspace through the host executor bridge."""

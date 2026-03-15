@@ -183,8 +183,8 @@ At a high level, one run goes through these stages:
 4. materialize the runtime bundle and `TASK.md`;
 5. start the selected runtime in the host execution layer;
 6. stream terminal output and run events;
-7. run repository checks;
-8. create a commit;
+7. clean temporary runtime files from the workspace;
+8. create a commit when the runtime produced repository changes;
 9. push the branch;
 10. create a draft PR.
 

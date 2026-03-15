@@ -35,7 +35,7 @@ class RunCreate(BaseModel):
         return self
 
 
-RunReportPhaseKey = Literal["preparation", "setup", "runtime", "checks", "git_pr"]
+RunReportPhaseKey = Literal["preparation", "runtime", "git_pr"]
 RunReportPhaseStatus = Literal[
     "not_started",
     "running",

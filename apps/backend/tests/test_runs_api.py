@@ -12,12 +12,7 @@ from app.schemas.claude import ClaudeSessionEventsResponse, ClaudeSessionRead, C
 from app.schemas.codex import CodexSessionEventsResponse, CodexSessionRead, CodexTerminalChunk
 from app.schemas.github import GitHubIssueDetailRead, GitHubRepoRead
 from app.schemas.run import RunCreate
-from app.schemas.workspace import (
-    WorkspaceCommandResult,
-    WorkspaceCommandsRunResponse,
-    WorkspaceExecutionConfigRead,
-    WorkspaceRead,
-)
+from app.schemas.workspace import WorkspaceRead
 from app.services.claude_proxy_service import ClaudeProxyService
 from app.services.codex_proxy_service import CodexProxyService, CodexProxyServiceError
 from app.services.export_service import ExportService
@@ -137,24 +132,6 @@ def _workspace() -> WorkspaceRead:
         updated_at="2026-03-08T10:00:00Z",
     )
 
-
-def _execution_config(
-    *,
-    source_path: str | None = None,
-    setup_commands: list[str] | None = None,
-    check_commands: list[str] | None = None,
-) -> WorkspaceExecutionConfigRead:
-    """Return one normalized repo execution config payload for tests."""
-    return WorkspaceExecutionConfigRead(
-        source_path=source_path,
-        run_working_directory=".",
-        setup_working_directory=".",
-        setup_commands=setup_commands or [],
-        check_working_directory=".",
-        check_commands=check_commands or [],
-    )
-
-
 def test_create_run_prepares_workspace_and_records_status_events(
     client: TestClient,
     monkeypatch,
@@ -226,11 +203,6 @@ def test_create_run_prepares_workspace_and_records_status_events(
                 "changed_files": [file.path for file in payload.files],
             }
         ),
-    )
-    monkeypatch.setattr(
-        WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(source_path=".team-agent-platform.toml"),
     )
     monkeypatch.setattr(
         ExportService,
@@ -446,11 +418,6 @@ def test_create_run_starts_claude_runtime_and_exposes_terminal_contract(
         ),
     )
     monkeypatch.setattr(
-        WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(source_path=".team-agent-platform.toml"),
-    )
-    monkeypatch.setattr(
         ExportService,
         "build_download_artifact",
         lambda self, **kwargs: (
@@ -630,7 +597,6 @@ def test_build_workspace_files_materializes_claude_bundle_and_task_markdown() ->
         repo_full_name="stemirkhan/team-agent-platform",
         base_branch="main",
         working_branch="tap/team-agent-platform/demo-branch",
-        execution_config=_execution_config(source_path=".team-agent-platform.toml"),
         issue_title=None,
         issue_number=None,
         issue_url=None,
@@ -692,11 +658,6 @@ def test_create_run_returns_failed_state_when_workspace_prepare_breaks(
                 "Git authentication failed while trying to clone repository.",
             )
         ),
-    )
-    monkeypatch.setattr(
-        WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(),
     )
 
     create_response = client.post(
@@ -767,11 +728,6 @@ def test_list_runs_supports_repository_filter(
         lambda self, workspace_id, payload: _workspace().model_copy(
             update={"has_changes": True, "changed_files": [file.path for file in payload.files]}
         ),
-    )
-    monkeypatch.setattr(
-        WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(source_path=".team-agent-platform.toml"),
     )
     monkeypatch.setattr(
         ExportService,
@@ -891,14 +847,6 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
             update={"has_changes": True, "changed_files": ["TASK.md"]}
         ),
     )
-    monkeypatch.setattr(
-        WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(
-            source_path=".team-agent-platform.toml",
-            check_commands=["make compose-config"],
-        ),
-    )
     workspace_state = {
         "value": _workspace().model_copy(
             update={"has_changes": True, "changed_files": ["apps/backend/app.py"]}
@@ -910,25 +858,6 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
         lambda self, workspace_id: workspace_state["value"],
     )
     scm_calls: list[str] = []
-    monkeypatch.setattr(
-        WorkspaceProxyService,
-        "run_commands",
-        lambda self, workspace_id, payload: WorkspaceCommandsRunResponse(
-            label=payload.label,
-            working_directory=payload.working_directory,
-            success=True,
-            items=[
-                WorkspaceCommandResult(
-                    command="make compose-config",
-                    exit_code=0,
-                    output="ok",
-                    started_at="2026-03-08T10:07:00Z",
-                    finished_at="2026-03-08T10:07:02Z",
-                    succeeded=True,
-                )
-            ],
-        ),
-    )
     monkeypatch.setattr(
         WorkspaceProxyService,
         "cleanup_workspace",
@@ -1104,11 +1033,7 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
     assert report is not None
     phases = {item["key"]: item for item in report["phases"]}
     assert phases["preparation"]["status"] == "completed"
-    assert phases["setup"]["status"] == "not_available"
     assert phases["runtime"]["status"] == "completed"
-    assert phases["checks"]["status"] == "completed"
-    assert phases["checks"]["commands"][0]["command"] == "make compose-config"
-    assert phases["checks"]["commands"][0]["output"] == "ok"
     assert phases["git_pr"]["status"] == "completed"
     assert phases["git_pr"]["meta"]["working_branch"] == "tap/team-agent-platform/demo-branch"
     assert phases["git_pr"]["meta"]["commit_sha"] == "abcdef1234567890"
@@ -1138,14 +1063,7 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
         for item in events_response.json()["items"]
         if item["event_type"] == "status"
     ]
-    assert statuses[-6:] == [
-        "committing",
-        "running_checks",
-        "committing",
-        "pushing",
-        "creating_pr",
-        "completed",
-    ]
+    assert statuses[-5:] == ["committing", "committing", "pushing", "creating_pr", "completed"]
 
     cancel_response = client.post(f"/api/v1/runs/{run_id}/cancel", headers=headers)
     assert cancel_response.status_code == 200
@@ -1348,11 +1266,6 @@ def test_get_run_completes_without_commit_when_only_materialized_files_changed(
     )
     monkeypatch.setattr(
         WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(),
-    )
-    monkeypatch.setattr(
-        WorkspaceProxyService,
         "cleanup_workspace",
         lambda self, workspace_id: _workspace().model_copy(
             update={"has_changes": False, "changed_files": []}
@@ -1545,11 +1458,6 @@ def test_get_run_recovers_when_workspace_was_already_finalized_by_parallel_poll(
     )
     monkeypatch.setattr(
         WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(),
-    )
-    monkeypatch.setattr(
-        WorkspaceProxyService,
         "cleanup_workspace",
         lambda self, workspace_id: _workspace().model_copy(
             update={"has_changes": True, "changed_files": ["apps/backend/app.py"]}
@@ -1566,25 +1474,6 @@ def test_get_run_recovers_when_workspace_was_already_finalized_by_parallel_poll(
                 if get_workspace_calls["count"] == 1
                 else finalized_workspace
             )
-        ),
-    )
-    monkeypatch.setattr(
-        WorkspaceProxyService,
-        "run_commands",
-        lambda self, workspace_id, payload: WorkspaceCommandsRunResponse(
-            label=payload.label,
-            working_directory=payload.working_directory,
-            success=True,
-            items=[
-                WorkspaceCommandResult(
-                    command="make compose-config",
-                    exit_code=0,
-                    output="ok",
-                    started_at="2026-03-08T10:07:00Z",
-                    finished_at="2026-03-08T10:07:02Z",
-                    succeeded=True,
-                )
-            ],
         ),
     )
     monkeypatch.setattr(
@@ -1755,11 +1644,6 @@ def test_resume_run_recovers_interrupted_codex_session(
         ),
     )
     monkeypatch.setattr(
-        WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(),
-    )
-    monkeypatch.setattr(
         ExportService,
         "build_download_artifact",
         lambda self, **kwargs: (
@@ -1854,7 +1738,10 @@ def test_resume_run_recovers_interrupted_codex_session(
     assert interrupted_response.json()["status"] == "interrupted"
     assert interrupted_response.json()["codex_session_id"] == "019cdddb-4df9-7100-ae82-b8b061ad6cbb"
     assert interrupted_response.json()["resume_attempt_count"] == 0
-    assert interrupted_response.json()["run_report"]["phases"][2]["status"] == "interrupted"
+    interrupted_phases = {
+        item["key"]: item for item in interrupted_response.json()["run_report"]["phases"]
+    }
+    assert interrupted_phases["runtime"]["status"] == "interrupted"
 
     resume_response = client.post(f"/api/v1/runs/{run_id}/resume", headers=headers)
     assert resume_response.status_code == 200
@@ -1866,7 +1753,8 @@ def test_resume_run_recovers_interrupted_codex_session(
     assert resumed_response.status_code == 200
     assert resumed_response.json()["status"] == "running"
     assert resumed_response.json()["resume_attempt_count"] == 1
-    assert resumed_response.json()["run_report"]["phases"][2]["status"] == "running"
+    resumed_phases = {item["key"]: item for item in resumed_response.json()["run_report"]["phases"]}
+    assert resumed_phases["runtime"]["status"] == "running"
 
     events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
     assert events_response.status_code == 200
@@ -1929,11 +1817,6 @@ def test_resume_run_recovers_interrupted_claude_session(
         lambda self, workspace_id, payload: _workspace().model_copy(
             update={"has_changes": True, "changed_files": ["TASK.md"]}
         ),
-    )
-    monkeypatch.setattr(
-        WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(),
     )
     monkeypatch.setattr(
         ExportService,
@@ -2043,7 +1926,10 @@ def test_resume_run_recovers_interrupted_claude_session(
     assert interrupted_response.status_code == 200
     assert interrupted_response.json()["status"] == "interrupted"
     assert interrupted_response.json()["resume_attempt_count"] == 0
-    assert interrupted_response.json()["run_report"]["phases"][2]["status"] == "interrupted"
+    interrupted_phases = {
+        item["key"]: item for item in interrupted_response.json()["run_report"]["phases"]
+    }
+    assert interrupted_phases["runtime"]["status"] == "interrupted"
 
     resume_response = client.post(f"/api/v1/runs/{run_id}/resume", headers=headers)
     assert resume_response.status_code == 200
@@ -2055,7 +1941,8 @@ def test_resume_run_recovers_interrupted_claude_session(
     assert resumed_response.status_code == 200
     assert resumed_response.json()["status"] == "running"
     assert resumed_response.json()["resume_attempt_count"] == 1
-    assert resumed_response.json()["run_report"]["phases"][2]["status"] == "running"
+    resumed_phases = {item["key"]: item for item in resumed_response.json()["run_report"]["phases"]}
+    assert resumed_phases["runtime"]["status"] == "running"
 
     events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
     assert events_response.status_code == 200
@@ -2118,11 +2005,6 @@ def test_get_run_auto_recovers_codex_session_after_host_restart(
         lambda self, workspace_id, payload: _workspace().model_copy(
             update={"has_changes": True, "changed_files": ["TASK.md"]}
         ),
-    )
-    monkeypatch.setattr(
-        WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(),
     )
     monkeypatch.setattr(
         ExportService,
@@ -2280,11 +2162,6 @@ def test_get_run_fails_when_codex_session_state_is_lost(
         lambda self, workspace_id, payload: _workspace().model_copy(
             update={"has_changes": True, "changed_files": ["TASK.md"]}
         ),
-    )
-    monkeypatch.setattr(
-        WorkspaceProxyService,
-        "get_execution_config",
-        lambda self, workspace_id: _execution_config(),
     )
     monkeypatch.setattr(
         ExportService,

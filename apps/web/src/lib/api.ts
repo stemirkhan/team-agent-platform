@@ -211,7 +211,7 @@ export type RunEvent = {
   created_at: string;
 };
 
-export type RunReportPhaseKey = "preparation" | "setup" | "runtime" | "checks" | "git_pr";
+export type RunReportPhaseKey = "preparation" | "runtime" | "git_pr";
 export type RunReportPhaseStatus =
   | "not_started"
   | "running"

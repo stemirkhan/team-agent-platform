@@ -67,8 +67,8 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       key: "active",
       title: t(locale, { ru: "В работе", en: "Active" }),
       description: t(locale, {
-        ru: "Setup, runtime execution и checks идут прямо сейчас.",
-        en: "Setup, runtime execution, and checks are currently in progress."
+        ru: "Runtime execution и связанные шаги orchestration идут прямо сейчас.",
+        en: "Runtime execution and related orchestration steps are currently in progress."
       }),
       emptyLabel: t(locale, {
         ru: "Сейчас ничего не выполняется.",

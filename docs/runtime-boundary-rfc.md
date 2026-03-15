@@ -41,7 +41,7 @@ This means the system has already crossed the line from "Codex-only with experim
 
 The following architectural moves are correct and should be preserved:
 
-- one shared run pipeline across workspace preparation, repo checks, commit, push, and PR creation
+- one shared run pipeline across workspace preparation, runtime execution, cleanup, commit, push, and PR creation
 - runtime-specific bundle generation instead of forcing a single `.codex` contract
 - a shared terminal contract for the UI instead of Codex-only terminal payloads
 - one product model where `runtime_target` is part of the run context
@@ -117,10 +117,10 @@ The target architecture has four layers and is now mostly implemented.
 The backend should own the run lifecycle that is common to every runtime:
 
 - workspace preparation
-- repo setup commands
 - task handoff materialization
 - status transitions
-- repo checks
+- runtime terminal synchronization
+- workspace cleanup
 - commit, push, and draft PR creation
 
 ### Backend runtime adapter
