@@ -3,22 +3,31 @@
 import { CheckCircle2, CircleOff, Clock3, Loader2, OctagonAlert, Slash } from "lucide-react";
 
 import { LocalizedTimestamp } from "@/components/ui/localized-timestamp";
-import { type RunReport, type RunReportCommand, type RunReportPhase, type RunReportPhaseStatus } from "@/lib/api";
+import {
+  type RunReport,
+  type RunReportCommand,
+  type RunReportPhase,
+  type RunReportPhaseStatus,
+  type RuntimeTarget
+} from "@/lib/api";
 import { t, type Locale } from "@/lib/i18n";
 
 type RunReportPanelProps = {
   locale: Locale;
   report: RunReport | null;
+  runtimeTarget: RuntimeTarget;
 };
 
-function phaseTitle(locale: Locale, key: RunReportPhase["key"]): string {
+function phaseTitle(locale: Locale, key: RunReportPhase["key"], runtimeTarget: RuntimeTarget): string {
   switch (key) {
     case "preparation":
       return t(locale, { ru: "Подготовка", en: "Preparation" });
     case "setup":
       return t(locale, { ru: "Setup", en: "Setup" });
-    case "codex":
-      return t(locale, { ru: "Codex", en: "Codex" });
+    case "runtime":
+      return runtimeTarget === "claude_code"
+        ? t(locale, { ru: "Claude Code", en: "Claude Code" })
+        : t(locale, { ru: "Codex", en: "Codex" });
     case "checks":
       return t(locale, { ru: "Проверки", en: "Checks" });
     case "git_pr":
@@ -150,7 +159,7 @@ function renderGitMeta(locale: Locale, phase: RunReportPhase) {
   );
 }
 
-export function RunReportPanel({ locale, report }: RunReportPanelProps) {
+export function RunReportPanel({ locale, report, runtimeTarget }: RunReportPanelProps) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20">
       <h2 className="mb-4 text-xl font-black text-slate-900 dark:text-slate-50">
@@ -172,7 +181,7 @@ export function RunReportPanel({ locale, report }: RunReportPanelProps) {
                 <div className="flex items-center gap-2 text-sm font-bold">
                   <StatusIcon status={phase.status} />
                   <span>
-                    {phase.order}. {phaseTitle(locale, phase.key)}
+                    {phase.order}. {phaseTitle(locale, phase.key, runtimeTarget)}
                   </span>
                 </div>
                 <span className="rounded-full border border-current/30 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide">

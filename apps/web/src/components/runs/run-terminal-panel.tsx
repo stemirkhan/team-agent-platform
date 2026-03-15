@@ -9,8 +9,9 @@ import { LocalizedTimestamp } from "@/components/ui/localized-timestamp";
 import {
   buildRunTerminalWebSocketUrl,
   fetchRunTerminalSession,
-  type CodexSessionRead,
-  type RunStatus
+  type RuntimeTarget,
+  type RunStatus,
+  type TerminalSessionRead
 } from "@/lib/api";
 import { t, type Locale } from "@/lib/i18n";
 
@@ -20,14 +21,15 @@ type RunTerminalPanelProps = {
   locale: Locale;
   runId: string;
   runStatus: RunStatus;
+  runtimeTarget: RuntimeTarget;
   token: string;
 };
 
-type CodexStreamPayload =
+type TerminalStreamPayload =
   | { type: "output"; offset: number; text: string }
   | {
       type: "status";
-      status: CodexSessionRead["status"];
+      status: TerminalSessionRead["status"];
       exit_code: number | null;
       summary_text: string | null;
       error_message: string | null;
@@ -49,6 +51,19 @@ type CodexEventLine = {
   usage?: {
     input_tokens?: unknown;
     output_tokens?: unknown;
+  };
+};
+
+type ClaudeEventLine = {
+  type?: string;
+  subtype?: unknown;
+  result?: unknown;
+  errors?: unknown;
+  message?: {
+    content?: Array<{
+      type?: string;
+      text?: unknown;
+    }>;
   };
 };
 
@@ -193,19 +208,111 @@ function renderCodexJsonLine(line: string, locale: Locale): string | null {
   }
 }
 
-function renderTerminalChunk(rawText: string, locale: Locale, buffer: string): { output: string; buffer: string } {
+function extractClaudeAssistantText(message: ClaudeEventLine["message"]): string | null {
+  if (!message || !Array.isArray(message.content)) {
+    return null;
+  }
+
+  const parts = message.content
+    .filter((item) => item?.type === "text" && typeof item.text === "string")
+    .map((item) => item.text.trim())
+    .filter((item) => item.length > 0);
+
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
+function extractClaudeErrors(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  for (const item of value) {
+    const message = extractNestedMessage(item);
+    if (message) {
+      return message;
+    }
+  }
+
+  return null;
+}
+
+function renderClaudeJsonLine(line: string, locale: Locale): string | null {
+  if (!line.trim().startsWith("{")) {
+    return normalizeTerminalText(`${line}\n`);
+  }
+
+  let payload: ClaudeEventLine;
+  try {
+    payload = JSON.parse(line) as ClaudeEventLine;
+  } catch {
+    return normalizeTerminalText(`${line}\n`);
+  }
+
+  switch (payload.type) {
+    case "system":
+    case "user":
+      return null;
+    case "assistant": {
+      const text = extractClaudeAssistantText(payload.message);
+      return text ? normalizeTerminalText(`${text}\n\n`) : null;
+    }
+    case "result": {
+      const result = stringifyUnknown(payload.result);
+      if (result) {
+        return normalizeTerminalText(`${result}\n`);
+      }
+      const errorMessage = extractClaudeErrors(payload.errors);
+      if (errorMessage) {
+        return normalizeTerminalText(`${errorMessage}\n`);
+      }
+      if (typeof payload.subtype === "string" && payload.subtype.trim().length > 0) {
+        return normalizeTerminalText(
+          `${t(locale, {
+            ru: `Claude завершил поток: ${payload.subtype}.`,
+            en: `Claude ended the stream with subtype: ${payload.subtype}.`
+          })}\n`
+        );
+      }
+      return null;
+    }
+    default: {
+      const nestedMessage =
+        extractNestedMessage(payload.message) ??
+        extractNestedMessage(payload.errors) ??
+        stringifyUnknown(payload.result);
+      return nestedMessage ? normalizeTerminalText(`${nestedMessage}\n`) : null;
+    }
+  }
+}
+
+function renderTerminalChunk(
+  rawText: string,
+  locale: Locale,
+  buffer: string,
+  runtimeTarget: RuntimeTarget
+): { output: string; buffer: string } {
   const combined = `${buffer}${rawText}`;
   const normalized = combined.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
   const nextBuffer = lines.pop() ?? "";
   const output = lines
-    .map((line) => renderCodexJsonLine(line, locale))
+    .map((line) =>
+      runtimeTarget === "claude_code"
+        ? renderClaudeJsonLine(line, locale)
+        : renderCodexJsonLine(line, locale)
+    )
     .filter((line): line is string => Boolean(line))
     .join("");
   return { output, buffer: nextBuffer };
 }
 
-export function RunTerminalPanel({ locale, runId, runStatus, token }: RunTerminalPanelProps) {
+export function RunTerminalPanel({
+  locale,
+  runId,
+  runStatus,
+  runtimeTarget,
+  token
+}: RunTerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -214,10 +321,10 @@ export function RunTerminalPanel({ locale, runId, runStatus, token }: RunTermina
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const lastOffsetRef = useRef(-1);
   const runStatusRef = useRef<RunStatus>(runStatus);
-  const sessionRef = useRef<CodexSessionRead | null>(null);
+  const sessionRef = useRef<TerminalSessionRead | null>(null);
   const lineBufferRef = useRef("");
 
-  const [session, setSession] = useState<CodexSessionRead | null>(null);
+  const [session, setSession] = useState<TerminalSessionRead | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<"waiting" | "connecting" | "streaming" | "closed" | "error">("waiting");
 
@@ -378,14 +485,19 @@ export function RunTerminalPanel({ locale, runId, runStatus, token }: RunTermina
           }
 
           try {
-            const payload = JSON.parse(event.data) as CodexStreamPayload;
+            const payload = JSON.parse(event.data) as TerminalStreamPayload;
 
             if (payload.type === "output") {
               if (payload.offset <= lastOffsetRef.current) {
                 return;
               }
               lastOffsetRef.current = payload.offset;
-              const rendered = renderTerminalChunk(payload.text, locale, lineBufferRef.current);
+              const rendered = renderTerminalChunk(
+                payload.text,
+                locale,
+                lineBufferRef.current,
+                runtimeTarget
+              );
               lineBufferRef.current = rendered.buffer;
               if (rendered.output) {
                 terminalRef.current?.write(rendered.output);
@@ -478,7 +590,7 @@ export function RunTerminalPanel({ locale, runId, runStatus, token }: RunTermina
       }
       closeSocket();
     };
-  }, [locale, runId, token]);
+  }, [locale, runId, runtimeTarget, token]);
 
   return (
     <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20">
@@ -490,8 +602,14 @@ export function RunTerminalPanel({ locale, runId, runStatus, token }: RunTermina
           </h2>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
             {t(locale, {
-              ru: "Terminal привязан к host-side Codex PTY. Панель показывает нормализованный live-лог без интерактивного stdin из браузера.",
-              en: "The terminal is attached to the host-side Codex PTY. The panel renders a normalized live log without interactive stdin from the browser."
+              ru:
+                runtimeTarget === "claude_code"
+                  ? "Terminal привязан к host-side Claude Code session. Панель показывает нормализованный live-лог без интерактивного stdin из браузера."
+                  : "Terminal привязан к host-side Codex PTY. Панель показывает нормализованный live-лог без интерактивного stdin из браузера.",
+              en:
+                runtimeTarget === "claude_code"
+                  ? "The terminal is attached to the host-side Claude Code session. The panel renders a normalized live log without interactive stdin from the browser."
+                  : "The terminal is attached to the host-side Codex PTY. The panel renders a normalized live log without interactive stdin from the browser."
             })}
           </p>
         </div>
@@ -540,15 +658,15 @@ export function RunTerminalPanel({ locale, runId, runStatus, token }: RunTermina
       ) : (
         <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-slate-400">
           {t(locale, {
-            ru: "Terminal session пока не создана. Если run еще стартует, панель подключится автоматически после появления PTY-сессии.",
-            en: "The terminal session has not been created yet. If the run is still starting, the panel will connect automatically once the PTY session appears."
+            ru: "Terminal session пока не создана. Если run еще стартует, панель подключится автоматически после появления host-side session.",
+            en: "The terminal session has not been created yet. If the run is still starting, the panel will connect automatically once the host-side session appears."
           })}
         </div>
       )}
 
       <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
         <div className="border-b border-zinc-800 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-zinc-400">
-          codex exec
+          {runtimeTarget === "claude_code" ? "claude -p" : "codex exec"}
         </div>
         <div className="h-[30rem] w-full" ref={containerRef} />
       </div>

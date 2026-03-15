@@ -17,6 +17,8 @@ const runStatusClasses: Record<RunStatus, string> = {
     "bg-violet-100 text-violet-800 ring-1 ring-violet-200 dark:bg-violet-500/10 dark:text-violet-300 dark:ring-violet-500/30",
   running_setup:
     "bg-cyan-100 text-cyan-800 ring-1 ring-cyan-200 dark:bg-cyan-500/10 dark:text-cyan-300 dark:ring-cyan-500/30",
+  starting_runtime:
+    "bg-brand-100 text-brand-800 ring-1 ring-brand-200 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-500/30",
   starting_codex:
     "bg-brand-100 text-brand-800 ring-1 ring-brand-200 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-500/30",
   running:

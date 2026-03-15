@@ -38,6 +38,7 @@ import {
   type GitHubIssue,
   type GitHubRepo,
   type HostExecutionReadiness,
+  type RuntimeTarget,
   type Team
 } from "@/lib/api";
 import { formatAuthLoading, t, type Locale } from "@/lib/i18n";
@@ -153,6 +154,7 @@ export function RunLaunchForm({
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [taskText, setTaskText] = useState("");
+  const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>("codex");
   const [codexModel, setCodexModel] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort>("medium");
   const [sandboxMode, setSandboxMode] = useState<CodexSandboxMode>("workspace-write");
@@ -164,7 +166,7 @@ export function RunLaunchForm({
   async function refreshReadiness() {
     setRefreshingReadiness(true);
     try {
-      const nextSnapshot = await refreshHostReadiness();
+      const nextSnapshot = await refreshHostReadiness(runtimeTarget);
       setReadinessSnapshot(nextSnapshot);
     } catch {
       return;
@@ -225,7 +227,7 @@ export function RunLaunchForm({
 
     async function refreshSilently() {
       try {
-        const nextSnapshot = await refreshHostReadiness();
+        const nextSnapshot = await refreshHostReadiness(runtimeTarget);
         if (!cancelled) {
           setReadinessSnapshot(nextSnapshot);
         }
@@ -253,7 +255,7 @@ export function RunLaunchForm({
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, []);
+  }, [runtimeTarget]);
 
   const parsedRepository = useMemo(() => parseRepositoryInput(repository), [repository]);
   const selectedRepoFromOptions = useMemo(
@@ -293,6 +295,7 @@ export function RunLaunchForm({
   const hasManualTask = taskText.trim().length > 0;
   const hasTaskSource = usingIssueFlow || hasManualTask;
   const effectiveReadiness = readinessSnapshot ?? readiness;
+  const runtimeLabel = runtimeTarget === "claude_code" ? "Claude Code" : "Codex";
   const codexOverridesSelected =
     codexModel.trim().length > 0 ||
     reasoningEffort !== "medium" ||
@@ -576,8 +579,9 @@ export function RunLaunchForm({
     setErrorMessage(null);
 
     try {
-          const run = await createRun(
+      const run = await createRun(
         {
+          runtime_target: runtimeTarget,
           team_slug: teamSlug,
           repo_owner: parsedRepository.owner,
           repo_name: parsedRepository.name,
@@ -586,11 +590,14 @@ export function RunLaunchForm({
           task_text: taskText.trim() || undefined,
           title: usingIssueFlow ? undefined : title.trim() || undefined,
           summary: usingIssueFlow ? undefined : summary.trim() || undefined,
-          codex: {
-            model: codexModel.trim() || undefined,
-            model_reasoning_effort: reasoningEffort,
-            sandbox_mode: sandboxMode
-          }
+          codex:
+            runtimeTarget === "codex"
+              ? {
+                  model: codexModel.trim() || undefined,
+                  model_reasoning_effort: reasoningEffort,
+                  sandbox_mode: sandboxMode
+                }
+              : undefined
         },
         token
       );
@@ -618,8 +625,8 @@ export function RunLaunchForm({
               </p>
               <p className="mt-1 max-w-3xl text-sm text-slate-600 dark:text-slate-300">
                 {t(locale, {
-                  ru: "Собери контекст задачи, а платформа подготовит workspace, стартует Codex и доведет результат до ветки и draft PR.",
-                  en: "Provide the task context and the platform will prepare the workspace, start Codex, and carry the result through to a branch and draft PR."
+                  ru: `Собери контекст задачи, а платформа подготовит workspace, стартует ${runtimeLabel} и доведет результат до ветки и draft PR.`,
+                  en: `Provide the task context and the platform will prepare the workspace, start ${runtimeLabel}, and carry the result through to a branch and draft PR.`
                 })}
               </p>
             </div>
@@ -627,7 +634,7 @@ export function RunLaunchForm({
               {[
                 t(locale, { ru: "Команда и repo", en: "Team and repo" }),
                 t(locale, { ru: "Контекст задачи", en: "Task context" }),
-                t(locale, { ru: "Codex run", en: "Codex run" }),
+                runtimeLabel,
                 t(locale, { ru: "Branch + draft PR", en: "Branch + draft PR" })
               ].map((step) => (
                 <span
@@ -711,8 +718,8 @@ export function RunLaunchForm({
       {effectiveReadiness && !effectiveReadiness.effective_ready ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-200">
           {t(locale, {
-            ru: "Host execution сейчас не готов. Открой диагностику и исправь `git` / `gh` / `codex` до запуска run.",
-            en: "Host execution is not ready right now. Open diagnostics and fix `git` / `gh` / `codex` before starting a run."
+            ru: "Host execution сейчас не готов. Открой диагностику и исправь `git` / `gh` / runtime CLI до запуска run.",
+            en: "Host execution is not ready right now. Open diagnostics and fix `git` / `gh` / runtime CLI before starting a run."
           })}
         </div>
       ) : null}
@@ -741,8 +748,8 @@ export function RunLaunchForm({
               </h3>
               <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                 {t(locale, {
-                  ru: "Выбери опубликованную команду и target repo, над которым будет работать Codex.",
-                  en: "Choose the published team and target repo that Codex should work on."
+                  ru: `Выбери опубликованную команду, runtime и target repo, над которым будет работать ${runtimeLabel}.`,
+                  en: `Choose the published team, runtime, and target repo that ${runtimeLabel} should work on.`
                 })}
               </p>
             </div>
@@ -768,6 +775,29 @@ export function RunLaunchForm({
                 {selectedTeam.description}
               </div>
             ) : null}
+
+            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+              {t(locale, { ru: "Runtime", en: "Runtime" })}
+              <select
+                className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                onChange={(event) => setRuntimeTarget(event.target.value as RuntimeTarget)}
+                value={runtimeTarget}
+              >
+                <option value="codex">Codex</option>
+                <option value="claude_code">Claude Code</option>
+              </select>
+              <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
+                {runtimeTarget === "claude_code"
+                  ? t(locale, {
+                      ru: "Claude Code использует `.claude` subagent bundle и host-side Claude CLI session.",
+                      en: "Claude Code uses the `.claude` subagent bundle and a host-side Claude CLI session."
+                    })
+                  : t(locale, {
+                      ru: "Codex использует `.codex` bundle и настраиваемые model/sandbox overrides.",
+                      en: "Codex uses the `.codex` bundle and configurable model/sandbox overrides."
+                    })}
+              </span>
+            </label>
 
             <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
               {t(locale, { ru: "Поиск репозитория", en: "Search repository" })}
@@ -985,8 +1015,8 @@ export function RunLaunchForm({
                   <p className="mt-1 opacity-90">
                     {usingIssueFlow
                       ? t(locale, {
-                          ru: "Текст ниже можно использовать как дополнительные инструкции и ограничения для Codex.",
-                          en: "You can use the text below for additional Codex instructions and constraints."
+                          ru: `Текст ниже можно использовать как дополнительные инструкции и ограничения для ${runtimeLabel}.`,
+                          en: `You can use the text below for additional instructions and constraints for ${runtimeLabel}.`
                         })
                       : t(locale, {
                           ru: "Если issue нет, опиши цель, ограничения и ожидаемый результат вручную.",
@@ -1207,8 +1237,14 @@ export function RunLaunchForm({
             <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
               {usingIssueFlow
                 ? t(locale, {
-                    ru: "Дополнительные инструкции для Codex (опционально)",
-                    en: "Extra instructions for Codex (optional)"
+                    ru:
+                      runtimeTarget === "claude_code"
+                        ? "Дополнительные инструкции для Claude Code (опционально)"
+                        : "Дополнительные инструкции для Codex (опционально)",
+                    en:
+                      runtimeTarget === "claude_code"
+                        ? "Extra instructions for Claude Code (optional)"
+                        : "Extra instructions for Codex (optional)"
                   })
                 : t(locale, { ru: "Описание задачи", en: "Task description" })}
               <textarea
@@ -1242,102 +1278,104 @@ export function RunLaunchForm({
           </div>
         </div>
 
-        <details className="rounded-2xl border border-slate-200 bg-slate-50/70 dark:border-zinc-800 dark:bg-zinc-900/70">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:hidden">
-            <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-              <Settings2 className="h-4 w-4" />
-              {t(locale, { ru: "Параметры Codex и sandbox", en: "Codex and sandbox settings" })}
-            </span>
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-              {codexOverridesSelected
-                ? t(locale, { ru: "Есть overrides", en: "Custom overrides" })
-                : t(locale, { ru: "Обычно можно не менять", en: "Defaults are usually enough" })}
-            </span>
-          </summary>
-          <div className="grid gap-4 border-t border-slate-200 px-4 py-4 dark:border-zinc-800 md:grid-cols-2">
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 md:col-span-2">
-              Codex model
-              <select
-                className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                onChange={(event) => {
-                  const nextValue = event.target.value;
-                  if (nextValue === "account-default") {
-                    setCodexModel("");
-                    return;
-                  }
-                  if (nextValue === "custom") {
-                    setCodexModel(
-                      (CODEX_MODEL_OPTIONS as readonly string[]).includes(codexModel)
-                        ? ""
-                        : codexModel
-                    );
-                    return;
-                  }
-                  setCodexModel(nextValue as CodexModelOption);
-                }}
-                value={selectedCodexModelOption}
-              >
-                <option value="account-default">
-                  {t(locale, {
-                    ru: "Модель аккаунта по умолчанию",
-                    en: "Account default model"
-                  })}
-                </option>
-                {CODEX_MODEL_OPTIONS.map((model) => (
-                  <option key={model} value={model}>
-                    {model}
-                  </option>
-                ))}
-                <option value="custom">
-                  {t(locale, { ru: "Custom model...", en: "Custom model..." })}
-                </option>
-              </select>
-              <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
-                {t(locale, {
-                  ru: "При browser-login Codex лучше не форсировать model без явной необходимости.",
-                  en: "With browser-login Codex it is better not to force a model unless you need one explicitly."
-                })}
+        {runtimeTarget === "codex" ? (
+          <details className="rounded-2xl border border-slate-200 bg-slate-50/70 dark:border-zinc-800 dark:bg-zinc-900/70">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:hidden">
+              <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                <Settings2 className="h-4 w-4" />
+                {t(locale, { ru: "Параметры Codex и sandbox", en: "Codex and sandbox settings" })}
               </span>
-            </label>
-            {selectedCodexModelOption === "custom" ? (
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                {codexOverridesSelected
+                  ? t(locale, { ru: "Есть overrides", en: "Custom overrides" })
+                  : t(locale, { ru: "Обычно можно не менять", en: "Defaults are usually enough" })}
+              </span>
+            </summary>
+            <div className="grid gap-4 border-t border-slate-200 px-4 py-4 dark:border-zinc-800 md:grid-cols-2">
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 md:col-span-2">
-                {t(locale, { ru: "Custom model id", en: "Custom model id" })}
-                <input
+                Codex model
+                <select
                   className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                  onChange={(event) => setCodexModel(event.target.value)}
-                  placeholder="gpt-5.3-codex-spark"
-                  type="text"
-                  value={codexModel}
-                />
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    if (nextValue === "account-default") {
+                      setCodexModel("");
+                      return;
+                    }
+                    if (nextValue === "custom") {
+                      setCodexModel(
+                        (CODEX_MODEL_OPTIONS as readonly string[]).includes(codexModel)
+                          ? ""
+                          : codexModel
+                      );
+                      return;
+                    }
+                    setCodexModel(nextValue as CodexModelOption);
+                  }}
+                  value={selectedCodexModelOption}
+                >
+                  <option value="account-default">
+                    {t(locale, {
+                      ru: "Модель аккаунта по умолчанию",
+                      en: "Account default model"
+                    })}
+                  </option>
+                  {CODEX_MODEL_OPTIONS.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                  <option value="custom">
+                    {t(locale, { ru: "Custom model...", en: "Custom model..." })}
+                  </option>
+                </select>
+                <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
+                  {t(locale, {
+                    ru: "При browser-login Codex лучше не форсировать model без явной необходимости.",
+                    en: "With browser-login Codex it is better not to force a model unless you need one explicitly."
+                  })}
+                </span>
               </label>
-            ) : null}
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-              {t(locale, { ru: "Reasoning effort", en: "Reasoning effort" })}
-              <select
-                className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                onChange={(event) => setReasoningEffort(event.target.value as CodexReasoningEffort)}
-                value={reasoningEffort}
-              >
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="xhigh">xhigh</option>
-              </select>
-            </label>
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-              Sandbox mode
-              <select
-                className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                onChange={(event) => setSandboxMode(event.target.value as CodexSandboxMode)}
-                value={sandboxMode}
-              >
-                <option value="read-only">read-only</option>
-                <option value="workspace-write">workspace-write</option>
-                <option value="danger-full-access">danger-full-access</option>
-              </select>
-            </label>
-          </div>
-        </details>
+              {selectedCodexModelOption === "custom" ? (
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 md:col-span-2">
+                  {t(locale, { ru: "Custom model id", en: "Custom model id" })}
+                  <input
+                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                    onChange={(event) => setCodexModel(event.target.value)}
+                    placeholder="gpt-5.3-codex-spark"
+                    type="text"
+                    value={codexModel}
+                  />
+                </label>
+              ) : null}
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                {t(locale, { ru: "Reasoning effort", en: "Reasoning effort" })}
+                <select
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  onChange={(event) => setReasoningEffort(event.target.value as CodexReasoningEffort)}
+                  value={reasoningEffort}
+                >
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                </select>
+              </label>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Sandbox mode
+                <select
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  onChange={(event) => setSandboxMode(event.target.value as CodexSandboxMode)}
+                  value={sandboxMode}
+                >
+                  <option value="read-only">read-only</option>
+                  <option value="workspace-write">workspace-write</option>
+                  <option value="danger-full-access">danger-full-access</option>
+                </select>
+              </label>
+            </div>
+          </details>
+        ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/70">
           <div className="space-y-2">
@@ -1362,6 +1400,10 @@ export function RunLaunchForm({
                   {parsedRepository.owner}/{parsedRepository.name}
                 </span>
               ) : null}
+              <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-950 dark:text-slate-200 dark:ring-zinc-700">
+                <Settings2 className="h-3 w-3" />
+                {runtimeLabel}
+              </span>
               <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-950 dark:text-slate-200 dark:ring-zinc-700">
                 <FileText className="h-3 w-3" />
                 {usingIssueFlow
