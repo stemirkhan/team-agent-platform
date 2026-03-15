@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     app_debug: bool = True
     api_v1_prefix: str = "/api/v1"
 
-    database_url: str = "postgresql+psycopg://agent_marketplace:agent_marketplace@localhost:5432/agent_marketplace"
+    database_url: str = "postgresql+psycopg://team_agent_platform:team_agent_platform@localhost:5432/team_agent_platform"
     redis_url: str = "redis://localhost:6379/0"
     host_executor_base_url: str | None = None
     host_executor_timeout_seconds: float = 2.5

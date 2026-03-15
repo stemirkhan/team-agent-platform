@@ -31,7 +31,7 @@ class TeamStatus(StrEnum):
 
 
 class Team(Base):
-    """Marketplace team entity."""
+    """Published team entity."""
 
     __tablename__ = "teams"
     __table_args__ = (UniqueConstraint("slug", name="uq_teams_slug"),)

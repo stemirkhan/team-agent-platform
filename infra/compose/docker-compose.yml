@@ -5,15 +5,15 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-agent_marketplace}
-      POSTGRES_USER: ${POSTGRES_USER:-agent_marketplace}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_marketplace}
+      POSTGRES_DB: ${POSTGRES_DB:-team_agent_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-team_agent_platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-team_agent_platform}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent_marketplace} -d ${POSTGRES_DB:-agent_marketplace}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-team_agent_platform} -d ${POSTGRES_DB:-team_agent_platform}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -39,7 +39,7 @@ services:
     env_file:
       - ../../.env
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent_marketplace}:${POSTGRES_PASSWORD:-agent_marketplace}@postgres:5432/${POSTGRES_DB:-agent_marketplace}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-team_agent_platform}:${POSTGRES_PASSWORD:-team_agent_platform}@postgres:5432/${POSTGRES_DB:-team_agent_platform}
       REDIS_URL: redis://redis:6379/0
       HOST_EXECUTOR_BASE_URL: ${HOST_EXECUTOR_BASE_URL:-http://host.containers.internal:8765}
       CORS_ORIGINS: "[\"http://localhost:${WEB_PORT:-3000}\",\"http://127.0.0.1:${WEB_PORT:-3000}\",\"http://[::1]:${WEB_PORT:-3000}\"]"

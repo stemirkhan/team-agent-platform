@@ -48,7 +48,7 @@ The following architectural moves are correct and should be preserved:
 - one backend adapter boundary for runtime-specific orchestration details
 - one shared host session engine with runtime-specific strategy hooks
 
-These are the right boundaries for an MVP monorepo. The platform does not need a plugin marketplace, microservices, or separate repositories.
+These are the right boundaries for an MVP monorepo. The platform does not need a plugin ecosystem, microservices, or separate repositories.
 
 ## Main architectural debt
 
@@ -193,7 +193,7 @@ The remaining cleanup order is:
 
 This RFC does not propose:
 
-- a plugin marketplace
+- a plugin ecosystem
 - runtime packages split into separate repositories
 - microservices
 - support for arbitrary remote execution providers

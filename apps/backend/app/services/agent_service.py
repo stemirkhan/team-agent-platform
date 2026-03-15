@@ -18,7 +18,7 @@ from app.utils.agent_assets import (
 
 
 class AgentService:
-    """Use-case orchestration for marketplace agents."""
+    """Use-case orchestration for published agents."""
 
     def __init__(
         self,

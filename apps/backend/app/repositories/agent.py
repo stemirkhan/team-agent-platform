@@ -10,7 +10,7 @@ from app.schemas.agent import AgentCreate
 
 
 class AgentRepository:
-    """Data access methods for marketplace agents."""
+    """Data access methods for published agents."""
 
     def __init__(self, session: Session) -> None:
         self.session = session

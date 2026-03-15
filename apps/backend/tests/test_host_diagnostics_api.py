@@ -235,7 +235,7 @@ def test_host_diagnostics_schema_normalizes_legacy_host_executor_payload() -> No
             "executor_context": {
                 "user": "temirkhan",
                 "home": "/home/temirkhan",
-                "cwd": "/home/temirkhan/my-agent-marketplace",
+                "cwd": "/home/temirkhan/team-agent-platform",
                 "containerized": False,
                 "container_runtime": None,
             },
@@ -455,7 +455,7 @@ def test_host_readiness_can_be_evaluated_for_requested_runtime(
         executor_context=HostExecutorContext(
             user="temirkhan",
             home="/home/temirkhan",
-            cwd="/home/temirkhan/my-agent-marketplace",
+            cwd="/home/temirkhan/team-agent-platform",
             containerized=False,
             container_runtime=None,
         ),

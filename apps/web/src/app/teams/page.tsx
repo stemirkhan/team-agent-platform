@@ -22,7 +22,7 @@ export default async function TeamsCatalogPage() {
             <span>{t(locale, { ru: "Каталог команд", en: "Team Catalog" })}</span>
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            {t(locale, { ru: "Опубликованные команды, собранные из агентов маркетплейса.", en: "Published teams assembled from marketplace agents." })}
+            {t(locale, { ru: "Опубликованные команды, собранные из опубликованных агентов.", en: "Published teams assembled from published agents." })}
           </p>
         </div>
         <Link href="/teams/new">

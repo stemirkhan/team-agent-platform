@@ -32,7 +32,7 @@ class VerificationStatus(StrEnum):
 
 
 class Agent(Base):
-    """Marketplace agent entity."""
+    """Published agent entity."""
 
     __tablename__ = "agents"
     __table_args__ = (UniqueConstraint("slug", name="uq_agents_slug"),)

@@ -3,11 +3,11 @@ set -eu
 
 API_BASE_URL="${API_BASE_URL:-http://127.0.0.1:8000/api/v1}"
 COMPOSE_FILE="${COMPOSE_FILE:-infra/compose/docker-compose.yml}"
-POSTGRES_DB="${POSTGRES_DB:-agent_marketplace}"
-POSTGRES_USER="${POSTGRES_USER:-agent_marketplace}"
+POSTGRES_DB="${POSTGRES_DB:-team_agent_platform}"
+POSTGRES_USER="${POSTGRES_USER:-team_agent_platform}"
 DEMO_EMAIL="${DEMO_EMAIL:-demo@team-agent-platform.local}"
 DEMO_PASSWORD="${DEMO_PASSWORD:-demo-password-123}"
-DEMO_DISPLAY_NAME="${DEMO_DISPLAY_NAME:-Marketplace Demo}"
+DEMO_DISPLAY_NAME="${DEMO_DISPLAY_NAME:-Platform Demo}"
 
 if [ -z "${XDG_DATA_HOME:-}" ] || echo "${XDG_DATA_HOME}" | grep -q '/snap/code/'; then
   export XDG_DATA_HOME="${HOME}/.local/share"
@@ -84,7 +84,7 @@ EOF
   printf '%s' "$login_body" | parse_json_field access_token
 }
 
-reset_marketplace_data() {
+reset_demo_data() {
   printf 'Resetting agents, teams, internal profiles, and exports...\n'
   psql_exec "TRUNCATE TABLE exports, team_items, teams, agent_versions, agents RESTART IDENTITY CASCADE;"
 }
@@ -221,7 +221,7 @@ EOF
   fi
 }
 
-reset_marketplace_data
+reset_demo_data
 token="$(authenticate)"
 
 backend_slug="$(

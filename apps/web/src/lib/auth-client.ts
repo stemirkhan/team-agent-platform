@@ -14,7 +14,7 @@ export type AuthTokenResponse = {
   user: AuthUser;
 };
 
-const ACCESS_TOKEN_KEY = "agent_marketplace_access_token";
+const ACCESS_TOKEN_KEY = "team_agent_platform_access_token";
 
 function getApiBaseUrl(): string {
   return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";

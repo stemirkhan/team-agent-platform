@@ -74,7 +74,7 @@ Reason:
   - display name: `Команда платформы`
   - password: `platform-owner-123`
 - `demo@team-agent-platform.local`
-  - display name: `Marketplace Demo`
+  - display name: `Platform Demo`
 
 Important note:
 

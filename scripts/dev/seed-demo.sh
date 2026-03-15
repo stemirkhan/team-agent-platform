@@ -4,7 +4,7 @@ set -eu
 API_BASE_URL="${API_BASE_URL:-http://127.0.0.1:8000/api/v1}"
 DEMO_EMAIL="${DEMO_EMAIL:-demo@team-agent-platform.local}"
 DEMO_PASSWORD="${DEMO_PASSWORD:-demo-password-123}"
-DEMO_DISPLAY_NAME="${DEMO_DISPLAY_NAME:-Marketplace Demo}"
+DEMO_DISPLAY_NAME="${DEMO_DISPLAY_NAME:-Platform Demo}"
 
 parse_json_field() {
   field_name="$1"

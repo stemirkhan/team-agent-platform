@@ -5,14 +5,14 @@
 
 ## Summary
 
-The project pivoted away from the original public marketplace direction.
+The project pivoted away from the original public catalog direction.
 The current MVP is a local-first, Codex-first, single-user execution platform over host `git`, `gh`, and `codex`.
 
 ## Current product model
 
 - `docs/TZ.md` is the primary technical source of truth.
 - `docs/PRD.md` is the secondary product source of truth.
-- The platform is no longer optimized around public discovery, ratings, reviews, or marketplace growth.
+- The platform is no longer optimized around public discovery, ratings, reviews, or catalog growth.
 - The core workflow is:
   1. define reusable agent profiles
   2. assemble them into a team
