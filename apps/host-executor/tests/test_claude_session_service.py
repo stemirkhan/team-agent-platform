@@ -167,3 +167,99 @@ def test_get_session_auto_resumes_persisted_running_session_after_restart(
     persisted = json.loads((storage_dir / "session.json").read_text(encoding="utf-8"))
     assert persisted["status"] == "resuming"
     assert persisted["resume_attempt_count"] == 1
+
+
+def test_get_session_exposes_claude_latest_and_aggregate_usage_metrics(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Persisted Claude session metadata should expose latest usage plus model-level totals."""
+    monkeypatch.setattr(
+        workspace_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=str(tmp_path / "workspaces")),
+    )
+    service = ClaudeSessionService()
+
+    storage_dir = service.sessions_root / "run-usage"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "session.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-usage",
+                "workspace_id": "ws-usage",
+                "repo_path": "/tmp/ws-usage/repo",
+                "command": [
+                    "claude",
+                    "-p",
+                    "--verbose",
+                    "--output-format",
+                    "stream-json",
+                ],
+                "status": "completed",
+                "pid": None,
+                "exit_code": 0,
+                "error_message": None,
+                "summary_text": "done",
+                "claude_session_id": "88a7b103-6ca7-52f1-a774-a713ca889ed8",
+                "transport_kind": "tmux",
+                "transport_ref": "tap-claude-run-run-usage",
+                "resume_attempt_count": 0,
+                "interrupted_at": None,
+                "resumable": False,
+                "recovered_from_restart": False,
+                "started_at": "2026-03-15T11:25:14Z",
+                "finished_at": "2026-03-15T11:29:11Z",
+                "last_output_offset": 2,
+            },
+            ensure_ascii=True,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    with (storage_dir / "chunks.jsonl").open("w", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                ClaudeTerminalChunk(
+                    offset=0,
+                    text=(
+                        '{"type":"assistant","message":{"usage":{"input_tokens":1,'
+                        '"cache_creation_input_tokens":2446,"cache_read_input_tokens":21870,'
+                        '"output_tokens":1}}}\n'
+                    ),
+                    created_at="2026-03-15T11:28:59Z",
+                ).model_dump(),
+                ensure_ascii=True,
+            )
+        )
+        handle.write("\n")
+        handle.write(
+            json.dumps(
+                ClaudeTerminalChunk(
+                    offset=1,
+                    text=(
+                        '{"type":"result","usage":{"input_tokens":12,'
+                        '"cache_creation_input_tokens":15129,'
+                        '"cache_read_input_tokens":215708,"output_tokens":2228},'
+                        '"modelUsage":{"claude-sonnet-4-6":{"inputTokens":38,'
+                        '"outputTokens":12841,"cacheReadInputTokens":826181,'
+                        '"cacheCreationInputTokens":51686,"costUSD":1.057343}}}\n'
+                    ),
+                    created_at="2026-03-15T11:29:11Z",
+                ).model_dump(),
+                ensure_ascii=True,
+            )
+        )
+        handle.write("\n")
+
+    session = service.get_session("run-usage")
+
+    assert session.input_tokens == 12
+    assert session.output_tokens == 2228
+    assert session.cache_creation_input_tokens == 15129
+    assert session.cache_read_input_tokens == 215708
+    assert session.total_input_tokens == 38
+    assert session.total_output_tokens == 12841
+    assert session.total_cache_creation_input_tokens == 51686
+    assert session.total_cache_read_input_tokens == 826181
+    assert session.total_cost_usd == 1.057343

@@ -70,10 +70,10 @@ flowchart TD
     E[Materialize runtime bundle and TASK.md]
     F[Start runtime session]
     G[Stream terminal and update run events]
-    H[Clean temporary runtime files]
-    I[Create commit]
-    J[Push working branch]
-    K[Create draft PR via gh]
+    H[Runtime finalize helper cleans scaffolding]
+    I[Runtime creates commit]
+    J[Runtime pushes working branch]
+    K[Runtime opens draft PR via gh]
     L[Run completed]
 
     X[Run interrupted or failed]
@@ -91,7 +91,8 @@ In short:
 - a run is initiated from the UI, but orchestrated by the backend;
 - the host executor prepares the workspace and starts the selected runtime;
 - terminal output and run events flow back through the backend and into the UI;
-- on success, the flow ends with commit, push, and draft PR creation;
+- on success, the runtime must finish commit, push, and draft PR creation inside the prepared workspace;
+- if the runtime exits without fully finishing SCM delivery, the backend marks the run as failed instead of completing SCM on its behalf;
 - on failure or interruption, the platform may use resume or auto-recovery when session state is still available.
 
 ## Runtime model

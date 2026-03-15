@@ -153,6 +153,117 @@ def test_cleanup_materialized_files_tolerates_missing_generated_file(tmp_path, m
     assert cleaned.changed_files == []
     assert not (repo_dir / "TASK.md").exists()
 
+
+def test_get_workspace_inferrs_runtime_managed_commit_state(tmp_path, monkeypatch) -> None:
+    """Refreshing workspace state should detect a direct runtime git commit."""
+    monkeypatch.setattr(
+        workspace_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=str(tmp_path)),
+    )
+    service = WorkspaceService()
+
+    workspace_dir = tmp_path / "ws-commit"
+    repo_dir = workspace_dir / "repo"
+    repo_dir.mkdir(parents=True)
+    _init_git_repo(repo_dir)
+
+    metadata = WorkspaceRead(
+        id="ws-commit",
+        repo_owner="stemirkhan",
+        repo_name="team-agent-platform",
+        repo_full_name="stemirkhan/team-agent-platform",
+        remote_url="https://github.com/stemirkhan/team-agent-platform.git",
+        workspace_path=str(workspace_dir),
+        repo_path=str(repo_dir),
+        base_branch="main",
+        working_branch="tap/demo",
+        current_branch="tap/demo",
+        status="prepared",
+        created_at="2026-03-09T10:00:00Z",
+        updated_at="2026-03-09T10:00:00Z",
+    )
+    service._save_workspace(metadata)
+    baseline = service.get_workspace("ws-commit")
+
+    (repo_dir / "README.md").write_text("# Demo\n\nRuntime change.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_dir, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "feat: runtime managed commit"],
+        cwd=repo_dir,
+        check=True,
+    )
+
+    refreshed = service.get_workspace("ws-commit")
+    assert refreshed.status == "committed"
+    assert refreshed.last_commit_sha != baseline.last_commit_sha
+    assert refreshed.last_commit_message == "feat: runtime managed commit"
+    assert refreshed.committed_at is not None
+
+
+def test_get_workspace_inferrs_runtime_managed_push_and_pr(tmp_path, monkeypatch) -> None:
+    """Refreshing workspace state should detect pushed branches and PRs created by runtime."""
+    monkeypatch.setattr(
+        workspace_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=str(tmp_path)),
+    )
+    service = WorkspaceService()
+
+    workspace_dir = tmp_path / "ws-pr"
+    repo_dir = workspace_dir / "repo"
+    repo_dir.mkdir(parents=True)
+    _init_git_repo(repo_dir)
+
+    metadata = WorkspaceRead(
+        id="ws-pr",
+        repo_owner="stemirkhan",
+        repo_name="team-agent-platform",
+        repo_full_name="stemirkhan/team-agent-platform",
+        remote_url="https://github.com/stemirkhan/team-agent-platform.git",
+        workspace_path=str(workspace_dir),
+        repo_path=str(repo_dir),
+        base_branch="main",
+        working_branch="tap/demo",
+        current_branch="tap/demo",
+        status="prepared",
+        created_at="2026-03-09T10:00:00Z",
+        updated_at="2026-03-09T10:00:00Z",
+    )
+    service._save_workspace(metadata)
+    service.get_workspace("ws-pr")
+
+    (repo_dir / "README.md").write_text("# Demo\n\nRuntime change.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo_dir, check=True)
+    subprocess.run(["git", "commit", "-m", "feat: runtime managed pr"], cwd=repo_dir, check=True)
+
+    original_try_run_git = service._try_run_git
+    monkeypatch.setattr(
+        service,
+        "_try_run_git",
+        lambda args, *, cwd: (
+            "origin/tap/demo\n"
+            if args == ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+            else original_try_run_git(args, cwd=cwd)
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "_try_view_pull_by_reference",
+        lambda repo_full_name, reference: {
+            "number": 42,
+            "url": "https://github.com/stemirkhan/team-agent-platform/pull/42",
+        },
+    )
+
+    refreshed = service.get_workspace("ws-pr")
+    assert refreshed.status == "pull_request_created"
+    assert refreshed.upstream_branch == "origin/tap/demo"
+    assert refreshed.pull_request_number == 42
+    assert refreshed.pull_request_url == "https://github.com/stemirkhan/team-agent-platform/pull/42"
+    assert refreshed.pushed_at is not None
+
+
 def test_run_commands_executes_shell_commands_in_workspace(tmp_path, monkeypatch) -> None:
     """Workspace commands should execute sequentially and return normalized output."""
     monkeypatch.setattr(

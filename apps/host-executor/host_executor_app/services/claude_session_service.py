@@ -35,6 +35,21 @@ class _ClaudeSessionState(RuntimeSessionState):
     claude_session_id: str | None = None
 
 
+@dataclass(slots=True)
+class _ClaudeUsageMetrics:
+    """Derived latest and aggregate usage metrics from Claude stream-json output."""
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    total_input_tokens: int | None = None
+    total_output_tokens: int | None = None
+    total_cache_creation_input_tokens: int | None = None
+    total_cache_read_input_tokens: int | None = None
+    total_cost_usd: float | None = None
+
+
 class ClaudeSessionService(BaseRuntimeSessionService):
     """Manage in-memory host-side Claude sessions keyed by run id."""
 
@@ -373,10 +388,9 @@ class ClaudeSessionService(BaseRuntimeSessionService):
     def _derive_usage_metrics(
         cls,
         chunks: list[ClaudeTerminalChunk],
-    ) -> tuple[int | None, int | None]:
-        """Return the latest token usage reported by Claude stream-json events."""
-        input_tokens: int | None = None
-        output_tokens: int | None = None
+    ) -> _ClaudeUsageMetrics:
+        """Return the latest and aggregate usage metrics reported by Claude stream-json events."""
+        metrics = _ClaudeUsageMetrics()
 
         for payload in cls._iter_json_objects(chunks):
             payload_type = payload.get("type")
@@ -388,23 +402,117 @@ class ClaudeSessionService(BaseRuntimeSessionService):
             elif payload_type == "result":
                 usage = payload.get("usage")
             if not isinstance(usage, dict):
+                usage = None
+
+            metrics.input_tokens = cls._coalesce_int(usage, "input_tokens", metrics.input_tokens)
+            metrics.output_tokens = cls._coalesce_int(usage, "output_tokens", metrics.output_tokens)
+            metrics.cache_creation_input_tokens = cls._coalesce_int(
+                usage,
+                "cache_creation_input_tokens",
+                metrics.cache_creation_input_tokens,
+            )
+            metrics.cache_read_input_tokens = cls._coalesce_int(
+                usage,
+                "cache_read_input_tokens",
+                metrics.cache_read_input_tokens,
+            )
+
+            if payload_type != "result":
                 continue
 
-            raw_input = usage.get("input_tokens")
-            raw_output = usage.get("output_tokens")
-            next_input = raw_input if isinstance(raw_input, int) else None
-            next_output = raw_output if isinstance(raw_output, int) else None
-            if next_input is not None:
-                input_tokens = next_input
-            if next_output is not None:
-                output_tokens = next_output
+            aggregate = cls._extract_model_usage_totals(payload.get("modelUsage"))
+            if aggregate is not None:
+                metrics.total_input_tokens = aggregate["input_tokens"]
+                metrics.total_output_tokens = aggregate["output_tokens"]
+                metrics.total_cache_creation_input_tokens = aggregate["cache_creation_input_tokens"]
+                metrics.total_cache_read_input_tokens = aggregate["cache_read_input_tokens"]
+                metrics.total_cost_usd = aggregate["cost_usd"]
+                continue
 
-        return input_tokens, output_tokens
+            metrics.total_input_tokens = cls._coalesce_int(
+                usage,
+                "input_tokens",
+                metrics.total_input_tokens,
+            )
+            metrics.total_output_tokens = cls._coalesce_int(
+                usage,
+                "output_tokens",
+                metrics.total_output_tokens,
+            )
+            metrics.total_cache_creation_input_tokens = cls._coalesce_int(
+                usage,
+                "cache_creation_input_tokens",
+                metrics.total_cache_creation_input_tokens,
+            )
+            metrics.total_cache_read_input_tokens = cls._coalesce_int(
+                usage,
+                "cache_read_input_tokens",
+                metrics.total_cache_read_input_tokens,
+            )
+
+        return metrics
+
+    @staticmethod
+    def _coalesce_int(
+        usage: object | None,
+        key: str,
+        current: int | None,
+    ) -> int | None:
+        """Return one integer usage field when it exists."""
+        if not isinstance(usage, dict):
+            return current
+        value = usage.get(key)
+        if isinstance(value, int):
+            return value
+        return current
+
+    @staticmethod
+    def _extract_model_usage_totals(
+        value: object | None,
+    ) -> dict[str, int | float | None] | None:
+        """Return aggregate usage totals from Claude's final `modelUsage` payload."""
+        if not isinstance(value, dict) or not value:
+            return None
+
+        input_tokens = 0
+        output_tokens = 0
+        cache_creation_input_tokens = 0
+        cache_read_input_tokens = 0
+        cost_usd = 0.0
+        saw_metric = False
+
+        for item in value.values():
+            if not isinstance(item, dict):
+                continue
+            if isinstance(item.get("inputTokens"), int):
+                input_tokens += item["inputTokens"]
+                saw_metric = True
+            if isinstance(item.get("outputTokens"), int):
+                output_tokens += item["outputTokens"]
+                saw_metric = True
+            if isinstance(item.get("cacheCreationInputTokens"), int):
+                cache_creation_input_tokens += item["cacheCreationInputTokens"]
+                saw_metric = True
+            if isinstance(item.get("cacheReadInputTokens"), int):
+                cache_read_input_tokens += item["cacheReadInputTokens"]
+                saw_metric = True
+            if isinstance(item.get("costUSD"), (int, float)):
+                cost_usd += float(item["costUSD"])
+
+        if not saw_metric:
+            return None
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_creation_input_tokens": cache_creation_input_tokens,
+            "cache_read_input_tokens": cache_read_input_tokens,
+            "cost_usd": cost_usd,
+        }
 
     @staticmethod
     def _to_read(state: _ClaudeSessionState) -> ClaudeSessionRead:
         """Convert internal state into a public API payload."""
-        input_tokens, output_tokens = ClaudeSessionService._derive_usage_metrics(state.chunks)
+        metrics = ClaudeSessionService._derive_usage_metrics(state.chunks)
         return ClaudeSessionRead(
             run_id=state.run_id,
             workspace_id=state.workspace_id,
@@ -424,8 +532,15 @@ class ClaudeSessionService(BaseRuntimeSessionService):
             resumable=state.resumable,
             recovered_from_restart=state.recovered_from_restart,
             output_bytes_read=state.output_bytes_read,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=metrics.input_tokens,
+            output_tokens=metrics.output_tokens,
+            cache_creation_input_tokens=metrics.cache_creation_input_tokens,
+            cache_read_input_tokens=metrics.cache_read_input_tokens,
+            total_input_tokens=metrics.total_input_tokens,
+            total_output_tokens=metrics.total_output_tokens,
+            total_cache_creation_input_tokens=metrics.total_cache_creation_input_tokens,
+            total_cache_read_input_tokens=metrics.total_cache_read_input_tokens,
+            total_cost_usd=metrics.total_cost_usd,
             started_at=state.started_at,
             finished_at=state.finished_at,
             last_output_offset=len(state.chunks),

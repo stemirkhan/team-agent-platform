@@ -175,6 +175,19 @@ function formatAbbreviatedNumber(locale: Locale, value: number | null): string {
   return formatter.format(value);
 }
 
+function formatUsd(locale: Locale, value: number | null): string {
+  if (value === null) {
+    return "-";
+  }
+
+  return new Intl.NumberFormat(locale === "ru" ? "ru-RU" : "en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 function extractEventMessage(event: RunEvent, locale: Locale): string {
   const payload = event.payload_json;
   if (payload && typeof payload.message === "string" && payload.message.length > 0) {
@@ -807,11 +820,39 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     }
   ];
   const durationLabel = formatRunDuration(locale, run.started_at, run.finished_at, nowMs);
-  const latestEvent = events[0] ?? null;
-  const inputTokensLabel = formatCompactNumber(locale, terminalSession?.input_tokens ?? null);
-  const outputTokensLabel = formatCompactNumber(locale, terminalSession?.output_tokens ?? null);
-  const inputTokensCompactLabel = formatAbbreviatedNumber(locale, terminalSession?.input_tokens ?? null);
-  const outputTokensCompactLabel = formatAbbreviatedNumber(locale, terminalSession?.output_tokens ?? null);
+  const latestEvent = events[events.length - 1] ?? null;
+  const isClaudeRun = run.runtime_target === "claude_code";
+  const displayedInputTokens =
+    isClaudeRun ? terminalSession?.total_input_tokens ?? terminalSession?.input_tokens ?? null : terminalSession?.input_tokens ?? null;
+  const displayedOutputTokens =
+    isClaudeRun ? terminalSession?.total_output_tokens ?? terminalSession?.output_tokens ?? null : terminalSession?.output_tokens ?? null;
+  const inputTokensLabel = formatCompactNumber(locale, displayedInputTokens);
+  const outputTokensLabel = formatCompactNumber(locale, displayedOutputTokens);
+  const inputTokensCompactLabel = formatAbbreviatedNumber(locale, displayedInputTokens);
+  const outputTokensCompactLabel = formatAbbreviatedNumber(locale, displayedOutputTokens);
+  const latestTurnInputLabel = formatCompactNumber(locale, terminalSession?.input_tokens ?? null);
+  const latestTurnOutputLabel = formatCompactNumber(locale, terminalSession?.output_tokens ?? null);
+  const cacheReadTokensLabel = formatCompactNumber(
+    locale,
+    isClaudeRun ? terminalSession?.total_cache_read_input_tokens ?? terminalSession?.cache_read_input_tokens ?? null : null,
+  );
+  const cacheWriteTokensLabel = formatCompactNumber(
+    locale,
+    isClaudeRun
+      ? terminalSession?.total_cache_creation_input_tokens ?? terminalSession?.cache_creation_input_tokens ?? null
+      : null,
+  );
+  const totalCostLabel = formatUsd(locale, isClaudeRun ? terminalSession?.total_cost_usd ?? null : null);
+  const showClaudeTokenBreakdown =
+    isClaudeRun &&
+    terminalSession !== null &&
+    [
+      terminalSession.total_cache_read_input_tokens,
+      terminalSession.cache_read_input_tokens,
+      terminalSession.total_cache_creation_input_tokens,
+      terminalSession.cache_creation_input_tokens,
+      terminalSession.total_cost_usd,
+    ].some((value) => value !== null);
 
   const renderOverview = () => (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -1305,12 +1346,12 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                   {terminalSession
                     ? t(locale, {
                         ru:
-                          run.runtime_target === "claude_code"
-                            ? "Берется из последних usage-метрик Claude stream."
+                          isClaudeRun
+                            ? "Для Claude показывается агрегат modelUsage, а cache вынесен отдельно."
                             : "Берется из последнего turn.completed в terminal stream.",
                         en:
-                          run.runtime_target === "claude_code"
-                            ? "Derived from the latest Claude stream usage metrics."
+                          isClaudeRun
+                            ? "Claude totals come from final modelUsage when available, with cache shown separately."
                             : "Derived from the latest turn.completed event in the terminal stream."
                       })
                     : t(locale, {
@@ -1318,6 +1359,33 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                         en: "Appears after the runtime session starts."
                       })}
                 </p>
+                {showClaudeTokenBreakdown ? (
+                  <dl className="mt-3 space-y-2 border-t border-slate-200 pt-3 text-xs text-slate-600 dark:border-zinc-800 dark:text-slate-300">
+                    <div className="flex items-center justify-between gap-3">
+                      <dt>{t(locale, { ru: "Cache read", en: "Cache read" })}</dt>
+                      <dd className="font-semibold text-slate-900 dark:text-slate-100">{cacheReadTokensLabel}</dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt>{t(locale, { ru: "Cache write", en: "Cache write" })}</dt>
+                      <dd className="font-semibold text-slate-900 dark:text-slate-100">{cacheWriteTokensLabel}</dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt>{t(locale, { ru: "Latest turn", en: "Latest turn" })}</dt>
+                      <dd className="font-semibold text-right text-slate-900 dark:text-slate-100">
+                        {t(locale, {
+                          ru: `${latestTurnInputLabel} in / ${latestTurnOutputLabel} out`,
+                          en: `${latestTurnInputLabel} in / ${latestTurnOutputLabel} out`
+                        })}
+                      </dd>
+                    </div>
+                    {terminalSession?.total_cost_usd !== null ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <dt>{t(locale, { ru: "Estimated cost", en: "Estimated cost" })}</dt>
+                        <dd className="font-semibold text-slate-900 dark:text-slate-100">{totalCostLabel}</dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                ) : null}
               </div>
 
               <div className="flex flex-wrap gap-2 sm:col-span-2">
