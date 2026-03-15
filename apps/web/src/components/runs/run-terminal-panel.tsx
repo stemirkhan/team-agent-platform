@@ -67,6 +67,11 @@ type ClaudeEventLine = {
   };
 };
 
+type ClaudeTextContentPart = {
+  type: "text";
+  text: string;
+};
+
 function normalizeTerminalText(value: string): string {
   return value.replace(/\r?\n/g, "\r\n");
 }
@@ -113,6 +118,15 @@ function extractNestedMessage(value: unknown): string | null {
     stringifyUnknown(payload.detail) ??
     null
   );
+}
+
+function isClaudeTextContentPart(value: unknown): value is ClaudeTextContentPart {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const item = value as { type?: unknown; text?: unknown };
+  return item.type === "text" && typeof item.text === "string";
 }
 
 function renderCodexJsonLine(line: string, locale: Locale): string | null {
@@ -214,7 +228,7 @@ function extractClaudeAssistantText(message: ClaudeEventLine["message"]): string
   }
 
   const parts = message.content
-    .filter((item) => item?.type === "text" && typeof item.text === "string")
+    .filter(isClaudeTextContentPart)
     .map((item) => item.text.trim())
     .filter((item) => item.length > 0);
 
