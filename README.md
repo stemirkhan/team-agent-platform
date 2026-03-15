@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="images/readme-showcase.gif" alt="Animated showcase of Team Agent Platform screens" width="100%">
+  <img src="images/readme-showcase.png" alt="High-resolution product showcase of Team Agent Platform" width="100%">
 </p>
 
 <p align="center">
@@ -103,6 +103,10 @@ At a high level, one run goes through these stages:
 8. create a commit when the runtime produced repository changes;
 9. require the runtime to finalize commit, push, and draft PR from the prepared workspace;
 10. fail the run if the runtime exits without fully finishing SCM delivery.
+
+For Codex-backed runs, the normal launch flow now fixes the root session sandbox to
+`danger-full-access`. The runtime owns SCM finalization, so it must be able to write `.git`,
+push the working branch, and create the draft PR from the prepared workspace.
 
 If the host executor or transport is interrupted, the platform supports resume and auto-recovery for recoverable sessions.
 
