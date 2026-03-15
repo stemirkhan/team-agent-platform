@@ -153,8 +153,8 @@ class AgentService:
             agent=agent,
             manifest_json=manifest,
             source_archive_url=None,
-            compatibility_matrix={"codex": True},
-            export_targets=["codex"],
+            compatibility_matrix={"codex": True, "claude_code": True},
+            export_targets=["codex", "claude_code"],
             install_instructions=agent.full_description or agent.short_description,
         )
 

@@ -37,6 +37,7 @@ class CodexSessionRead(BaseModel):
     exit_code: int | None = None
     error_message: str | None = None
     summary_text: str | None = None
+    runtime_session_id: str | None = None
     codex_session_id: str | None = None
     transport_kind: Literal["pty", "tmux"] = "pty"
     transport_ref: str | None = None

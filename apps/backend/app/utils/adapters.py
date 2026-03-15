@@ -1,4 +1,4 @@
-"""Helpers for Codex export artifacts."""
+"""Helpers for Codex and Claude Code export artifacts."""
 
 import json
 import re
@@ -7,6 +7,7 @@ from typing import Any
 _DEFAULT_CODEX_REASONING = "medium"
 _DEFAULT_CODEX_SANDBOX = "workspace-write"
 _DEFAULT_CODEX_INSTRUCTIONS = "Follow task instructions and use available tools."
+_DEFAULT_CLAUDE_INSTRUCTIONS = "Follow task instructions and use available tools."
 
 
 def render_codex_agent_toml(codex_profile: dict[str, Any]) -> str:
@@ -21,6 +22,42 @@ def render_codex_agent_toml(codex_profile: dict[str, Any]) -> str:
     if normalized["model"]:
         lines.insert(1, f"model = {_toml_string(normalized['model'])}")
     return "\n".join(lines).strip() + "\n"
+
+
+def render_claude_subagent_markdown(
+    *,
+    name: str,
+    claude_profile: dict[str, Any],
+    reference_paths: list[str] | None = None,
+) -> str:
+    """Render one Claude Code subagent definition in Markdown format."""
+    normalized = _normalize_claude_profile(claude_profile)
+    frontmatter_lines = [
+        "---",
+        f"name: {_yaml_string(name)}",
+        f"description: {_yaml_string(normalized['description'])}",
+    ]
+    if normalized["model"]:
+        frontmatter_lines.append(f"model: {_yaml_string(normalized['model'])}")
+    if normalized["permission_mode"]:
+        frontmatter_lines.append(
+            f"permissionMode: {_yaml_string(normalized['permission_mode'])}"
+        )
+    frontmatter_lines.append("---")
+
+    body_lines = [normalized["developer_instructions"]]
+    normalized_reference_paths = [path for path in (reference_paths or []) if _normalize_str(path)]
+    if normalized_reference_paths:
+        body_lines.extend(
+            [
+                "",
+                "## Project-Specific References",
+                "Review these files when they are relevant to the task:",
+            ]
+        )
+        body_lines.extend(f"- `{path}`" for path in normalized_reference_paths)
+
+    return "\n".join(frontmatter_lines + [""] + body_lines).rstrip() + "\n"
 
 
 def build_codex_team_files(team_items: list[dict[str, Any]]) -> dict[str, str]:
@@ -62,6 +99,29 @@ def build_codex_team_files(team_items: list[dict[str, Any]]) -> dict[str, str]:
     return files
 
 
+def build_claude_team_files(team_items: list[dict[str, Any]]) -> dict[str, str]:
+    """Build minimal Claude Code team bundle files."""
+    files: dict[str, str] = {}
+    used_keys: set[str] = set()
+
+    for index, item in enumerate(team_items, start=1):
+        base_key = _slugify_key(
+            str(item.get("role_name") or item.get("agent_slug") or f"agent-{index}")
+        )
+        if not base_key:
+            base_key = f"agent-{index}"
+        key = _make_unique_key(base_key=base_key, used_keys=used_keys)
+
+        claude_profile = item.get("claude") if isinstance(item.get("claude"), dict) else {}
+        files[f".claude/agents/{key}.md"] = render_claude_subagent_markdown(
+            name=key,
+            claude_profile=claude_profile,
+            reference_paths=item.get("reference_paths") if isinstance(item, dict) else None,
+        )
+
+    return files
+
+
 def _normalize_codex_profile(codex_profile: dict[str, Any]) -> dict[str, str | None]:
     """Return stable Codex config values used in TOML generation."""
     description = _normalize_str(codex_profile.get("description")) or "Agent role"
@@ -84,8 +144,30 @@ def _normalize_codex_profile(codex_profile: dict[str, Any]) -> dict[str, str | N
     }
 
 
+def _normalize_claude_profile(claude_profile: dict[str, Any]) -> dict[str, str | None]:
+    """Return stable Claude Code config values used in subagent generation."""
+    description = _normalize_str(claude_profile.get("description")) or "Agent role"
+    model = _normalize_str(claude_profile.get("model"))
+    permission_mode = _normalize_str(claude_profile.get("permission_mode"))
+    developer_instructions = (
+        _normalize_str(claude_profile.get("developer_instructions"))
+        or _DEFAULT_CLAUDE_INSTRUCTIONS
+    )
+    return {
+        "description": description,
+        "model": model,
+        "permission_mode": permission_mode,
+        "developer_instructions": developer_instructions,
+    }
+
+
 def _toml_string(value: str) -> str:
     """Return TOML-safe basic string."""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _yaml_string(value: str) -> str:
+    """Return YAML-safe string using JSON-compatible quoting."""
     return json.dumps(value, ensure_ascii=False)
 
 

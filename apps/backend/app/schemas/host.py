@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.models.export_job import RuntimeTarget
+
 
 class HostToolStatus(StrEnum):
     """Normalized readiness state for a host tool."""
@@ -42,6 +44,25 @@ def _legacy_tmux_diagnostics() -> dict[str, Any]:
     }
 
 
+def _legacy_claude_diagnostics() -> dict[str, Any]:
+    """Return a synthetic Claude diagnostics block for older host-executor payloads."""
+    return {
+        "name": "claude",
+        "found": False,
+        "path": None,
+        "version": None,
+        "minimum_version": "2.0.0",
+        "version_ok": False,
+        "auth_required": True,
+        "auth_ok": None,
+        "status": HostToolStatus.MISSING,
+        "message": "This host executor build does not report Claude Code diagnostics yet.",
+        "remediation_steps": [
+            "Restart or redeploy the host executor to pick up the latest diagnostics schema."
+        ],
+    }
+
+
 class HostToolDiagnostics(BaseModel):
     """Diagnostics snapshot for a single host tool."""
 
@@ -64,17 +85,21 @@ class HostDiagnosticsTools(BaseModel):
     git: HostToolDiagnostics
     gh: HostToolDiagnostics
     codex: HostToolDiagnostics
+    claude: HostToolDiagnostics
     tmux: HostToolDiagnostics
 
     @model_validator(mode="before")
     @classmethod
-    def add_legacy_tmux_snapshot(cls, value: Any) -> Any:
-        """Inject tmux diagnostics when the host executor still returns the legacy shape."""
-        if not isinstance(value, dict) or "tmux" in value:
+    def add_legacy_tool_snapshots(cls, value: Any) -> Any:
+        """Inject newer tool diagnostics when the host executor still returns the legacy shape."""
+        if not isinstance(value, dict):
             return value
 
         normalized = dict(value)
-        normalized["tmux"] = _legacy_tmux_diagnostics()
+        if "claude" not in normalized:
+            normalized["claude"] = _legacy_claude_diagnostics()
+        if "tmux" not in normalized:
+            normalized["tmux"] = _legacy_tmux_diagnostics()
         return normalized
 
 
@@ -138,6 +163,8 @@ class HostExecutionReadinessResponse(BaseModel):
     generated_at: datetime
     execution_source: HostExecutionSource
     effective_ready: bool
+    requested_runtime: RuntimeTarget | None = None
+    runtime_ready: dict[str, bool] = Field(default_factory=dict)
     host_executor_url: str | None = None
     host_executor_reachable: bool = False
     host_executor_error: str | None = None

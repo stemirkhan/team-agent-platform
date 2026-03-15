@@ -19,6 +19,7 @@ class RunStatus(StrEnum):
     CLONING_REPO = "cloning_repo"
     MATERIALIZING_TEAM = "materializing_team"
     RUNNING_SETUP = "running_setup"
+    STARTING_RUNTIME = "starting_runtime"
     STARTING_CODEX = "starting_codex"
     RUNNING = "running"
     INTERRUPTED = "interrupted"
@@ -41,7 +42,7 @@ class RunEventType(StrEnum):
 
 
 class Run(Base):
-    """One Codex execution session over a GitHub repository."""
+    """One runtime execution session over a GitHub repository."""
 
     __tablename__ = "runs"
 
@@ -76,7 +77,9 @@ class Run(Base):
     workspace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     workspace_path: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     repo_path: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    runtime_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     codex_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    claude_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     transport_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     transport_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     resume_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

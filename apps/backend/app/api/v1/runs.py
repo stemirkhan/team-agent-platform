@@ -1,4 +1,4 @@
-"""Run lifecycle endpoints for local-first Codex execution."""
+"""Run lifecycle endpoints for local-first runtime execution."""
 
 import asyncio
 import json
@@ -10,8 +10,8 @@ from app.api.deps import get_auth_service, get_current_user, get_run_service
 from app.core.security import decode_access_token
 from app.models.run import RunStatus
 from app.models.user import User
-from app.schemas.codex import CodexSessionEventsResponse, CodexSessionRead
 from app.schemas.run import RunCreate, RunEventListResponse, RunListResponse, RunRead
+from app.schemas.terminal import TerminalSessionEventsResponse, TerminalSessionRead
 from app.services.auth_service import AuthService
 from app.services.run_service import RunService
 
@@ -43,7 +43,7 @@ def create_run(
     user: User = Depends(get_current_user),
     service: RunService = Depends(get_run_service),
 ) -> RunRead:
-    """Create one run and prepare its workspace plus Codex bundle."""
+    """Create one run and prepare its workspace plus runtime bundle."""
     return service.create_run(payload, user)
 
 
@@ -73,7 +73,7 @@ def cancel_run(
     user: User = Depends(get_current_user),
     service: RunService = Depends(get_run_service),
 ) -> RunRead:
-    """Cancel one running host-side Codex session."""
+    """Cancel one running host-side runtime session."""
     return service.cancel_run(run_id, user)
 
 
@@ -83,27 +83,27 @@ def resume_run(
     user: User = Depends(get_current_user),
     service: RunService = Depends(get_run_service),
 ) -> RunRead:
-    """Resume one interrupted host-side Codex session."""
+    """Resume one interrupted host-side runtime session."""
     return service.resume_run(run_id, user)
 
 
-@router.get("/{run_id}/terminal/session", response_model=CodexSessionRead)
+@router.get("/{run_id}/terminal/session", response_model=TerminalSessionRead)
 def get_run_terminal_session(
     run_id: UUID,
     user: User = Depends(get_current_user),
     service: RunService = Depends(get_run_service),
-) -> CodexSessionRead:
+) -> TerminalSessionRead:
     """Return current terminal session metadata for one run."""
     return service.get_terminal_session(run_id, user)
 
 
-@router.get("/{run_id}/terminal/events", response_model=CodexSessionEventsResponse)
+@router.get("/{run_id}/terminal/events", response_model=TerminalSessionEventsResponse)
 def get_run_terminal_events(
     run_id: UUID,
     offset: int = Query(default=0, ge=0),
     user: User = Depends(get_current_user),
     service: RunService = Depends(get_run_service),
-) -> CodexSessionEventsResponse:
+) -> TerminalSessionEventsResponse:
     """Return incremental terminal output for one run."""
     return service.get_terminal_events(run_id, offset=offset, current_user=user)
 

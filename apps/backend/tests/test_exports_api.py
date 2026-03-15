@@ -1,4 +1,4 @@
-"""Integration tests for Codex export endpoints."""
+"""Integration tests for runtime export endpoints."""
 
 from io import BytesIO
 from urllib.parse import parse_qs, urlparse
@@ -164,6 +164,64 @@ def test_export_draft_agent_is_rejected(client: TestClient) -> None:
     assert export_response.json()["detail"] == "Only published agents can be exported."
 
 
+def test_export_published_agent_as_claude_code(client: TestClient) -> None:
+    """Published agent can be exported as a Claude Code subagent definition."""
+    headers = _auth_headers(
+        client,
+        email="claude-exporter@example.com",
+        display_name="Claude Exporter",
+    )
+
+    client.post(
+        "/api/v1/agents",
+        headers=headers,
+        json={
+            "slug": "claude-export-agent",
+            "title": "Claude Export Agent",
+            "short_description": "Published agent used for Claude export tests.",
+            "category": "backend",
+        },
+    )
+    client.post("/api/v1/agents/claude-export-agent/publish", headers=headers)
+    _configure_agent_profile(
+        client,
+        headers=headers,
+        slug="claude-export-agent",
+        export_targets=["claude_code"],
+        manifest_json={
+            "instructions": "Inspect backend code and prepare a focused implementation plan.",
+            "claude": {
+                "description": "Backend implementation specialist for repository tasks.",
+                "model": "sonnet",
+                "permission_mode": "bypassPermissions",
+                "developer_instructions": "Inspect the repo, make focused edits, and report what changed.",
+            },
+        },
+    )
+
+    export_response = client.post(
+        "/api/v1/exports/agents/claude-export-agent",
+        headers=headers,
+        json={"runtime_target": "claude_code"},
+    )
+    assert export_response.status_code == 201
+    payload = export_response.json()
+    assert payload["runtime_target"] == "claude_code"
+    parsed_result_url = urlparse(payload["result_url"])
+    assert parsed_result_url.path == "/downloads/agent/claude-export-agent/claude.md"
+
+    download_response = client.get(payload["result_url"])
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"].startswith("text/markdown")
+    content = download_response.content.decode("utf-8")
+    assert content.startswith("---\n")
+    assert 'name: "claude-export-agent"' in content
+    assert 'description: "Backend implementation specialist for repository tasks."' in content
+    assert 'model: "sonnet"' in content
+    assert 'permissionMode: "bypassPermissions"' in content
+    assert "Inspect the repo, make focused edits, and report what changed." in content
+
+
 def test_export_agent_with_skills_and_markdown_files_returns_zip_bundle(client: TestClient) -> None:
     """Single-agent export switches to zip when the agent has attached assets."""
     headers = _auth_headers(
@@ -226,6 +284,82 @@ def test_export_agent_with_skills_and_markdown_files_returns_zip_bundle(client: 
         assert 'name: "backend-audit"' in skill_content
         assert 'description: "Repository audit skill."' in skill_content
         assert "# Backend audit" in skill_content
+
+
+def test_export_agent_with_assets_returns_claude_zip_bundle(client: TestClient) -> None:
+    """Claude agent export switches to zip when the agent has attached assets."""
+    headers = _auth_headers(
+        client,
+        email="claude-agent-bundle@example.com",
+        display_name="Claude Agent Bundle",
+    )
+
+    client.post(
+        "/api/v1/agents",
+        headers=headers,
+        json={
+            "slug": "claude-agent-bundle",
+            "title": "Claude Agent Bundle",
+            "short_description": "Published agent with Claude bundle attachments.",
+            "category": "backend",
+        },
+    )
+    client.post("/api/v1/agents/claude-agent-bundle/publish", headers=headers)
+    _configure_agent_profile(
+        client,
+        headers=headers,
+        slug="claude-agent-bundle",
+        export_targets=["claude_code"],
+        manifest_json={
+            "instructions": "Inspect backend code and use local playbooks when helpful.",
+            "claude": {
+                "description": "Backend implementation specialist.",
+                "developer_instructions": "Start from the playbooks before changing code.",
+            },
+        },
+        skills=[
+            {
+                "slug": "backend-audit",
+                "description": "Repository audit skill.",
+                "content": "Inspect backend boundaries and capture risks.",
+            }
+        ],
+        markdown_files=[
+            {
+                "path": "AGENTS.md",
+                "content": "# Project instructions\n\nFollow repository rules.",
+            }
+        ],
+    )
+
+    export_response = client.post(
+        "/api/v1/exports/agents/claude-agent-bundle",
+        headers=headers,
+        json={"runtime_target": "claude_code"},
+    )
+    assert export_response.status_code == 201
+    payload = export_response.json()
+    parsed_result_url = urlparse(payload["result_url"])
+    assert parsed_result_url.path == "/downloads/agent/claude-agent-bundle/claude.zip"
+
+    download_response = client.get(payload["result_url"])
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"].startswith("application/zip")
+
+    with ZipFile(BytesIO(download_response.content)) as archive:
+        names = set(archive.namelist())
+        assert ".claude/agents/claude-agent-bundle.md" in names
+        assert "agents/claude-agent-bundle/AGENTS.md" in names
+        assert "agents/claude-agent-bundle/skills/backend-audit.md" in names
+        agent_markdown = archive.read(".claude/agents/claude-agent-bundle.md").decode("utf-8")
+        assert "## Project-Specific References" in agent_markdown
+        assert "`agents/claude-agent-bundle/AGENTS.md`" in agent_markdown
+        assert "`agents/claude-agent-bundle/skills/backend-audit.md`" in agent_markdown
+        skill_content = archive.read("agents/claude-agent-bundle/skills/backend-audit.md").decode(
+            "utf-8"
+        )
+        assert skill_content.startswith("# backend-audit\n")
+        assert "Repository audit skill." in skill_content
 
 
 def test_export_published_team_with_items(client: TestClient) -> None:
@@ -390,6 +524,95 @@ def test_team_export_includes_namespaced_agent_assets(client: TestClient) -> Non
         ).decode("utf-8")
         assert skill_content.startswith("---\n")
         assert 'name: "api-check"' in skill_content
+
+
+def test_team_claude_export_includes_subagents_and_namespaced_assets(client: TestClient) -> None:
+    """Claude team bundle should include `.claude/agents/*` and namespaced references."""
+    headers = _auth_headers(
+        client,
+        email="team-claude-assets@example.com",
+        display_name="Team Claude Assets",
+    )
+
+    client.post(
+        "/api/v1/agents",
+        headers=headers,
+        json={
+            "slug": "team-claude-agent",
+            "title": "Team Claude Agent",
+            "short_description": "Published agent with Claude bundle files.",
+            "category": "backend",
+        },
+    )
+    client.post("/api/v1/agents/team-claude-agent/publish", headers=headers)
+    _configure_agent_profile(
+        client,
+        headers=headers,
+        slug="team-claude-agent",
+        export_targets=["claude_code"],
+        manifest_json={
+            "instructions": "Review backend contracts and use the attached docs.",
+            "claude": {
+                "description": "Backend reviewer for API and service contracts.",
+                "model": "sonnet",
+                "permission_mode": "bypassPermissions",
+                "developer_instructions": "Inspect the repository, consult the bundled docs, then report findings.",
+            },
+        },
+        skills=[
+            {
+                "slug": "api-check",
+                "description": "API review checklist.",
+                "content": "Review endpoints, schemas, and host contracts.",
+            }
+        ],
+        markdown_files=[
+            {
+                "path": "docs/architecture.md",
+                "content": "# Architecture\n\nDocument service boundaries.",
+            }
+        ],
+    )
+
+    client.post(
+        "/api/v1/teams",
+        headers=headers,
+        json={
+            "slug": "team-claude-export",
+            "title": "Team Claude Export",
+            "description": "Published team with Claude subagents.",
+        },
+    )
+    client.post(
+        "/api/v1/teams/team-claude-export/items",
+        headers=headers,
+        json={"agent_slug": "team-claude-agent", "role_name": "reviewer"},
+    )
+    client.post("/api/v1/teams/team-claude-export/publish", headers=headers)
+
+    export_response = client.post(
+        "/api/v1/exports/teams/team-claude-export",
+        headers=headers,
+        json={"runtime_target": "claude_code"},
+    )
+    assert export_response.status_code == 201
+    parsed_result_url = urlparse(export_response.json()["result_url"])
+    assert parsed_result_url.path == "/downloads/team/team-claude-export/claude.zip"
+
+    download_response = client.get(export_response.json()["result_url"])
+    assert download_response.status_code == 200
+    with ZipFile(BytesIO(download_response.content)) as archive:
+        names = set(archive.namelist())
+        assert ".claude/agents/reviewer.md" in names
+        assert "agents/team-claude-agent/docs/architecture.md" in names
+        assert "agents/team-claude-agent/skills/api-check.md" in names
+        reviewer = archive.read(".claude/agents/reviewer.md").decode("utf-8")
+        assert 'name: "reviewer"' in reviewer
+        assert 'description: "Backend reviewer for API and service contracts."' in reviewer
+        assert 'model: "sonnet"' in reviewer
+        assert 'permissionMode: "bypassPermissions"' in reviewer
+        assert "`agents/team-claude-agent/docs/architecture.md`" in reviewer
+        assert "`agents/team-claude-agent/skills/api-check.md`" in reviewer
 
 
 def test_team_export_uses_current_agent_profile(client: TestClient) -> None:

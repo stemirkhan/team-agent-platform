@@ -38,6 +38,7 @@ class HostDiagnosticsTools(BaseModel):
     git: HostToolDiagnostics
     gh: HostToolDiagnostics
     codex: HostToolDiagnostics
+    claude: HostToolDiagnostics
     tmux: HostToolDiagnostics
 
 
