@@ -345,19 +345,19 @@ export function ExecutionBoardPanel({ locale }: ExecutionBoardPanelProps) {
       <div className="pointer-events-none absolute -right-20 top-10 h-56 w-56 rounded-full bg-brand-200/20 blur-3xl dark:bg-slate-500/10" />
       <div className="relative space-y-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-3">
             <div className="space-y-2">
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">
                 {t(locale, { ru: "Live operating view", en: "Live operating view" })}
               </p>
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-col items-start gap-3 2xl:flex-row 2xl:items-center">
                 <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-slate-50 sm:text-[2rem]">
                   {t(locale, { ru: "Execution flow by lane", en: "Execution flow by lane" })}
                 </h2>
                 {user ? (
                   <div
                     aria-label={t(locale, { ru: "Метрики доски", en: "Board metrics" })}
-                    className="flex items-center divide-x divide-slate-200 overflow-hidden rounded-full border border-slate-200 bg-white/80 shadow-sm shadow-slate-200/60 backdrop-blur dark:divide-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/80 dark:shadow-black/20"
+                    className="flex max-w-full items-center divide-x divide-slate-200 overflow-hidden rounded-full border border-slate-200 bg-white/80 shadow-sm shadow-slate-200/60 backdrop-blur dark:divide-zinc-700 dark:border-zinc-700 dark:bg-zinc-950/80 dark:shadow-black/20"
                   >
                     <div className="px-4 py-1.5">
                       <BoardMetricPill
@@ -390,11 +390,11 @@ export function ExecutionBoardPanel({ locale }: ExecutionBoardPanelProps) {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 xl:max-w-[28rem] xl:justify-end">
             {user ? (
               <select
                 aria-label={t(locale, { ru: "Фильтр по репозиторию", en: "Repository filter" })}
-                className="h-10 rounded-full border border-slate-200 bg-white/90 px-4 py-1 text-sm font-medium text-slate-700 outline-none shadow-sm shadow-slate-200/60 backdrop-blur transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-brand-500 dark:focus:ring-brand-500/20"
+                className="h-10 min-w-[15rem] rounded-full border border-slate-200 bg-white/90 px-4 py-1 text-sm font-medium text-slate-700 outline-none shadow-sm shadow-slate-200/60 backdrop-blur transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-brand-500 dark:focus:ring-brand-500/20"
                 onChange={(event) => setSelectedRepository(event.target.value)}
                 value={selectedRepository}
               >
