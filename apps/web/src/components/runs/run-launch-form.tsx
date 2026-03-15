@@ -232,7 +232,11 @@ export function RunLaunchForm({
       }
     };
 
-    const intervalId = setInterval(() => { void refreshSilently(); }, 60_000);
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshSilently();
+      }
+    }, 60_000);
 
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);

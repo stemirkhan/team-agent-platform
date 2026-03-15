@@ -396,7 +396,11 @@ export function HostDiagnosticsPanel({
       }
     };
 
-    const intervalId = setInterval(() => { void runRefresh(); }, 60_000);
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void runRefresh();
+      }
+    }, 60_000);
 
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
