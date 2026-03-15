@@ -56,6 +56,13 @@ class ClaudeSessionRead(BaseModel):
     recovered_from_restart: bool = False
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    total_input_tokens: int | None = None
+    total_output_tokens: int | None = None
+    total_cache_creation_input_tokens: int | None = None
+    total_cache_read_input_tokens: int | None = None
+    total_cost_usd: float | None = None
     started_at: str
     finished_at: str | None = None
     last_output_offset: int = 0

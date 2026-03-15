@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.run import Run, RunEvent
@@ -101,6 +101,32 @@ class RunRepository:
         self.session.commit()
         self.session.refresh(run)
         return run
+
+    def update_if_status_in(
+        self,
+        run_id: UUID,
+        *,
+        statuses: list[str] | tuple[str, ...],
+        fields: dict[str, object],
+    ) -> Run | None:
+        """Persist run changes only when the current status still matches an expected value."""
+        if not statuses:
+            return None
+
+        if "updated_at" not in fields:
+            fields["updated_at"] = datetime.now(UTC)
+
+        result = self.session.execute(
+            update(Run)
+            .where(Run.id == run_id)
+            .where(Run.status.in_(tuple(statuses)))
+            .values(**fields)
+        )
+        self.session.commit()
+
+        if (result.rowcount or 0) == 0:
+            return None
+        return self.get_by_id(run_id)
 
     def create_event(
         self,

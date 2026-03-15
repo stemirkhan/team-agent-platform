@@ -46,7 +46,7 @@ The platform can:
 - materialize a runtime bundle plus `TASK.md`;
 - launch the selected runtime through the host executor;
 - stream terminal output to the UI;
-- clean runtime scaffolding, commit, push, and draft PR steps.
+- let the runtime clean scaffolding and finish commit, push, and draft PR delivery itself.
 
 The original problem was straightforward:
 

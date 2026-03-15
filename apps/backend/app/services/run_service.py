@@ -24,11 +24,9 @@ from app.schemas.run import (
 )
 from app.schemas.terminal import TerminalSessionEventsResponse, TerminalSessionRead
 from app.schemas.workspace import (
-    WorkspaceCommit,
     WorkspaceFileWrite,
     WorkspaceMaterialize,
     WorkspacePrepare,
-    WorkspacePullRequestCreate,
     WorkspaceRead,
 )
 from app.services.claude_proxy_service import ClaudeProxyService
@@ -54,7 +52,12 @@ class RunService:
         "Workspace is prepared and the runtime bundle plus `TASK.md` are materialized. "
         "Terminal execution is the next layer."
     )
-    _NO_CHANGES_TO_COMMIT_DETAIL = "Workspace has no changes to commit."
+    _SYNCABLE_RUN_STATUSES = (
+        RunStatus.STARTING_RUNTIME.value,
+        RunStatus.STARTING_CODEX.value,
+        RunStatus.RUNNING.value,
+        RunStatus.RESUMING.value,
+    )
 
     def __init__(
         self,
@@ -100,8 +103,6 @@ class RunService:
                     "tooling, and retry the run."
                 ),
             )
-        runtime_label = adapter.label
-
         team = self.team_repository.get_by_slug(payload.team_slug)
         if team is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found.")
@@ -200,6 +201,7 @@ class RunService:
                 ),
             )
             workspace_files = self._build_workspace_files(
+                run=run,
                 runtime_target=runtime_target,
                 team_slug=team.slug,
                 team_startup_prompt=team.startup_prompt,
@@ -285,19 +287,17 @@ class RunService:
         items = [self._sync_run_with_runtime_session(item) for item in items]
         return RunListResponse(items=items, total=total, limit=limit, offset=offset)
 
-    def get_run(self, run_id, current_user: User):
+    def get_run(self, run_id, current_user: User, *, sync_session: bool = True):
         """Return one run owned by the current user."""
-        run = self.run_repository.get_by_id(run_id)
-        if run is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
-        self._ensure_owner(run.created_by, current_user.id)
-        run = self._sync_run_with_runtime_session(run)
+        run = self._get_owned_run(run_id, current_user)
+        if sync_session:
+            run = self._sync_run_with_runtime_session(run)
         run.run_report = self._build_run_report(run)
         return run
 
     def list_run_events(self, run_id, current_user: User) -> RunEventListResponse:
         """Return ordered run events for one run owned by the current user."""
-        run = self.get_run(run_id, current_user)
+        run = self.get_run(run_id, current_user, sync_session=False)
         items = self.run_repository.list_events(run_id=run.id)
         return RunEventListResponse(items=items, total=len(items))
 
@@ -447,7 +447,7 @@ class RunService:
 
     def get_terminal_session(self, run_id, current_user: User) -> TerminalSessionRead:
         """Return current host-side terminal session for one run."""
-        run = self.get_run(run_id, current_user)
+        run = self.get_run(run_id, current_user, sync_session=False)
         try:
             session = self._get_runtime_adapter(run.runtime_target).get_session(str(run.id))
         except RuntimeAdapterError as exc:
@@ -462,7 +462,7 @@ class RunService:
         current_user: User,
     ) -> TerminalSessionEventsResponse:
         """Return incremental terminal output for one run."""
-        run = self.get_run(run_id, current_user)
+        run = self.get_run(run_id, current_user, sync_session=False)
         try:
             events = self._get_runtime_adapter(run.runtime_target).get_events(
                 str(run.id),
@@ -516,6 +516,7 @@ class RunService:
     def _build_workspace_files(
         self,
         *,
+        run,
         runtime_target: str,
         team_slug: str,
         team_startup_prompt: str | None,
@@ -530,6 +531,9 @@ class RunService:
     ) -> list[WorkspaceFileWrite]:
         """Return text files that should be written into the prepared workspace."""
         adapter = self._get_runtime_adapter(runtime_target)
+        commit_message = self._build_commit_message(run)
+        pr_title = self._build_pr_title(run)
+        pr_body = self._build_pr_body(run)
         task_markdown = self._build_task_markdown(
             payload=payload,
             team_startup_prompt=team_startup_prompt,
@@ -540,14 +544,29 @@ class RunService:
             issue_number=issue_number,
             issue_url=issue_url,
             issue_body=issue_body,
+            commit_message=commit_message,
+            pr_title=pr_title,
         )
         try:
-            return adapter.build_workspace_files(
+            files = adapter.build_workspace_files(
                 export_service=self.export_service,
                 team_slug=team_slug,
                 task_markdown=task_markdown,
                 codex_options=payload.codex,
             )
+            file_map = {item.path: item.content for item in files}
+            file_map[".tap/finalize_run.py"] = self._build_runtime_finalize_script(
+                repo_full_name=repo_full_name,
+                base_branch=base_branch,
+                working_branch=working_branch,
+                commit_message=commit_message,
+                pr_title=pr_title,
+                pr_body=pr_body,
+            )
+            return [
+                WorkspaceFileWrite(path=path, content=content)
+                for path, content in sorted(file_map.items())
+            ]
         except RuntimeAdapterError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -564,6 +583,8 @@ class RunService:
         issue_number: int | None,
         issue_url: str | None,
         issue_body: str | None,
+        commit_message: str,
+        pr_title: str,
     ) -> str:
         """Render the task handoff file materialized into the repo workspace."""
         lines = [
@@ -585,6 +606,21 @@ class RunService:
                 f"- Base branch: `{base_branch}`",
                 f"- Working branch: `{working_branch}`",
                 f"- Team: `{payload.team_slug}`",
+            ]
+        )
+        lines.extend(
+            [
+                "",
+                "## Required Outcome",
+                "- Complete the requested repository changes.",
+                (
+                    "- Create the draft PR yourself from the prepared working branch "
+                    "before ending the run."
+                ),
+                (
+                    "- Treat the run as incomplete until the draft PR exists, unless cleanup "
+                    "proves that no repository changes remain."
+                ),
             ]
         )
         if payload.summary:
@@ -614,7 +650,206 @@ class RunService:
                 "- Avoid modifying unrelated files.",
             ]
         )
+        lines.extend(
+            [
+                "",
+                "## SCM Finalization",
+                (
+                    "- After implementation and validation are complete, finalize the branch "
+                    "yourself from the repo root."
+                ),
+                (
+                    "- Run `python3 .tap/finalize_run.py` to remove runtime scaffolding, "
+                    "commit the remaining repo changes, push the working branch, and open "
+                    "the draft PR."
+                ),
+                "- Backend will not create the commit, push the branch, or open the PR for you.",
+                (
+                    "- If the script reports that no repository changes remain after cleanup, "
+                    "do not create an empty commit or PR."
+                ),
+                "",
+                "### Expected Git Metadata",
+                f"- Commit message: `{commit_message}`",
+                f"- Draft PR title: `{pr_title}`",
+            ]
+        )
         return "\n".join(lines).strip() + "\n"
+
+    @staticmethod
+    def _build_runtime_finalize_script(
+        *,
+        repo_full_name: str,
+        base_branch: str,
+        working_branch: str,
+        commit_message: str,
+        pr_title: str,
+        pr_body: str,
+    ) -> str:
+        """Render one runtime-invoked helper that cleans scaffolding and finalizes SCM."""
+        return f"""#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+REPO_FULL_NAME = {repo_full_name!r}
+BASE_BRANCH = {base_branch!r}
+WORKING_BRANCH = {working_branch!r}
+COMMIT_MESSAGE = {commit_message!r}
+PR_TITLE = {pr_title!r}
+PR_BODY = {pr_body!r}
+
+
+def _prune_empty_directories(start: Path, *, stop_at: Path) -> None:
+    current = start.resolve()
+    while current != stop_at:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def _restore_materialized_files(repo_root: Path) -> None:
+    state_path = repo_root.parent / ".materialized-files.json"
+    if not state_path.exists():
+        return
+
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise SystemExit(f"Materialized file state is invalid: {{state_path}}")
+
+    for relative_path, entry in payload.items():
+        if not isinstance(relative_path, str) or not isinstance(entry, dict):
+            continue
+        target_path = (repo_root / relative_path).resolve()
+        try:
+            target_path.relative_to(repo_root.resolve())
+        except ValueError as exc:
+            raise SystemExit(
+                f"Materialized file path escapes the repo root: {{relative_path}}"
+            ) from exc
+
+        existed_before = bool(entry.get("existed"))
+        previous_content = entry.get("content")
+        if existed_before:
+            if not isinstance(previous_content, str):
+                raise SystemExit(f"Materialized file state is invalid for `{{relative_path}}`.")
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(previous_content, encoding="utf-8")
+            continue
+
+        if target_path.exists():
+            target_path.unlink(missing_ok=True)
+            _prune_empty_directories(target_path.parent, stop_at=repo_root.resolve())
+
+    state_path.unlink(missing_ok=True)
+
+
+def _run(
+    args: list[str],
+    *,
+    repo_root: Path,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        args,
+        cwd=str(repo_root),
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if check and completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        if not detail:
+            detail = f"Command failed: {{' '.join(args)}}"
+        raise SystemExit(detail)
+    return completed
+
+
+def main() -> int:
+    repo_root = Path(__file__).resolve().parents[1]
+    _restore_materialized_files(repo_root)
+
+    if _run(["git", "status", "--porcelain=v1"], repo_root=repo_root).stdout.strip():
+        _run(["git", "add", "-A"], repo_root=repo_root)
+        staged_diff = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            cwd=str(repo_root),
+            check=False,
+        )
+        if staged_diff.returncode == 1:
+            _run(["git", "commit", "-m", COMMIT_MESSAGE], repo_root=repo_root)
+        elif staged_diff.returncode != 0:
+            raise SystemExit("Git failed while checking staged changes.")
+
+    ahead_count = _run(
+        ["git", "rev-list", "--count", f"{{BASE_BRANCH}}..HEAD"],
+        repo_root=repo_root,
+    ).stdout.strip()
+    if ahead_count == "0":
+        print("No repository changes remain after cleanup. Skipping push and pull request.")
+        return 0
+
+    _run(["git", "push", "--set-upstream", "origin", WORKING_BRANCH], repo_root=repo_root)
+
+    existing_pr = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "view",
+            WORKING_BRANCH,
+            "--repo",
+            REPO_FULL_NAME,
+            "--json",
+            "number,url",
+        ],
+        cwd=str(repo_root),
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if existing_pr.returncode == 0:
+        print(existing_pr.stdout.strip() or "Draft pull request already exists.")
+        return 0
+
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", delete=False) as handle:
+        handle.write(PR_BODY)
+        body_path = Path(handle.name)
+
+    try:
+        _run(
+            [
+                "gh",
+                "pr",
+                "create",
+                "--repo",
+                REPO_FULL_NAME,
+                "--base",
+                BASE_BRANCH,
+                "--head",
+                WORKING_BRANCH,
+                "--title",
+                PR_TITLE,
+                "--body-file",
+                str(body_path),
+                "--draft",
+            ],
+            repo_root=repo_root,
+        )
+    finally:
+        body_path.unlink(missing_ok=True)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
     @staticmethod
     def _build_runtime_config(
@@ -714,12 +949,7 @@ class RunService:
 
     def _sync_run_with_runtime_session(self, run):
         """Reconcile DB run state with host-side runtime session state when needed."""
-        if run.status not in {
-            RunStatus.STARTING_RUNTIME.value,
-            RunStatus.STARTING_CODEX.value,
-            RunStatus.RUNNING.value,
-            RunStatus.RESUMING.value,
-        }:
+        if run.status not in self._SYNCABLE_RUN_STATUSES:
             return run
 
         try:
@@ -812,7 +1042,10 @@ class RunService:
                     event_type=RunEventType.STATUS,
                     payload={
                         "status": RunStatus.RESUMING.value,
-                        "message": f"Host executor restarted and automatic {adapter.label} recovery is in progress.",
+                        "message": (
+                            f"Host executor restarted and automatic {adapter.label} "
+                            "recovery is in progress."
+                        ),
                     },
                 )
                 self._append_event(
@@ -825,15 +1058,11 @@ class RunService:
                 )
             return updated
 
-        self._append_runtime_terminal_audit_event(
-            run_id=run.id,
-            adapter=adapter,
-        )
-
         if session.status == "interrupted":
             interrupted_at = self._parse_terminal_timestamp(session.interrupted_at)
-            updated = self.run_repository.update(
-                run,
+            updated = self.run_repository.update_if_status_in(
+                run.id,
+                statuses=self._SYNCABLE_RUN_STATUSES,
                 fields={
                     **self._build_run_session_fields(session),
                     "status": RunStatus.INTERRUPTED.value,
@@ -841,6 +1070,13 @@ class RunService:
                     "finished_at": interrupted_at or datetime.now(UTC),
                     "interrupted_at": interrupted_at or datetime.now(UTC),
                 },
+            )
+            if updated is None:
+                refreshed = self.run_repository.get_by_id(run.id)
+                return refreshed or run
+            self._append_runtime_terminal_audit_event(
+                run_id=updated.id,
+                adapter=adapter,
             )
             self._append_event(
                 run_id=updated.id,
@@ -870,12 +1106,33 @@ class RunService:
             return updated
 
         if session.status == "completed":
-            run = self.run_repository.update(run, fields=self._build_run_session_fields(session))
-            return self._finalize_completed_run(run, session)
+            claimed = self.run_repository.update_if_status_in(
+                run.id,
+                statuses=self._SYNCABLE_RUN_STATUSES,
+                fields={
+                    **self._build_run_session_fields(session),
+                    "status": RunStatus.COMMITTING.value,
+                    "error_message": None,
+                    "finished_at": None,
+                },
+            )
+            if claimed is None:
+                refreshed = self.run_repository.get_by_id(run.id)
+                return refreshed or run
+            self._append_runtime_terminal_audit_event(
+                run_id=claimed.id,
+                adapter=adapter,
+            )
+            return self._finalize_completed_run(
+                claimed,
+                session,
+                skip_prepare_transition=True,
+            )
 
         if session.status == "cancelled":
-            updated = self.run_repository.update(
-                run,
+            updated = self.run_repository.update_if_status_in(
+                run.id,
+                statuses=self._SYNCABLE_RUN_STATUSES,
                 fields={
                     **self._build_run_session_fields(session),
                     "status": RunStatus.CANCELLED.value,
@@ -883,6 +1140,13 @@ class RunService:
                     "finished_at": self._parse_terminal_timestamp(session.finished_at)
                     or datetime.now(UTC),
                 },
+            )
+            if updated is None:
+                refreshed = self.run_repository.get_by_id(run.id)
+                return refreshed or run
+            self._append_runtime_terminal_audit_event(
+                run_id=updated.id,
+                adapter=adapter,
             )
             self._append_event(
                 run_id=updated.id,
@@ -894,8 +1158,9 @@ class RunService:
             )
             return updated
 
-        updated = self.run_repository.update(
-            run,
+        updated = self.run_repository.update_if_status_in(
+            run.id,
+            statuses=self._SYNCABLE_RUN_STATUSES,
             fields={
                 **self._build_run_session_fields(session),
                 "status": RunStatus.FAILED.value,
@@ -903,6 +1168,13 @@ class RunService:
                 "finished_at": self._parse_terminal_timestamp(session.finished_at)
                 or datetime.now(UTC),
             },
+        )
+        if updated is None:
+            refreshed = self.run_repository.get_by_id(run.id)
+            return refreshed or run
+        self._append_runtime_terminal_audit_event(
+            run_id=updated.id,
+            adapter=adapter,
         )
         self._append_event(
             run_id=updated.id,
@@ -1009,7 +1281,8 @@ class RunService:
     ) -> dict[str, object]:
         """Return run fields that mirror host-side runtime session metadata."""
         adapter = self._get_runtime_adapter(
-            getattr(session, "runtime_target", None) or self._infer_runtime_target_from_session(session)
+            getattr(session, "runtime_target", None)
+            or self._infer_runtime_target_from_session(session)
         )
         fields: dict[str, object] = {
             **adapter.build_session_identity_payload(session),
@@ -1068,99 +1341,40 @@ class RunService:
             payload=payload,
         )
 
-    def _finalize_completed_run(self, run, session: RuntimeSessionRead):
-        """Convert a completed runtime session into commit, push, and draft-PR artifacts."""
+    def _finalize_completed_run(
+        self,
+        run,
+        session: RuntimeSessionRead,
+        *,
+        skip_prepare_transition: bool = False,
+    ):
+        """Conclude one completed runtime session from the observed workspace delivery state."""
         if run.workspace_id is None:
             return self._fail_run(
                 run,
                 detail="Run is missing workspace metadata required for post-run finalization.",
             )
 
-        adapter = self._get_runtime_adapter(run.runtime_target)
-        runtime_label = adapter.label
-        runtime_slug = adapter.summary_label
-
         try:
-            run = self._transition_run(
-                run,
-                status_value=RunStatus.COMMITTING,
-                message=(
-                    f"Cleaning temporary runtime files and preparing a git commit "
-                    f"for the {runtime_slug} changes."
-                ),
-            )
-            workspace = self.workspace_proxy_service.cleanup_workspace(run.workspace_id)
-
-            if not workspace.has_changes:
-                return self._complete_run(
+            prepare_message = "Inspecting runtime-managed SCM results in the prepared workspace."
+            if skip_prepare_transition and run.status == RunStatus.COMMITTING.value:
+                self._append_event(
+                    run_id=run.id,
+                    event_type=RunEventType.STATUS,
+                    payload={
+                        "status": RunStatus.COMMITTING.value,
+                        "message": prepare_message,
+                    },
+                )
+            else:
+                run = self._transition_run(
                     run,
-                    summary_text=session.summary_text,
-                    message=(
-                        f"{runtime_label} session completed with no repository changes to commit."
-                    ),
+                    status_value=RunStatus.COMMITTING,
+                    message=prepare_message,
                 )
-
-            recovered = self._recover_from_existing_workspace_finalization(
+            return self._resolve_runtime_managed_workspace_outcome(
                 run,
                 summary_text=session.summary_text,
-            )
-            if recovered is not None:
-                return recovered
-
-            run = self._transition_run(
-                run,
-                status_value=RunStatus.COMMITTING,
-                message=f"Creating a git commit from the {runtime_slug} changes.",
-            )
-            try:
-                workspace = self.workspace_proxy_service.commit_workspace(
-                    run.workspace_id,
-                    WorkspaceCommit(message=self._build_commit_message(run)),
-                )
-            except WorkspaceProxyServiceError as exc:
-                if exc.detail == self._NO_CHANGES_TO_COMMIT_DETAIL:
-                    recovered = self._recover_from_existing_workspace_finalization(
-                        run,
-                        summary_text=session.summary_text,
-                    )
-                    if recovered is not None:
-                        return recovered
-                raise
-            run = self.run_repository.update(
-                run,
-                fields={
-                    "working_branch": workspace.working_branch,
-                    "workspace_path": workspace.workspace_path,
-                    "repo_path": workspace.repo_path,
-                    "summary": session.summary_text or run.summary,
-                },
-            )
-
-            run = self._transition_run(
-                run,
-                status_value=RunStatus.PUSHING,
-                message="Pushing the working branch to origin.",
-            )
-            workspace = self.workspace_proxy_service.push_workspace(run.workspace_id)
-
-            run = self._transition_run(
-                run,
-                status_value=RunStatus.CREATING_PR,
-                message=f"Creating a draft pull request for the {runtime_slug} changes.",
-            )
-            workspace = self.workspace_proxy_service.create_pull_request(
-                run.workspace_id,
-                WorkspacePullRequestCreate(
-                    title=self._build_pr_title(run),
-                    body=self._build_pr_body(run),
-                    draft=True,
-                ),
-            )
-            return self._complete_run(
-                run,
-                summary_text=session.summary_text,
-                message="Draft pull request created from the working branch.",
-                pr_url=workspace.pull_request_url,
             )
         except WorkspaceProxyServiceError as exc:
             return self._fail_run(run, detail=exc.detail)
@@ -1205,20 +1419,19 @@ class RunService:
             )
         return updated
 
-    def _recover_from_existing_workspace_finalization(
+    def _resolve_runtime_managed_workspace_outcome(
         self,
         run,
         *,
         summary_text: str | None,
     ):
-        """Resume or complete finalization from the current workspace state."""
+        """Conclude one run strictly from runtime-managed workspace delivery state."""
         if run.workspace_id is None:
             return None
 
         workspace = self.workspace_proxy_service.get_workspace(run.workspace_id)
         adapter = self._get_runtime_adapter(run.runtime_target)
         runtime_label = adapter.label
-        runtime_slug = adapter.summary_label
         run = self.run_repository.update(
             run,
             fields={
@@ -1229,60 +1442,39 @@ class RunService:
             },
         )
 
-        if workspace.status == "pull_request_created":
+        if workspace.status == "pull_request_created" and not workspace.has_changes:
             return self._complete_run(
                 run,
                 summary_text=summary_text,
-                message="Draft pull request created from the working branch.",
+                message="Runtime created the draft pull request from the working branch.",
                 pr_url=workspace.pull_request_url,
+            )
+
+        if workspace.status == "pull_request_created":
+            return self._fail_run(
+                run,
+                detail=(
+                    f"{runtime_label} created a draft pull request but left additional "
+                    "repository changes unfinalized in the workspace."
+                ),
             )
 
         if workspace.status == "pushed":
-            run = self._transition_run(
+            return self._fail_run(
                 run,
-                status_value=RunStatus.CREATING_PR,
-                message=f"Creating a draft pull request for the {runtime_slug} changes.",
-            )
-            workspace = self.workspace_proxy_service.create_pull_request(
-                run.workspace_id,
-                WorkspacePullRequestCreate(
-                    title=self._build_pr_title(run),
-                    body=self._build_pr_body(run),
-                    draft=True,
+                detail=(
+                    f"{runtime_label} pushed the working branch but did not open the draft "
+                    "pull request. The runtime must finish the PR step itself."
                 ),
-            )
-            return self._complete_run(
-                run,
-                summary_text=summary_text,
-                message="Draft pull request created from the working branch.",
-                pr_url=workspace.pull_request_url,
             )
 
         if workspace.status == "committed":
-            run = self._transition_run(
+            return self._fail_run(
                 run,
-                status_value=RunStatus.PUSHING,
-                message="Pushing the working branch to origin.",
-            )
-            workspace = self.workspace_proxy_service.push_workspace(run.workspace_id)
-            run = self._transition_run(
-                run,
-                status_value=RunStatus.CREATING_PR,
-                message=f"Creating a draft pull request for the {runtime_slug} changes.",
-            )
-            workspace = self.workspace_proxy_service.create_pull_request(
-                run.workspace_id,
-                WorkspacePullRequestCreate(
-                    title=self._build_pr_title(run),
-                    body=self._build_pr_body(run),
-                    draft=True,
+                detail=(
+                    f"{runtime_label} created a local commit but did not push the working "
+                    "branch or open the draft pull request."
                 ),
-            )
-            return self._complete_run(
-                run,
-                summary_text=summary_text,
-                message="Draft pull request created from the working branch.",
-                pr_url=workspace.pull_request_url,
             )
 
         if workspace.status == "prepared" and not workspace.has_changes:
@@ -1290,11 +1482,18 @@ class RunService:
                 run,
                 summary_text=summary_text,
                 message=(
-                    f"{runtime_label} session completed with no repository changes to commit."
+                    f"{runtime_label} session completed with no repository changes after "
+                    "runtime cleanup."
                 ),
             )
 
-        return None
+        return self._fail_run(
+            run,
+            detail=(
+                f"{runtime_label} session completed but left repository changes unfinalized. "
+                "The runtime must run `python3 .tap/finalize_run.py` before finishing the task."
+            ),
+        )
 
     def _build_commit_message(self, run) -> str:
         """Return a deterministic git commit message for one finalized run."""
@@ -1554,3 +1753,11 @@ class RunService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only the run creator can access this run.",
             )
+
+    def _get_owned_run(self, run_id, current_user: User):
+        """Load one run and require the current user to own it."""
+        run = self.run_repository.get_by_id(run_id)
+        if run is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+        self._ensure_owner(run.created_by, current_user.id)
+        return run

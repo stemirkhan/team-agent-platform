@@ -21,7 +21,7 @@ With the current platform you can:
 - materialize a runtime bundle and `TASK.md` inside a prepared workspace;
 - run `codex` or `claude`, plus `git` and `gh`, through a host-side execution layer;
 - watch terminal output and run events in the browser;
-- create a branch, push it, and open a draft PR;
+- require the runtime to finalize the branch, push it, and open the draft PR itself;
 - recover interrupted runs through resume and auto-recovery flows.
 
 ## High-level architecture
@@ -185,8 +185,8 @@ At a high level, one run goes through these stages:
 6. stream terminal output and run events;
 7. clean temporary runtime files from the workspace;
 8. create a commit when the runtime produced repository changes;
-9. push the branch;
-10. create a draft PR.
+9. require the runtime to finalize commit, push, and draft PR from the prepared workspace;
+10. fail the run if the runtime exits without fully finishing SCM delivery.
 
 If the host executor or transport is interrupted, the platform supports resume and auto-recovery for recoverable sessions.
 

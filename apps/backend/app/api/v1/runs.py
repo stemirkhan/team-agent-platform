@@ -128,7 +128,7 @@ async def stream_run_terminal(
         return
 
     try:
-        service.get_run(run_id, user)
+        service.get_run(run_id, user, sync_session=False)
     except Exception:
         await websocket.close(code=4403, reason="Forbidden")
         return

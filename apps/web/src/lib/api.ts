@@ -308,6 +308,13 @@ export type TerminalSessionRead = {
   recovered_from_restart: boolean;
   input_tokens: number | null;
   output_tokens: number | null;
+  cache_creation_input_tokens: number | null;
+  cache_read_input_tokens: number | null;
+  total_input_tokens: number | null;
+  total_output_tokens: number | null;
+  total_cache_creation_input_tokens: number | null;
+  total_cache_read_input_tokens: number | null;
+  total_cost_usd: number | null;
   started_at: string;
   finished_at: string | null;
   last_output_offset: number;
