@@ -456,80 +456,71 @@ function ExecutionBoardCard({
   run: Run;
   showRepository: boolean;
 }) {
-  const showErrorMarker = Boolean(
-    run.error_message &&
-      (run.status === "interrupted" || run.status === "failed" || run.status === "cancelled")
-  );
-  const timestampLabel =
-    run.finished_at &&
-    (run.status === "completed" ||
-      run.status === "interrupted" ||
-      run.status === "failed" ||
-      run.status === "cancelled")
-      ? t(locale, { ru: "Завершен", en: "Finished" })
-      : t(locale, { ru: "Создан", en: "Created" });
-  const timestampValue =
-    run.finished_at &&
-    (run.status === "completed" ||
-      run.status === "interrupted" ||
-      run.status === "failed" ||
-      run.status === "cancelled")
-      ? run.finished_at
-      : run.created_at;
+  const isTerminal =
+    run.status === "completed" ||
+    run.status === "interrupted" ||
+    run.status === "failed" ||
+    run.status === "cancelled";
+
+  const showErrorMarker = Boolean(run.error_message && isTerminal);
+
+  const timestampLabel = run.finished_at && isTerminal
+    ? t(locale, { ru: "Завершен", en: "Finished" })
+    : t(locale, { ru: "Создан", en: "Created" });
+
+  const timestampValue = run.finished_at && isTerminal
+    ? run.finished_at
+    : run.created_at;
 
   return (
-    <article className="min-w-0 rounded-2xl border border-white/70 bg-white p-4 shadow-sm shadow-slate-200/70 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <RunStatusBadge locale={locale} status={run.status} />
-        </div>
-
-        {run.pr_url ? (
-          <a href={run.pr_url} rel="noreferrer" target="_blank">
-            <Button className="h-9 w-9 shrink-0 px-0" size="sm" type="button" variant="ghost">
-              <ExternalLink className="h-4 w-4" />
-            </Button>
-          </a>
-        ) : null}
-      </div>
-
-      <div className="mt-3 min-w-0 space-y-2">
-        <h4 className="line-clamp-2 text-lg font-black leading-6 text-slate-900 dark:text-slate-50">
+    <article className="min-w-0 rounded-2xl border border-white/70 bg-white shadow-sm shadow-slate-200/70 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20">
+      {/* Card header: title is the primary anchor */}
+      <div className="px-4 pt-4 pb-3">
+        <h4 className="truncate text-sm font-semibold leading-5 text-slate-900 dark:text-slate-50" title={run.title}>
           {run.title}
         </h4>
 
-        {showRepository ? (
-          <p className="truncate text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-            {run.repo_full_name}
-          </p>
-        ) : null}
-
-        <p className="truncate text-sm font-medium text-slate-500 dark:text-slate-400">{run.team_title}</p>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
-          {run.issue_number ? (
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 dark:bg-zinc-800">
-              {t(locale, {
-                ru: `Issue #${run.issue_number}`,
-                en: `Issue #${run.issue_number}`
-              })}
-            </span>
+        {/* Context row: repo and team on the same line to save vertical space */}
+        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+          {showRepository ? (
+            <>
+              <span className="min-w-0 truncate font-medium" title={run.repo_full_name}>
+                {run.repo_full_name}
+              </span>
+              <span className="shrink-0 text-slate-300 dark:text-zinc-600" aria-hidden="true">·</span>
+            </>
           ) : null}
-          {showErrorMarker ? (
-            <span className="rounded-full bg-rose-100 px-2.5 py-1 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
-              {t(locale, { ru: "Есть ошибка", en: "Has error" })}
-            </span>
-          ) : null}
+          <span className="min-w-0 truncate" title={run.team_title}>
+            {run.team_title}
+          </span>
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-200 pt-3 dark:border-zinc-800">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+      {/* Status + meta row */}
+      <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
+        <RunStatusBadge locale={locale} status={run.status} />
+
+        {run.issue_number ? (
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-zinc-800 dark:text-slate-300">
+            #{run.issue_number}
+          </span>
+        ) : null}
+
+        {showErrorMarker ? (
+          <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
+            {t(locale, { ru: "Ошибка", en: "Error" })}
+          </span>
+        ) : null}
+      </div>
+
+      {/* Footer: timestamp left, actions right */}
+      <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-4 py-2.5 dark:border-zinc-800/80">
+        <div className="min-w-0 flex items-baseline gap-1.5">
+          <span className="shrink-0 text-[11px] font-medium text-slate-400 dark:text-slate-500">
             {timestampLabel}
-          </p>
+          </span>
           <LocalizedTimestamp
-            className="mt-1 block text-sm font-medium text-slate-900 dark:text-slate-100"
+            className="truncate text-xs font-semibold text-slate-600 dark:text-slate-300"
             dateStyle="short"
             locale={locale}
             timeStyle={undefined}
@@ -537,11 +528,28 @@ function ExecutionBoardCard({
           />
         </div>
 
-        <Link href={`/runs/${run.id}`}>
-          <Button size="sm" variant="secondary">
-            {t(locale, { ru: "Открыть", en: "Open" })}
-          </Button>
-        </Link>
+        <div className="flex shrink-0 items-center gap-1">
+          {run.pr_url ? (
+            <a
+              href={run.pr_url}
+              rel="noreferrer"
+              target="_blank"
+              aria-label={t(locale, { ru: "Открыть PR", en: "Open PR" })}
+              title={t(locale, { ru: "Открыть PR", en: "Open PR" })}
+            >
+              <Button className="h-7 gap-1 px-2 text-xs" size="sm" type="button" variant="ghost">
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span>PR</span>
+              </Button>
+            </a>
+          ) : null}
+
+          <Link href={`/runs/${run.id}`}>
+            <Button className="h-7 px-2.5 text-xs" size="sm" variant="secondary">
+              {t(locale, { ru: "Открыть", en: "Open" })}
+            </Button>
+          </Link>
+        </div>
       </div>
     </article>
   );
