@@ -1,19 +1,17 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   AlertTriangle,
   Bot,
   CheckCircle2,
   GitBranch,
   Github,
-  RefreshCcw,
   ServerCog,
   Sparkles,
   TerminalSquare
 } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import {
   refreshHostReadiness,
   type HostDiagnosticsSnapshot,
@@ -364,27 +362,56 @@ export function HostDiagnosticsPanel({
 }: HostDiagnosticsPanelProps) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [error, setError] = useState(initialError);
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      const nextSnapshot = await refreshHostReadiness();
-      setSnapshot(nextSnapshot);
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : t(locale, {
-              ru: "Не удалось обновить диагностику.",
-              en: "Failed to refresh diagnostics."
-            })
-      );
-    } finally {
-      setIsRefreshing(false);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function runRefresh() {
+      try {
+        const nextSnapshot = await refreshHostReadiness();
+        if (!cancelled) {
+          setSnapshot(nextSnapshot);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : t(locale, {
+                  ru: "Не удалось обновить диагностику.",
+                  en: "Failed to refresh diagnostics."
+                })
+          );
+        }
+      }
     }
-  };
+
+    void runRefresh();
+
+    const handleFocus = () => { void runRefresh(); };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void runRefresh();
+      }
+    };
+
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void runRefresh();
+      }
+    }, 60_000);
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [locale]);
 
   return (
     <div className="space-y-6">
@@ -422,12 +449,6 @@ export function HostDiagnosticsPanel({
             </p>
           </div>
 
-          <Button onClick={handleRefresh} size="sm" variant="secondary">
-            <RefreshCcw className={`mr-2 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-            {isRefreshing
-              ? t(locale, { ru: "Обновление...", en: "Refreshing..." })
-              : t(locale, { ru: "Обновить", en: "Refresh" })}
-          </Button>
         </div>
 
         {error ? (

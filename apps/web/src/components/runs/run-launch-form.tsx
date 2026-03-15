@@ -9,7 +9,6 @@ import {
   FolderGit2,
   Loader2,
   Play,
-  RefreshCcw,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -42,6 +41,7 @@ import {
   type Team
 } from "@/lib/api";
 import { formatAuthLoading, t, type Locale } from "@/lib/i18n";
+import { LocalizedTimestamp } from "@/components/ui/localized-timestamp";
 
 type RunLaunchFormProps = {
   locale: Locale;
@@ -161,19 +161,6 @@ export function RunLaunchForm({
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [readinessSnapshot, setReadinessSnapshot] = useState(readiness);
-  const [refreshingReadiness, setRefreshingReadiness] = useState(false);
-
-  async function refreshReadiness() {
-    setRefreshingReadiness(true);
-    try {
-      const nextSnapshot = await refreshHostReadiness(runtimeTarget);
-      setReadinessSnapshot(nextSnapshot);
-    } catch {
-      return;
-    } finally {
-      setRefreshingReadiness(false);
-    }
-  }
 
   useEffect(() => {
     setReadinessSnapshot(readiness);
@@ -238,20 +225,25 @@ export function RunLaunchForm({
 
     void refreshSilently();
 
-    const handleFocus = () => {
-      void refreshSilently();
-    };
+    const handleFocus = () => { void refreshSilently(); };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         void refreshSilently();
       }
     };
 
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshSilently();
+      }
+    }, 60_000);
+
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
+      clearInterval(intervalId);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
@@ -654,16 +646,10 @@ export function RunLaunchForm({
               <Sparkles className="h-3.5 w-3.5" />
               {t(locale, { ru: "Открыть диагностику", en: "Open diagnostics" })}
             </Link>
-            <Button className="rounded-full" onClick={() => void refreshReadiness()} size="sm" type="button" variant="secondary">
-              <RefreshCcw className={`mr-2 h-3.5 w-3.5 ${refreshingReadiness ? "animate-spin" : ""}`} />
-              {refreshingReadiness
-                ? t(locale, { ru: "Обновление...", en: "Refreshing..." })
-                : t(locale, { ru: "Обновить readiness", en: "Refresh readiness" })}
-            </Button>
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           <span
             className={[
               "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold",
@@ -677,6 +663,12 @@ export function RunLaunchForm({
               ? t(locale, { ru: "Нужна диагностика", en: "Diagnostics required" })
               : t(locale, { ru: "Host execution готов", en: "Host execution ready" })}
           </span>
+          {effectiveReadiness?.generated_at ? (
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {t(locale, { ru: "Обновлено:", en: "Updated:" })}{" "}
+              <LocalizedTimestamp locale={locale} value={effectiveReadiness.generated_at} />
+            </span>
+          ) : null}
           {user ? (
             <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-950 dark:text-slate-200 dark:ring-zinc-700">
               <UserRound className="h-3.5 w-3.5" />
