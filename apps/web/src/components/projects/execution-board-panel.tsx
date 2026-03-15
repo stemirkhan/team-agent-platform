@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ExternalLink, Loader2, Play, RefreshCcw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { RunStatusBadge } from "@/components/runs/run-status-badge";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,9 @@ const laneStatusMap: Record<RunsBoardLane, RunStatus[]> = {
   completed: ["completed"],
   failed: ["interrupted", "failed", "cancelled"]
 };
+
+const boardAutoScrollEdgePx = 96;
+const boardAutoScrollMaxStep = 18;
 
 function buildBoardColumns(locale: Locale): BoardColumn[] {
   return [
@@ -215,6 +218,9 @@ export function ExecutionBoardPanel({ locale }: ExecutionBoardPanelProps) {
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const boardScrollerRef = useRef<HTMLDivElement | null>(null);
+  const boardAutoScrollFrameRef = useRef<number | null>(null);
+  const boardAutoScrollVelocityRef = useRef(0);
 
   const boardColumns = useMemo(() => buildBoardColumns(locale), [locale]);
 
@@ -338,6 +344,96 @@ export function ExecutionBoardPanel({ locale }: ExecutionBoardPanelProps) {
   }, [runs]);
 
   const totalRuns = runs.length;
+
+  function stopBoardAutoScroll() {
+    boardAutoScrollVelocityRef.current = 0;
+
+    if (boardAutoScrollFrameRef.current !== null) {
+      cancelAnimationFrame(boardAutoScrollFrameRef.current);
+      boardAutoScrollFrameRef.current = null;
+    }
+  }
+
+  function startBoardAutoScroll() {
+    if (boardAutoScrollFrameRef.current !== null) {
+      return;
+    }
+
+    const tick = () => {
+      const container = boardScrollerRef.current;
+      if (!container) {
+        boardAutoScrollFrameRef.current = null;
+        return;
+      }
+
+      const velocity = boardAutoScrollVelocityRef.current;
+      const maxScrollLeft = container.scrollWidth - container.clientWidth;
+
+      if (velocity === 0 || maxScrollLeft <= 0) {
+        boardAutoScrollFrameRef.current = null;
+        return;
+      }
+
+      const nextScrollLeft = Math.max(0, Math.min(container.scrollLeft + velocity, maxScrollLeft));
+      if (nextScrollLeft === container.scrollLeft) {
+        stopBoardAutoScroll();
+        return;
+      }
+
+      container.scrollLeft = nextScrollLeft;
+      boardAutoScrollFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    boardAutoScrollFrameRef.current = requestAnimationFrame(tick);
+  }
+
+  function updateBoardAutoScroll(clientX: number) {
+    const container = boardScrollerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const maxScrollLeft = container.scrollWidth - container.clientWidth;
+    if (maxScrollLeft <= 0) {
+      stopBoardAutoScroll();
+      return;
+    }
+
+    const bounds = container.getBoundingClientRect();
+    let velocity = 0;
+
+    if (clientX <= bounds.left + boardAutoScrollEdgePx) {
+      const ratio = 1 - (clientX - bounds.left) / boardAutoScrollEdgePx;
+      velocity = -Math.max(0, Math.min(1, ratio)) * boardAutoScrollMaxStep;
+      if (container.scrollLeft <= 0) {
+        velocity = 0;
+      }
+    } else if (clientX >= bounds.right - boardAutoScrollEdgePx) {
+      const ratio = 1 - (bounds.right - clientX) / boardAutoScrollEdgePx;
+      velocity = Math.max(0, Math.min(1, ratio)) * boardAutoScrollMaxStep;
+      if (container.scrollLeft >= maxScrollLeft) {
+        velocity = 0;
+      }
+    }
+
+    boardAutoScrollVelocityRef.current = velocity;
+
+    if (velocity === 0) {
+      stopBoardAutoScroll();
+      return;
+    }
+
+    startBoardAutoScroll();
+  }
+
+  useEffect(() => {
+    return () => {
+      boardAutoScrollVelocityRef.current = 0;
+      if (boardAutoScrollFrameRef.current !== null) {
+        cancelAnimationFrame(boardAutoScrollFrameRef.current);
+      }
+    };
+  }, []);
 
   return (
     <section className="relative overflow-hidden rounded-[2rem] border border-slate-200/80 bg-white/90 p-6 shadow-sm shadow-slate-200/70 dark:border-zinc-800 dark:bg-zinc-950/95 dark:shadow-black/20">
@@ -465,63 +561,70 @@ export function ExecutionBoardPanel({ locale }: ExecutionBoardPanelProps) {
         ) : null}
 
         {user && totalRuns > 0 ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5 xl:items-start">
-            {boardColumns.map((column) => (
-              <section
-                className={cn(
-                  "relative flex min-h-[20rem] self-start flex-col overflow-hidden rounded-[1.75rem] border p-4 shadow-sm shadow-slate-200/60 dark:shadow-black/20",
-                  column.columnClassName
-                )}
-                key={column.key}
-              >
-                <div
-                  className={cn("pointer-events-none absolute inset-x-0 top-0 h-28", column.columnGlowClassName)}
-                />
-                <div className="relative mb-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p
+          <div
+            className="-mx-2 overflow-x-auto px-2 pb-3"
+            onMouseLeave={stopBoardAutoScroll}
+            onMouseMove={(event) => updateBoardAutoScroll(event.clientX)}
+            ref={boardScrollerRef}
+          >
+            <div className="flex min-w-max items-start gap-4">
+              {boardColumns.map((column) => (
+                <section
+                  className={cn(
+                    "relative flex min-h-[20rem] w-[21rem] flex-none flex-col overflow-hidden rounded-[1.75rem] border p-4 shadow-sm shadow-slate-200/60 dark:shadow-black/20",
+                    column.columnClassName
+                  )}
+                  key={column.key}
+                >
+                  <div
+                    className={cn("pointer-events-none absolute inset-x-0 top-0 h-28", column.columnGlowClassName)}
+                  />
+                  <div className="relative mb-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p
+                          className={cn(
+                            "mb-2 inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
+                            column.headerBadgeClassName
+                          )}
+                        >
+                          {column.eyebrow}
+                        </p>
+                        <h3 className="text-lg font-black text-slate-900 dark:text-slate-50">
+                          {column.title}
+                        </h3>
+                      </div>
+                      <span
                         className={cn(
-                          "mb-2 inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
-                          column.headerBadgeClassName
+                          "rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
+                          column.countClassName
                         )}
                       >
-                        {column.eyebrow}
-                      </p>
-                      <h3 className="text-lg font-black text-slate-900 dark:text-slate-50">
-                        {column.title}
-                      </h3>
+                        {groupedRuns[column.key].length}
+                      </span>
                     </div>
-                    <span
-                      className={cn(
-                        "rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
-                        column.countClassName
-                      )}
-                    >
-                      {groupedRuns[column.key].length}
-                    </span>
+                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{column.description}</p>
                   </div>
-                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{column.description}</p>
-                </div>
 
-                <div className="relative space-y-3">
-                  {groupedRuns[column.key].length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-slate-300/80 bg-white/70 px-4 py-4 text-sm text-slate-500 dark:border-zinc-700 dark:bg-zinc-950/50 dark:text-slate-400">
-                      {column.emptyLabel}
-                    </div>
-                  ) : null}
+                  <div className="relative space-y-3">
+                    {groupedRuns[column.key].length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-300/80 bg-white/70 px-4 py-4 text-sm text-slate-500 dark:border-zinc-700 dark:bg-zinc-950/50 dark:text-slate-400">
+                        {column.emptyLabel}
+                      </div>
+                    ) : null}
 
-                  {groupedRuns[column.key].map((run) => (
-                    <ExecutionBoardCard
-                      key={run.id}
-                      locale={locale}
-                      run={run}
-                      showRepository={selectedRepository === "all"}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
+                    {groupedRuns[column.key].map((run) => (
+                      <ExecutionBoardCard
+                        key={run.id}
+                        locale={locale}
+                        run={run}
+                        showRepository={selectedRepository === "all"}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
           </div>
         ) : null}
       </div>
