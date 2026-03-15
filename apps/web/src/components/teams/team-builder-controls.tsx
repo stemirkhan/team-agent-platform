@@ -707,7 +707,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
               </label>
 
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-                {t(locale, { ru: "Стартовый промт Codex", en: "Codex startup prompt" })}
+                {t(locale, { ru: "Стартовый runtime-промт", en: "Runtime startup prompt" })}
                 <textarea
                   className="mt-1 min-h-36 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                   onChange={(event) => setSettingsStartupPrompt(event.target.value)}

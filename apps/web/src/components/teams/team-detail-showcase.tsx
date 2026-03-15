@@ -35,6 +35,10 @@ type StartupPromptCardProps = {
   onTeamUpdated: (team: TeamDetails) => void;
 };
 
+function teamRuntimeLabel(locale: Locale): string {
+  return t(locale, { ru: "выбирается при запуске", en: "selected per run" });
+}
+
 function StartupPromptCard({ locale, team, onTeamUpdated }: StartupPromptCardProps) {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
@@ -147,7 +151,7 @@ function StartupPromptCard({ locale, team, onTeamUpdated }: StartupPromptCardPro
         <div className="flex items-center gap-2">
           <PlaySquare className="h-4 w-4 text-slate-500 dark:text-slate-400" />
           <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-            {t(locale, { ru: "Стартовый промт Codex", en: "Codex startup prompt" })}
+            {t(locale, { ru: "Стартовый runtime-промт", en: "Runtime startup prompt" })}
           </h2>
         </div>
         {canEditStartupPrompt ? (
@@ -183,8 +187,8 @@ function StartupPromptCard({ locale, team, onTeamUpdated }: StartupPromptCardPro
         <form className="mt-4 space-y-4" id="team-startup-prompt-form" onSubmit={onSaveStartupPrompt}>
           <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
             {t(locale, {
-              ru: "Этот стартовый промт добавляется в TASK.md и влияет на начальный prompt Codex для каждого нового run команды.",
-              en: "This startup prompt is added to TASK.md and becomes part of the initial Codex prompt for every new team run."
+              ru: "Этот стартовый промт добавляется в TASK.md и влияет на начальный runtime prompt для каждого нового run команды.",
+              en: "This startup prompt is added to TASK.md and becomes part of the initial runtime prompt for every new team run."
             })}
           </p>
           <textarea
@@ -273,7 +277,7 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
     {
       id: "export" as const,
       label: t(locale, { ru: "Export", en: "Export" }),
-      note: t(locale, { ru: "codex bundle", en: "codex bundle" })
+      note: t(locale, { ru: "runtime bundle", en: "runtime bundle" })
     }
   ];
 
@@ -400,7 +404,7 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
             </div>
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Runtime", en: "Runtime" })}</dt>
-              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">codex</dd>
+              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">{teamRuntimeLabel(locale)}</dd>
             </div>
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Startup prompt", en: "Startup prompt" })}</dt>
@@ -479,7 +483,7 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
                 </span>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-950/90 dark:text-slate-200 dark:ring-zinc-700">
                   <Sparkles className="h-3.5 w-3.5" />
-                  codex
+                  {teamRuntimeLabel(locale)}
                 </span>
               </div>
 
@@ -493,8 +497,8 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
                 <p className="max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-300">
                   {teamState.description ??
                     t(locale, {
-                      ru: "Собранная команда агентов для локального Codex execution workflow.",
-                      en: "An assembled agent team for the local Codex execution workflow."
+                      ru: "Собранная команда агентов для локального runtime execution workflow.",
+                      en: "An assembled agent team for the local runtime execution workflow."
                     })}
                 </p>
               </div>
@@ -516,7 +520,7 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
                     {t(locale, { ru: "Runtime", en: "Runtime" })}
                   </p>
-                  <p className="font-semibold text-slate-900 dark:text-slate-100">codex</p>
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">{teamRuntimeLabel(locale)}</p>
                 </div>
               </div>
             </div>
@@ -538,7 +542,7 @@ export function TeamDetailShowcase({ team, locale }: TeamDetailShowcaseProps) {
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950/90">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-                  {t(locale, { ru: "Codex bundle", en: "Codex bundle" })}
+                  {t(locale, { ru: "Runtime bundle", en: "Runtime bundle" })}
                 </p>
                 <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
                   {t(locale, { ru: "командный runtime", en: "team runtime" })}

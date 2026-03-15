@@ -487,8 +487,8 @@ export function HostDiagnosticsPanel({
               <p className="text-sm text-slate-700 dark:text-slate-200">
                 {snapshot.effective_ready
                   ? t(locale, {
-                      ru: "Текущий execution source готов к запуску GitHub/Codex workflow.",
-                      en: "The current execution source is ready to run the GitHub/Codex workflow."
+                      ru: "Текущий execution source готов к запуску GitHub- и runtime-workflow.",
+                      en: "The current execution source is ready to run GitHub and runtime workflows."
                     })
                   : t(locale, {
                       ru: "Текущий execution source еще не готов. Исправь проблемы ниже, прежде чем запускать run-сессии.",

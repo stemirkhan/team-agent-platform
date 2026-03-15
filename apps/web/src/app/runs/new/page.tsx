@@ -55,8 +55,8 @@ export default async function NewRunPage({
           </h1>
           <p className="max-w-3xl text-sm text-slate-600 dark:text-slate-300">
             {t(locale, {
-              ru: "Сначала выбери команду, repo и task context. После submit платформа подготовит workspace, стартует Codex и переведет run в live execution.",
-              en: "Choose the team, repo, and task context first. After submit, the platform prepares the workspace, starts Codex, and moves the run into live execution."
+              ru: "Сначала выбери команду, repo и task context. После submit платформа подготовит workspace, стартует выбранный runtime и переведет run в live execution.",
+              en: "Choose the team, repo, and task context first. After submit, the platform prepares the workspace, starts the selected runtime, and moves the run into live execution."
             })}
           </p>
         </div>

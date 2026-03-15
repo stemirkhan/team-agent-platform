@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { clearAccessToken, fetchCurrentUser, getAccessToken, type AuthUser } from "@/lib/auth-client";
-import { type Agent, type AgentMarkdownFile, type AgentSkill, updateAgent } from "@/lib/api";
+import { type Agent, type AgentMarkdownFile, type AgentSkill, type RuntimeTarget, updateAgent } from "@/lib/api";
 import { formatAuthLoading, t, type Locale } from "@/lib/i18n";
 
 type AgentProfileFormProps = {
@@ -42,6 +42,10 @@ function readNestedString(
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizeRuntimeTargets(targets: RuntimeTarget[] | null | undefined): RuntimeTarget[] {
+  return targets?.length ? targets : ["codex", "claude_code"];
+}
+
 export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
   const router = useRouter();
   const manifest = useMemo(
@@ -57,8 +61,15 @@ export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
   const [instructions, setInstructions] = useState(
     readNestedString(manifest, "instructions") ?? agent.install_instructions ?? agent.short_description
   );
+  const exportTargets = useMemo(() => normalizeRuntimeTargets(agent.export_targets), [agent.export_targets]);
   const [codexInstructions, setCodexInstructions] = useState(
     readNestedString(manifest, "codex", "developer_instructions") ??
+      readNestedString(manifest, "instructions") ??
+      agent.install_instructions ??
+      agent.short_description
+  );
+  const [claudeInstructions, setClaudeInstructions] = useState(
+    readNestedString(manifest, "claude", "developer_instructions") ??
       readNestedString(manifest, "instructions") ??
       agent.install_instructions ??
       agent.short_description
@@ -116,6 +127,12 @@ export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
         agent.install_instructions ??
         agent.short_description
     );
+    setClaudeInstructions(
+      readNestedString(manifest, "claude", "developer_instructions") ??
+        readNestedString(manifest, "instructions") ??
+        agent.install_instructions ??
+        agent.short_description
+    );
     setSkills(agent.skills ?? []);
     setMarkdownFiles(agent.markdown_files ?? []);
   }, [agent, manifest]);
@@ -150,16 +167,27 @@ export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
         agent.slug,
         {
           manifest_json: {
+            ...(manifest ?? {}),
             title: agent.title,
             description: agent.full_description ?? agent.short_description,
             instructions: instructions.trim(),
             codex: {
+              ...(manifest && typeof manifest.codex === "object" ? (manifest.codex as Record<string, unknown>) : {}),
               description: agent.short_description,
               developer_instructions: codexInstructions.trim()
-            }
+            },
+            claude: {
+              ...(manifest && typeof manifest.claude === "object" ? (manifest.claude as Record<string, unknown>) : {}),
+              description: agent.short_description,
+              developer_instructions: claudeInstructions.trim()
+            },
           },
-          export_targets: ["codex"],
-          compatibility_matrix: { codex: true },
+          export_targets: exportTargets,
+          compatibility_matrix:
+            agent.compatibility_matrix ?? {
+              codex: true,
+              claude_code: true
+            },
           install_instructions: instructions.trim(),
           skills: skills.filter((item) => item.slug.trim() || item.content.trim()),
           markdown_files: markdownFiles.filter((item) => item.path.trim() || item.content.trim())
@@ -276,12 +304,12 @@ export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
               </summary>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                 {t(locale, {
-                  ru: "Переопределите инструкции отдельно для Codex, если нужен более точный runtime-профиль.",
-                  en: "Override instructions specifically for Codex when the runtime profile needs extra detail."
+                  ru: "Переопределите инструкции отдельно для конкретного runtime, если базового профиля недостаточно.",
+                  en: "Override instructions for a specific runtime when the general profile is not precise enough."
                 })}
               </p>
 
-              <div className="mt-4">
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
                   Codex
                   <textarea
@@ -289,6 +317,16 @@ export function AgentProfileForm({ agent, locale }: AgentProfileFormProps) {
                     onChange={(event) => setCodexInstructions(event.target.value)}
                     required
                     value={codexInstructions}
+                  />
+                </label>
+
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  Claude Code
+                  <textarea
+                    className="mt-1 min-h-28 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                    onChange={(event) => setClaudeInstructions(event.target.value)}
+                    required
+                    value={claudeInstructions}
                   />
                 </label>
               </div>

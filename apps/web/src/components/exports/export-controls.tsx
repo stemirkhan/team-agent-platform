@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { Download } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { clearAccessToken, fetchCurrentUser, getAccessToken, type AuthUser } from "@/lib/auth-client";
 import {
   type CodexReasoningEffort,
   type CodexSandboxMode,
+  type RuntimeTarget,
   createAgentExport,
   createTeamExport,
   resolveDownloadUrl,
@@ -21,13 +22,21 @@ type ExportControlsProps = {
   slug: string;
   status: "draft" | "published" | "archived" | "hidden";
   locale: Locale;
+  supportedRuntimes?: RuntimeTarget[] | null;
 };
+
+function runtimeLabel(locale: Locale, runtimeTarget: RuntimeTarget): string {
+  return runtimeTarget === "claude_code"
+    ? t(locale, { ru: "Claude Code", en: "Claude Code" })
+    : t(locale, { ru: "Codex", en: "Codex" });
+}
 
 export function ExportControls({
   entityType,
   slug,
   status,
   locale,
+  supportedRuntimes,
 }: ExportControlsProps) {
   const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -38,10 +47,21 @@ export function ExportControls({
   const [lastDownloadUrl, setLastDownloadUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const availableRuntimes = useMemo(
+    () => (supportedRuntimes?.length ? supportedRuntimes : (["codex", "claude_code"] as RuntimeTarget[])),
+    [supportedRuntimes]
+  );
+  const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>(availableRuntimes[0] ?? "codex");
 
   const [codexModel, setCodexModel] = useState("");
   const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>("medium");
   const [codexSandboxMode, setCodexSandboxMode] = useState<CodexSandboxMode>("read-only");
+
+  useEffect(() => {
+    if (!availableRuntimes.includes(runtimeTarget)) {
+      setRuntimeTarget(availableRuntimes[0] ?? "codex");
+    }
+  }, [availableRuntimes, runtimeTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,12 +116,15 @@ export function ExportControls({
 
     try {
       const payload = {
-        runtime_target: "codex" as const,
-        codex: {
-          model: codexModel.trim() || undefined,
-          model_reasoning_effort: codexReasoningEffort,
-          sandbox_mode: codexSandboxMode,
-        },
+        runtime_target: runtimeTarget,
+        codex:
+          runtimeTarget === "codex"
+            ? {
+                model: codexModel.trim() || undefined,
+                model_reasoning_effort: codexReasoningEffort,
+                sandbox_mode: codexSandboxMode,
+              }
+            : undefined,
       };
       const created =
         entityType === "agent"
@@ -158,8 +181,8 @@ export function ExportControls({
         </h2>
         <p className="text-sm text-slate-600 dark:text-slate-300">
           {t(locale, {
-            ru: `Войдите, чтобы экспортировать ${entityType === "agent" ? "агента" : "команду"} в Codex.`,
-            en: `Login to export this ${entityType} to Codex.`,
+            ru: `Войдите, чтобы экспортировать ${entityType === "agent" ? "агента" : "команду"} в runtime bundle.`,
+            en: `Login to export this ${entityType} into a runtime bundle.`,
           })}
         </p>
       </section>
@@ -194,57 +217,90 @@ export function ExportControls({
             {t(locale, { ru: "Параметры скачивания", en: "Download parameters" })}
           </p>
 
-          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-slate-200">
-            Codex
-          </div>
-
           <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-            {t(locale, { ru: "Модель", en: "Model" })}
-            <input
+            {t(locale, { ru: "Целевой runtime", en: "Target runtime" })}
+            <select
               className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-              onChange={(event) => setCodexModel(event.target.value)}
-              placeholder={t(locale, {
-                ru: "Оставь пустым для модели аккаунта",
-                en: "Leave empty to use the account default",
-              })}
-              value={codexModel}
-            />
-            <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
-              {t(locale, {
-                ru: "Если модель не указана, Codex CLI сам выберет поддерживаемую модель из локального аккаунта.",
-                en: "If model is omitted, Codex CLI will use a supported model from the local account.",
-              })}
-            </span>
+              onChange={(event) => setRuntimeTarget(event.target.value as RuntimeTarget)}
+              value={runtimeTarget}
+            >
+              {availableRuntimes.map((runtime) => (
+                <option key={runtime} value={runtime}>
+                  {runtimeLabel(locale, runtime)}
+                </option>
+              ))}
+            </select>
           </label>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-              {t(locale, { ru: "Уровень reasoning", en: "Reasoning effort" })}
-              <select
-                className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                onChange={(event) => setCodexReasoningEffort(event.target.value as CodexReasoningEffort)}
-                value={codexReasoningEffort}
-              >
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="xhigh">xhigh</option>
-              </select>
-            </label>
-
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
-              {t(locale, { ru: "Режим sandbox", en: "Sandbox mode" })}
-              <select
-                className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                onChange={(event) => setCodexSandboxMode(event.target.value as CodexSandboxMode)}
-                value={codexSandboxMode}
-              >
-                <option value="read-only">read-only</option>
-                <option value="workspace-write">workspace-write</option>
-                <option value="danger-full-access">danger-full-access</option>
-              </select>
-            </label>
+          <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <p className="font-semibold text-slate-700 dark:text-slate-200">
+              {runtimeLabel(locale, runtimeTarget)}
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {t(locale, {
+                ru:
+                  runtimeTarget === "claude_code"
+                    ? "Claude Code export соберёт `.claude/agents/*` и приложит связанные markdown/skill assets в `agents/<slug>/...`."
+                    : "Codex export соберёт `.codex` bundle и позволит переопределить model/reasoning/sandbox параметры.",
+                en:
+                  runtimeTarget === "claude_code"
+                    ? "Claude Code export will build `.claude/agents/*` and attach linked markdown and skill assets under `agents/<slug>/...`."
+                    : "Codex export will build a `.codex` bundle and allow model, reasoning, and sandbox overrides.",
+              })}
+            </p>
           </div>
+
+          {runtimeTarget === "codex" ? (
+            <>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                {t(locale, { ru: "Модель", en: "Model" })}
+                <input
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  onChange={(event) => setCodexModel(event.target.value)}
+                  placeholder={t(locale, {
+                    ru: "Оставь пустым для модели аккаунта",
+                    en: "Leave empty to use the account default",
+                  })}
+                  value={codexModel}
+                />
+                <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
+                  {t(locale, {
+                    ru: "Если модель не указана, Codex CLI сам выберет поддерживаемую модель из локального аккаунта.",
+                    en: "If model is omitted, Codex CLI will use a supported model from the local account.",
+                  })}
+                </span>
+              </label>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  {t(locale, { ru: "Уровень reasoning", en: "Reasoning effort" })}
+                  <select
+                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                    onChange={(event) => setCodexReasoningEffort(event.target.value as CodexReasoningEffort)}
+                    value={codexReasoningEffort}
+                  >
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                    <option value="xhigh">xhigh</option>
+                  </select>
+                </label>
+
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  {t(locale, { ru: "Режим sandbox", en: "Sandbox mode" })}
+                  <select
+                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                    onChange={(event) => setCodexSandboxMode(event.target.value as CodexSandboxMode)}
+                    value={codexSandboxMode}
+                  >
+                    <option value="read-only">read-only</option>
+                    <option value="workspace-write">workspace-write</option>
+                    <option value="danger-full-access">danger-full-access</option>
+                  </select>
+                </label>
+              </div>
+            </>
+          ) : null}
         </div>
 
         {errorMessage ? (
@@ -274,7 +330,7 @@ export function ExportControls({
           <Button disabled={submitting || status !== "published"} type="submit">
             {submitting
               ? t(locale, { ru: "Готовим экспорт...", en: "Preparing export..." })
-              : t(locale, { ru: "Экспортировать для Codex", en: "Export for Codex" })}
+              : t(locale, { ru: "Экспортировать bundle", en: "Export bundle" })}
           </Button>
           {lastDownloadUrl ? (
             <a

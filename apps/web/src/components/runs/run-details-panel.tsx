@@ -39,6 +39,7 @@ import {
   resumeRun,
   type Run,
   type RunEvent,
+  type RuntimeTarget,
   type TerminalSessionRead,
   type Workspace
 } from "@/lib/api";
@@ -95,6 +96,12 @@ function formatWorkspaceStatus(locale: Locale, value: Workspace["status"]): stri
     default:
       return String(value).replaceAll("_", " ");
   }
+}
+
+function formatRuntimeTarget(locale: Locale, value: RuntimeTarget): string {
+  return value === "claude_code"
+    ? t(locale, { ru: "Claude Code", en: "Claude Code" })
+    : t(locale, { ru: "Codex", en: "Codex" });
 }
 
 function parseTimestamp(value: string | null): number | null {
@@ -824,7 +831,7 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
               <span className="font-semibold text-slate-900 dark:text-slate-100">
                 {t(locale, { ru: "Runtime:", en: "Runtime:" })}
               </span>{" "}
-              {run.runtime_target}
+              {formatRuntimeTarget(locale, run.runtime_target)}
             </p>
             <p>
               <span className="font-semibold text-slate-900 dark:text-slate-100">
@@ -1031,7 +1038,9 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
             </div>
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Runtime", en: "Runtime" })}</dt>
-              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">{run.runtime_target}</dd>
+              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">
+                {formatRuntimeTarget(locale, run.runtime_target)}
+              </dd>
             </div>
           </dl>
         </div>
@@ -1207,7 +1216,9 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                   <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
                     {t(locale, { ru: "Runtime", en: "Runtime" })}
                   </dt>
-                  <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{run.runtime_target}</dd>
+                  <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                    {formatRuntimeTarget(locale, run.runtime_target)}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
@@ -1395,8 +1406,8 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
                 </div>
                 <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
                   {t(locale, {
-                    ru: "PTY-поток Codex CLI для текущего run. Здесь виден живой output и финальный exit state.",
-                    en: "PTY stream from the Codex CLI for this run. This is the live output and final exit state."
+                    ru: `Host-side поток ${formatRuntimeTarget(locale, run.runtime_target)} для текущего run. Здесь виден живой output и финальный exit state.`,
+                    en: `Host-side ${formatRuntimeTarget(locale, run.runtime_target)} stream for this run. This is the live output and final exit state.`
                   })}
                 </p>
               </div>

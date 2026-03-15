@@ -23,8 +23,8 @@ export default async function AgentsCatalogPage() {
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-300">
             {t(locale, {
-              ru: "Опубликованные профили агентов для локального Codex workflow.",
-              en: "Published agent profiles for the local Codex workflow."
+              ru: "Опубликованные профили агентов для локального runtime workflow.",
+              en: "Published agent profiles for the local runtime workflow."
             })}
           </p>
         </div>

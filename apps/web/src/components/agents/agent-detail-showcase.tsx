@@ -157,13 +157,61 @@ function buildDefaultMarkdownPath(files: Array<Pick<AgentMarkdownFile, "path">>)
   }
 }
 
+function runtimeLabel(locale: Locale, runtimeTarget: RuntimeTarget): string {
+  return runtimeTarget === "claude_code"
+    ? t(locale, { ru: "Claude Code", en: "Claude Code" })
+    : t(locale, { ru: "Codex", en: "Codex" });
+}
+
+function normalizeRuntimeTargets(targets: RuntimeTarget[] | null | undefined): RuntimeTarget[] {
+  return targets?.length ? targets : ["codex", "claude_code"];
+}
+
+function buildSkillAssetPath(runtimeTarget: RuntimeTarget, agentSlug: string, skillSlug: string): string {
+  const normalizedSlug = skillSlug || "new-skill";
+  return runtimeTarget === "claude_code"
+    ? `agents/${agentSlug}/skills/${normalizedSlug}.md`
+    : `.codex/skills/${normalizedSlug}/SKILL.md`;
+}
+
+function buildRuntimeEntryPath(runtimeTarget: RuntimeTarget, agentSlug: string): string {
+  return runtimeTarget === "claude_code" ? `.claude/agents/${agentSlug}.md` : `${agentSlug}.toml`;
+}
+
+function buildAgentBundlePaths(
+  runtimeTarget: RuntimeTarget,
+  agentSlug: string,
+  markdownFiles: Array<Pick<AgentMarkdownFile, "path">>,
+  skills: Array<Pick<AgentSkill, "slug">>
+): string[] {
+  const files = [buildRuntimeEntryPath(runtimeTarget, agentSlug)];
+  const normalizedMarkdownPaths = markdownFiles
+    .map((file) => file.path.trim())
+    .filter((path) => path.length > 0);
+  if (runtimeTarget === "claude_code") {
+    files.push(
+      ...normalizedMarkdownPaths.map((path) => `agents/${agentSlug}/${path}`),
+      ...skills.map((skill) => buildSkillAssetPath(runtimeTarget, agentSlug, skill.slug))
+    );
+    return files;
+  }
+
+  files.push(
+    ...normalizedMarkdownPaths,
+    ...skills.map((skill) => buildSkillAssetPath(runtimeTarget, agentSlug, skill.slug))
+  );
+  return files;
+}
+
 export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps) {
   const router = useRouter();
   const draftCounterRef = useRef(0);
+  const exportTargets = useMemo(() => normalizeRuntimeTargets(agent.export_targets), [agent.export_targets]);
 
   const [activeTab, setActiveTab] = useState<AgentPageTabId>("overview");
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const [previewRuntime, setPreviewRuntime] = useState<RuntimeTarget>(exportTargets[0] ?? "codex");
 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -189,6 +237,10 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
     () => (manifest && typeof manifest.codex === "object" ? (manifest.codex as Record<string, unknown>) : null),
     [manifest]
   );
+  const manifestClaude = useMemo(
+    () => (manifest && typeof manifest.claude === "object" ? (manifest.claude as Record<string, unknown>) : null),
+    [manifest]
+  );
   const baseInstructions = useMemo(
     () =>
       readNestedString(manifest, "instructions") ??
@@ -202,13 +254,30 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
       baseInstructions,
     [baseInstructions, manifest]
   );
-  const exportTargets: RuntimeTarget[] = agent.export_targets?.length ? agent.export_targets : ["codex"];
+  const claudeInstructions = useMemo(
+    () =>
+      readNestedString(manifest, "claude", "developer_instructions") ??
+      baseInstructions,
+    [baseInstructions, manifest]
+  );
+  const activeRuntimeInstructions = previewRuntime === "claude_code" ? claudeInstructions : codexInstructions;
+  const runtimeHasExplicitOverride = useMemo(() => {
+    return previewRuntime === "claude_code"
+      ? readNestedString(manifest, "claude", "developer_instructions") !== null
+      : readNestedString(manifest, "codex", "developer_instructions") !== null;
+  }, [manifest, previewRuntime]);
 
   useEffect(() => {
     setSkills(agent.skills.map((skill, index) => createEditableSkill(skill, index)));
     setMarkdownFiles(agent.markdown_files.map((file, index) => createEditableMarkdownFile(file, index)));
     setAssetErrorMessage(null);
   }, [agent]);
+
+  useEffect(() => {
+    if (!exportTargets.includes(previewRuntime)) {
+      setPreviewRuntime(exportTargets[0] ?? "codex");
+    }
+  }, [exportTargets, previewRuntime]);
 
   useEffect(() => {
     let cancelled = false;
@@ -252,12 +321,10 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
 
   const treeLines = useMemo(
     () =>
-      buildTreeLines([
-        `${agent.slug}.toml`,
-        ...markdownFiles.map((file) => file.path).filter(Boolean),
-        ...skills.map((skill) => `.codex/skills/${skill.slug || "new-skill"}/SKILL.md`)
-      ]),
-    [agent.slug, markdownFiles, skills]
+      buildTreeLines(
+        buildAgentBundlePaths(previewRuntime, agent.slug, markdownFiles, skills).filter(Boolean)
+      ),
+    [agent.slug, markdownFiles, previewRuntime, skills]
   );
   const assets = useMemo<ExplorerAsset[]>(
     () =>
@@ -268,7 +335,10 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
           label:
             (file.path.split("/").at(-1) ?? file.path) ||
             t(locale, { ru: "Новый markdown", en: "New markdown" }),
-          path: file.path || t(locale, { ru: "без пути", en: "no path" }),
+          path:
+            (previewRuntime === "claude_code" && file.path
+              ? `agents/${agent.slug}/${file.path}`
+              : file.path) || t(locale, { ru: "без пути", en: "no path" }),
           description: null,
           content: file.content
         })),
@@ -276,12 +346,12 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
           id: skill.clientId,
           kind: "skill" as const,
           label: skill.slug || t(locale, { ru: "Новый skill", en: "New skill" }),
-          path: `.codex/skills/${skill.slug || "new-skill"}/SKILL.md`,
+          path: buildSkillAssetPath(previewRuntime, agent.slug, skill.slug),
           description: skill.description ?? null,
           content: skill.content
         }))
       ].sort((left, right) => left.path.localeCompare(right.path)),
-    [locale, markdownFiles, skills]
+    [agent.slug, locale, markdownFiles, previewRuntime, skills]
   );
   const visibleAssets = useMemo(
     () =>
@@ -389,10 +459,15 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
               ...(manifestCodex ?? {}),
               description: agent.short_description,
               developer_instructions: codexInstructions.trim()
+            },
+            claude: {
+              ...(manifestClaude ?? {}),
+              description: agent.short_description,
+              developer_instructions: claudeInstructions.trim()
             }
           },
           export_targets: exportTargets,
-          compatibility_matrix: agent.compatibility_matrix ?? { codex: true },
+          compatibility_matrix: agent.compatibility_matrix ?? { codex: true, claude_code: true },
           install_instructions: baseInstructions.trim(),
           skills: skills
             .map(({ clientId: _clientId, ...skill }) => skill)
@@ -436,7 +511,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
     {
       id: "export" as const,
       label: t(locale, { ru: "Export", en: "Export" }),
-      note: t(locale, { ru: "codex bundle", en: "codex bundle" })
+      note: t(locale, { ru: "runtime bundle", en: "runtime bundle" })
     }
   ];
   const fileFilters = [
@@ -454,16 +529,38 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
 
   const renderDeveloperTree = () => (
     <div className="rounded-3xl border border-slate-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex items-center gap-2">
-        <FolderTree className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-        <h3 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-          {t(locale, { ru: "Файловое дерево", en: "File tree" })}
-        </h3>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <FolderTree className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+          <h3 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+            {t(locale, { ru: "Файловое дерево", en: "File tree" })}
+          </h3>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {exportTargets.map((runtime) => {
+            const active = previewRuntime === runtime;
+            return (
+              <button
+                className={cn(
+                  "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+                  active
+                    ? "bg-slate-950 text-slate-50 dark:bg-slate-100 dark:text-slate-950"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-zinc-900 dark:text-slate-200 dark:hover:bg-zinc-800"
+                )}
+                key={runtime}
+                onClick={() => setPreviewRuntime(runtime)}
+                type="button"
+              >
+                {runtimeLabel(locale, runtime)}
+              </button>
+            );
+          })}
+        </div>
       </div>
       <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
         {t(locale, {
-          ru: "Превью single-agent Codex bundle в стиле Linux tree.",
-          en: "Single-agent Codex bundle preview in a Linux tree style."
+          ru: `Превью single-agent ${runtimeLabel(locale, previewRuntime)} bundle в стиле Linux tree.`,
+          en: `Single-agent ${runtimeLabel(locale, previewRuntime)} bundle preview in a Linux tree style.`
         })}
       </p>
       <div className="mt-4 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
@@ -485,20 +582,20 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
       </div>
       <ul className="mt-4 space-y-3 text-sm text-slate-700 dark:text-slate-200">
         <li className="flex items-center justify-between gap-3">
-          <span>{t(locale, { ru: "Agent config", en: "Agent config" })}</span>
-          <code className="text-xs">{agent.slug}.toml</code>
+          <span>{t(locale, { ru: "Runtime entrypoint", en: "Runtime entrypoint" })}</span>
+          <code className="text-xs">{buildRuntimeEntryPath(previewRuntime, agent.slug)}</code>
         </li>
         <li className="flex items-center justify-between gap-3">
           <span>{t(locale, { ru: "Markdown assets", en: "Markdown assets" })}</span>
           <span className="font-semibold">{markdownFiles.length}</span>
         </li>
         <li className="flex items-center justify-between gap-3">
-          <span>{t(locale, { ru: "Codex skills", en: "Codex skills" })}</span>
+          <span>{t(locale, { ru: "Skill assets", en: "Skill assets" })}</span>
           <span className="font-semibold">{skills.length}</span>
         </li>
         <li className="flex items-center justify-between gap-3">
           <span>{t(locale, { ru: "Runtime", en: "Runtime" })}</span>
-          <span className="font-semibold">{exportTargets.join(", ")}</span>
+          <span className="font-semibold">{exportTargets.map((runtime) => runtimeLabel(locale, runtime)).join(", ")}</span>
         </li>
       </ul>
     </div>
@@ -540,11 +637,36 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
             <div className="flex items-center gap-2">
               <FileCode2 className="h-4 w-4 text-slate-500 dark:text-slate-400" />
               <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-                {t(locale, { ru: "Codex-профиль", en: "Codex profile" })}
+                {t(locale, { ru: "Runtime override", en: "Runtime override" })}
               </h2>
             </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {exportTargets.map((runtime) => {
+                const active = previewRuntime === runtime;
+                return (
+                  <button
+                    className={cn(
+                      "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+                      active
+                        ? "bg-slate-950 text-slate-50 dark:bg-slate-100 dark:text-slate-950"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-zinc-900 dark:text-slate-200 dark:hover:bg-zinc-800"
+                    )}
+                    key={runtime}
+                    onClick={() => setPreviewRuntime(runtime)}
+                    type="button"
+                  >
+                    {runtimeLabel(locale, runtime)}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-4 text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+              {runtimeHasExplicitOverride
+                ? t(locale, { ru: "Отдельный override", en: "Explicit override" })
+                : t(locale, { ru: "Наследует базовые инструкции", en: "Inherits general instructions" })}
+            </p>
             <pre className="mt-4 overflow-x-auto whitespace-pre-wrap rounded-2xl bg-slate-950 px-4 py-4 text-sm leading-6 text-slate-100">
-              {codexInstructions}
+              {activeRuntimeInstructions}
             </pre>
           </div>
         </div>
@@ -579,7 +701,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                         {skill.slug || t(locale, { ru: "Новый skill", en: "New skill" })}
                       </code>
                       <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
-                        .codex/skills/{skill.slug || "new-skill"}/SKILL.md
+                        {buildSkillAssetPath(previewRuntime, agent.slug, skill.slug || "new-skill")}
                       </p>
                     </div>
                     <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -846,7 +968,11 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/70">
               <code className="text-xs font-semibold text-brand-700 dark:text-brand-300">
-                .codex/skills/{skills.find((skill) => skill.clientId === selectedAsset.id)?.slug || "new-skill"}/SKILL.md
+                {buildSkillAssetPath(
+                  previewRuntime,
+                  agent.slug,
+                  skills.find((skill) => skill.clientId === selectedAsset.id)?.slug || "new-skill"
+                )}
               </code>
             </div>
 
@@ -942,7 +1068,9 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
                     {t(locale, { ru: "Runtime", en: "Runtime" })}
                   </p>
-                  <p className="font-semibold text-slate-900 dark:text-slate-100">{exportTargets.join(", ")}</p>
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">
+                    {exportTargets.map((runtime) => runtimeLabel(locale, runtime)).join(", ")}
+                  </p>
                 </div>
               </div>
             </div>
@@ -962,10 +1090,10 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950/90">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-                  {t(locale, { ru: "Codex bundle", en: "Codex bundle" })}
+                  {t(locale, { ru: "Runtime bundle", en: "Runtime bundle" })}
                 </p>
                 <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  {t(locale, { ru: "готов к материализации", en: "ready to materialize" })}
+                  {runtimeLabel(locale, previewRuntime)} {t(locale, { ru: "готов к materialize", en: "ready to materialize" })}
                 </p>
               </div>
             </div>
@@ -1007,7 +1135,13 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
           {activeTab === "overview" ? renderOverview() : null}
           {activeTab === "files" ? renderFiles() : null}
           {activeTab === "export" ? (
-            <ExportControls entityType="agent" locale={locale} slug={agent.slug} status={agent.status} />
+            <ExportControls
+              entityType="agent"
+              locale={locale}
+              slug={agent.slug}
+              status={agent.status}
+              supportedRuntimes={exportTargets}
+            />
           ) : null}
         </div>
       </div>
