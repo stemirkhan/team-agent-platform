@@ -9,7 +9,6 @@ from host_executor_app.schemas.workspace import (
     WorkspaceCommandsRun,
     WorkspaceCommandsRunResponse,
     WorkspaceCommit,
-    WorkspaceExecutionConfigRead,
     WorkspaceListResponse,
     WorkspaceMaterialize,
     WorkspacePrepare,
@@ -56,18 +55,6 @@ def test_host_executor_workspace_endpoints(monkeypatch) -> None:
         workspace_api.workspace_service,
         "get_workspace",
         lambda workspace_id: workspace,
-    )
-    monkeypatch.setattr(
-        workspace_api.workspace_service,
-        "get_execution_config",
-        lambda workspace_id: WorkspaceExecutionConfigRead(
-            source_path=".team-agent-platform.toml",
-            run_working_directory=".",
-            setup_working_directory=".",
-            setup_commands=["cd apps/backend && .venv/bin/python -m pip install -e '.[dev]'"],
-            check_working_directory=".",
-            check_commands=["make compose-config"],
-        ),
     )
     monkeypatch.setattr(
         workspace_api.workspace_service,
@@ -156,10 +143,6 @@ def test_host_executor_workspace_endpoints(monkeypatch) -> None:
     get_response = client.get("/workspaces/ws-1")
     assert get_response.status_code == 200
     assert get_response.json()["changed_files"] == ["README.md"]
-
-    config_response = client.get("/workspaces/ws-1/execution-config")
-    assert config_response.status_code == 200
-    assert config_response.json()["source_path"] == ".team-agent-platform.toml"
 
     commit_response = client.post(
         "/workspaces/ws-1/commit",

@@ -77,17 +77,6 @@ class WorkspaceMaterialize(BaseModel):
     files: list[WorkspaceFileWrite] = Field(default_factory=list, min_length=1, max_length=500)
 
 
-class WorkspaceExecutionConfigRead(BaseModel):
-    """Normalized repo-level execution contract discovered in one workspace."""
-
-    source_path: str | None = None
-    run_working_directory: str = "."
-    setup_working_directory: str = "."
-    setup_commands: list[str] = Field(default_factory=list)
-    check_working_directory: str = "."
-    check_commands: list[str] = Field(default_factory=list)
-
-
 class WorkspaceCommandsRun(BaseModel):
     """Batch of shell commands that should run inside one prepared workspace."""
 

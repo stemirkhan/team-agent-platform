@@ -22,14 +22,10 @@ function phaseTitle(locale: Locale, key: RunReportPhase["key"], runtimeTarget: R
   switch (key) {
     case "preparation":
       return t(locale, { ru: "Подготовка", en: "Preparation" });
-    case "setup":
-      return t(locale, { ru: "Setup", en: "Setup" });
     case "runtime":
       return runtimeTarget === "claude_code"
         ? t(locale, { ru: "Claude Code", en: "Claude Code" })
         : t(locale, { ru: "Codex", en: "Codex" });
-    case "checks":
-      return t(locale, { ru: "Проверки", en: "Checks" });
     case "git_pr":
       return t(locale, { ru: "Git / PR", en: "Git / PR" });
     default:

@@ -6,7 +6,6 @@ from host_executor_app.schemas.workspace import (
     WorkspaceCommandsRun,
     WorkspaceCommandsRunResponse,
     WorkspaceCommit,
-    WorkspaceExecutionConfigRead,
     WorkspaceListResponse,
     WorkspaceMaterialize,
     WorkspacePrepare,
@@ -39,17 +38,6 @@ def get_workspace(workspace_id: str = Path(min_length=1)) -> WorkspaceRead:
     """Return one workspace with refreshed git state."""
     try:
         return workspace_service.get_workspace(workspace_id)
-    except WorkspaceServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-
-
-@router.get("/{workspace_id}/execution-config", response_model=WorkspaceExecutionConfigRead)
-def get_workspace_execution_config(
-    workspace_id: str = Path(min_length=1),
-) -> WorkspaceExecutionConfigRead:
-    """Return repo-level execution config normalized for one workspace."""
-    try:
-        return workspace_service.get_execution_config(workspace_id)
     except WorkspaceServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

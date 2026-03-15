@@ -70,7 +70,7 @@ flowchart TD
     E[Materialize runtime bundle and TASK.md]
     F[Start runtime session]
     G[Stream terminal and update run events]
-    H[Run repo checks]
+    H[Clean temporary runtime files]
     I[Create commit]
     J[Push working branch]
     K[Create draft PR via gh]
@@ -103,7 +103,7 @@ The platform is now multi-runtime in practice:
 
 The current runtime boundary is:
 
-- one shared run pipeline in the backend for workspace preparation, setup, checks, git, and PR finalization
+- one shared run pipeline in the backend for workspace preparation, runtime execution, cleanup, git, and PR finalization
 - one backend runtime adapter registry for bundle materialization, session start/resume/cancel/get-events, terminal normalization, and execution-trace extraction
 - one shared host session engine for PTY or `tmux` lifecycle, recovery bookkeeping, and chunk persistence
 - runtime-specific host modules for command building, session-id semantics, and output parsing
