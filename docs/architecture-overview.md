@@ -92,6 +92,8 @@ In short:
 - the host executor prepares the workspace and starts the selected runtime;
 - terminal output and run events flow back through the backend and into the UI;
 - on success, the runtime must finish commit, push, and draft PR creation inside the prepared workspace;
+- for Codex runs, that contract implies a `danger-full-access` root sandbox in the normal run
+  flow so the runtime can complete `.git` writes and GitHub delivery itself;
 - if the runtime exits without fully finishing SCM delivery, the backend marks the run as failed instead of completing SCM on its behalf;
 - on failure or interruption, the platform may use resume or auto-recovery when session state is still available.
 

@@ -18,8 +18,8 @@ from app.services.codex_proxy_service import CodexProxyService, CodexProxyServic
 from app.services.export_service import ExportService
 from app.services.github_proxy_service import GitHubProxyService
 from app.services.host_execution_service import HostExecutionReadinessService
-from app.services.runtime_adapters import ClaudeRuntimeAdapter, CodexRuntimeAdapter
 from app.services.run_service import RunService
+from app.services.runtime_adapters import ClaudeRuntimeAdapter, CodexRuntimeAdapter
 from app.services.workspace_proxy_service import WorkspaceProxyService, WorkspaceProxyServiceError
 
 
@@ -293,7 +293,7 @@ def test_create_run_prepares_workspace_and_records_status_events(
             "codex": {
                 "model": "gpt-5.3-codex-spark",
                 "model_reasoning_effort": "medium",
-                "sandbox_mode": "workspace-write",
+                "sandbox_mode": "danger-full-access",
             },
         },
     )
@@ -358,6 +358,48 @@ def test_create_run_prepares_workspace_and_records_status_events(
         "starting_runtime",
         "running",
     ]
+
+
+def test_create_run_rejects_codex_workspace_write_when_runtime_owns_scm(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Codex run creation should reject sandbox modes that cannot finish SCM delivery."""
+    headers = _auth_headers(
+        client,
+        email="runner-invalid-codex-sandbox@example.com",
+        display_name="Runner Invalid Codex Sandbox",
+    )
+    _publish_agent(
+        client,
+        headers=headers,
+        slug="delivery-orchestrator",
+        title="Delivery Orchestrator",
+    )
+    _publish_team(client, headers=headers, slug="delivery-team-invalid-codex-sandbox")
+
+    monkeypatch.setattr(
+        HostExecutionReadinessService,
+        "build_readiness",
+        lambda self: SimpleNamespace(effective_ready=True),
+    )
+
+    response = client.post(
+        "/api/v1/runs",
+        headers=headers,
+        json={
+            "team_slug": "delivery-team-invalid-codex-sandbox",
+            "repo_owner": "stemirkhan",
+            "repo_name": "team-agent-platform",
+            "task_text": "Try to launch Codex with a sandbox mode that cannot finalize SCM.",
+            "codex": {
+                "sandbox_mode": "workspace-write",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert "danger-full-access" in response.text
 
 
 def test_create_run_starts_claude_runtime_and_exposes_terminal_contract(

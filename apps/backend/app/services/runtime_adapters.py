@@ -306,7 +306,7 @@ class CodexRuntimeAdapter(_RuntimeAdapterBase):
                     sandbox_mode=(
                         codex_options.sandbox_mode
                         if codex_options is not None
-                        else "workspace-write"
+                        else "danger-full-access"
                     ),
                 )
             )
@@ -692,7 +692,10 @@ class ClaudeRuntimeAdapter(_RuntimeAdapterBase):
             if subtype == "task_started":
                 tool_use_id = payload.get("tool_use_id")
                 task_id = payload.get("task_id")
-                if not isinstance(tool_use_id, str) or tool_use_id not in subagent_tasks_by_tool_use_id:
+                if (
+                    not isinstance(tool_use_id, str)
+                    or tool_use_id not in subagent_tasks_by_tool_use_id
+                ):
                     continue
                 agent = subagent_tasks_by_tool_use_id[tool_use_id]
                 if isinstance(task_id, str) and task_id.strip():
@@ -722,7 +725,10 @@ class ClaudeRuntimeAdapter(_RuntimeAdapterBase):
             )
         else:
             signal_level = "none"
-            message = "No confirmed Claude subagent launch signals were captured in the terminal output."
+            message = (
+                "No confirmed Claude subagent launch signals were captured in the "
+                "terminal output."
+            )
 
         return {
             "kind": "claude_execution_trace",

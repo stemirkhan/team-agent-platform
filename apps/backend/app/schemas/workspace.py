@@ -24,6 +24,8 @@ class WorkspaceRead(BaseModel):
     status: WorkspaceStatus
     has_changes: bool = False
     changed_files: list[str] = Field(default_factory=list)
+    initial_head_sha: str | None = None
+    initial_head_message: str | None = None
     last_commit_sha: str | None = None
     last_commit_message: str | None = None
     committed_at: str | None = None

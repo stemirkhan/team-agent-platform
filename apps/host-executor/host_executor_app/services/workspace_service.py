@@ -381,12 +381,24 @@ class WorkspaceService:
             cwd=repo_dir,
             label="read last commit message",
         ).stdout.strip()
+        initial_head_sha = metadata.initial_head_sha or last_commit_sha or None
+        initial_head_message = metadata.initial_head_message or last_commit_message or None
 
         upstream_branch = self._try_run_git(
             ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
             cwd=repo_dir,
         )
         normalized_upstream_branch = upstream_branch.strip() or None if upstream_branch else None
+        remote_branch_head = self._try_read_remote_branch_head(
+            repo_dir=repo_dir,
+            working_branch=metadata.working_branch,
+        )
+        remote_branch_matches_head = bool(
+            remote_branch_head and last_commit_sha and remote_branch_head == last_commit_sha
+        )
+        expected_upstream_branch = f"origin/{metadata.working_branch}"
+        if normalized_upstream_branch is None and remote_branch_matches_head:
+            normalized_upstream_branch = expected_upstream_branch
 
         status_output = self._run_git(
             ["status", "--porcelain=v1"],
@@ -394,36 +406,49 @@ class WorkspaceService:
             label="read git status",
         ).stdout
         changed_files = self._parse_git_status(status_output)
+        has_runtime_commit = bool(
+            initial_head_sha and last_commit_sha and last_commit_sha != initial_head_sha
+        )
+        persisted_push = metadata.status in {"pushed", "pull_request_created"} and bool(
+            metadata.pushed_at
+        )
+        persisted_pull = (
+            metadata.status == "pull_request_created"
+            and metadata.pull_request_number is not None
+            and metadata.pull_request_url is not None
+        )
         pull = None
         if (
-            normalized_upstream_branch == f"origin/{metadata.working_branch}"
-            or metadata.pull_request_number is not None
-            or metadata.status == "pull_request_created"
+            normalized_upstream_branch == expected_upstream_branch
+            or remote_branch_matches_head
+            or persisted_push
+            or persisted_pull
         ):
             pull = self._try_view_pull_by_reference(
                 metadata.repo_full_name,
                 metadata.working_branch,
             )
 
-        derived_status = metadata.status
-        committed_at = metadata.committed_at
-        pushed_at = metadata.pushed_at
-        pull_request_number = metadata.pull_request_number
-        pull_request_url = metadata.pull_request_url
+        derived_status = "prepared"
+        committed_at = metadata.committed_at if has_runtime_commit else None
+        pushed_at = metadata.pushed_at if persisted_push else None
+        pull_request_number = metadata.pull_request_number if persisted_pull else None
+        pull_request_url = metadata.pull_request_url if persisted_pull else None
 
-        if last_commit_sha and last_commit_sha != metadata.last_commit_sha:
-            derived_status = self._max_workspace_status(derived_status, "committed")
+        if has_runtime_commit:
+            derived_status = "committed"
             committed_at = committed_at or _utc_now()
-        if normalized_upstream_branch == f"origin/{metadata.working_branch}":
-            derived_status = self._max_workspace_status(derived_status, "pushed")
+        if normalized_upstream_branch == expected_upstream_branch:
+            derived_status = "pushed"
             committed_at = committed_at or _utc_now()
             pushed_at = pushed_at or _utc_now()
-        if pull is not None:
+        if pull is not None or persisted_pull:
             derived_status = "pull_request_created"
             committed_at = committed_at or _utc_now()
             pushed_at = pushed_at or _utc_now()
-            pull_request_number = pull["number"]
-            pull_request_url = pull["url"]
+            if pull is not None:
+                pull_request_number = pull["number"]
+                pull_request_url = pull["url"]
 
         return metadata.model_copy(
             update={
@@ -432,6 +457,8 @@ class WorkspaceService:
                 "status": derived_status,
                 "has_changes": len(changed_files) > 0,
                 "changed_files": changed_files,
+                "initial_head_sha": initial_head_sha,
+                "initial_head_message": initial_head_message,
                 "last_commit_sha": last_commit_sha or None,
                 "last_commit_message": last_commit_message or metadata.last_commit_message,
                 "committed_at": committed_at,
@@ -679,7 +706,66 @@ class WorkspaceService:
         try:
             return self._view_pull_by_reference(repo_full_name, reference)
         except WorkspaceServiceError:
+            return self._try_find_pull_by_head_branch(repo_full_name, reference)
+
+    def _try_find_pull_by_head_branch(
+        self,
+        repo_full_name: str,
+        working_branch: str,
+    ) -> dict[str, object] | None:
+        """Best-effort PR lookup by head branch when `gh pr view <branch>` is unavailable."""
+        try:
+            completed = self._run_gh(
+                [
+                    "pr",
+                    "list",
+                    "--repo",
+                    repo_full_name,
+                    "--head",
+                    working_branch,
+                    "--state",
+                    "all",
+                    "--json",
+                    "number,url",
+                ],
+                label="read pull request by head branch",
+            )
+        except WorkspaceServiceError:
             return None
+
+        try:
+            payload = json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, list):
+            return None
+        for item in payload:
+            if (
+                isinstance(item, dict)
+                and isinstance(item.get("number"), int)
+                and isinstance(item.get("url"), str)
+            ):
+                return {"number": item["number"], "url": item["url"]}
+        return None
+
+    def _try_read_remote_branch_head(
+        self,
+        *,
+        repo_dir: Path,
+        working_branch: str,
+    ) -> str | None:
+        """Best-effort read of the remote branch head without relying on a fetched tracking ref."""
+        output = self._try_run_git(
+            ["ls-remote", "--heads", "origin", working_branch],
+            cwd=repo_dir,
+        )
+        if output is None:
+            return None
+        for line in output.splitlines():
+            parts = line.strip().split(maxsplit=1)
+            if parts and parts[0]:
+                return parts[0]
+        return None
 
     @staticmethod
     def _build_remote_url(repo_url: str) -> str:

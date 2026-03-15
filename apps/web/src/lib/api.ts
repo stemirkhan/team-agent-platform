@@ -193,6 +193,8 @@ export type Workspace = {
   status: "prepared" | "committed" | "pushed" | "pull_request_created";
   has_changes: boolean;
   changed_files: string[];
+  initial_head_sha: string | null;
+  initial_head_message: string | null;
   last_commit_sha: string | null;
   last_commit_message: string | null;
   committed_at: string | null;

@@ -157,7 +157,7 @@ export function RunLaunchForm({
   const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>("codex");
   const [codexModel, setCodexModel] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort>("medium");
-  const [sandboxMode, setSandboxMode] = useState<CodexSandboxMode>("workspace-write");
+  const [sandboxMode, setSandboxMode] = useState<CodexSandboxMode>("danger-full-access");
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [readinessSnapshot, setReadinessSnapshot] = useState(readiness);
@@ -299,7 +299,7 @@ export function RunLaunchForm({
   const codexOverridesSelected =
     codexModel.trim().length > 0 ||
     reasoningEffort !== "medium" ||
-    sandboxMode !== "workspace-write";
+    sandboxMode !== "danger-full-access";
 
   useEffect(() => {
     if (!effectiveReadiness?.effective_ready) {
@@ -1364,14 +1364,18 @@ export function RunLaunchForm({
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
                 Sandbox mode
                 <select
-                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-                  onChange={(event) => setSandboxMode(event.target.value as CodexSandboxMode)}
+                  className="mt-1 w-full cursor-not-allowed rounded-xl border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-400"
+                  disabled
                   value={sandboxMode}
                 >
-                  <option value="read-only">read-only</option>
-                  <option value="workspace-write">workspace-write</option>
                   <option value="danger-full-access">danger-full-access</option>
                 </select>
+                <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
+                  {t(locale, {
+                    ru: "Для обычного run flow Codex обязан сам завершить commit, push и draft PR, поэтому здесь фиксирован `danger-full-access`.",
+                    en: "In the normal run flow Codex must finish commit, push, and draft PR delivery itself, so `danger-full-access` is fixed here."
+                  })}
+                </span>
               </label>
             </div>
           </details>

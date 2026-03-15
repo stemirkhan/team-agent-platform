@@ -32,6 +32,16 @@ class RunCreate(BaseModel):
         """Require either issue context or manual task text."""
         if self.issue_number is None and not self.task_text:
             raise ValueError("Either issue_number or task_text must be provided.")
+        if (
+            self.runtime_target == RuntimeTarget.CODEX
+            and self.codex is not None
+            and self.codex.sandbox_mode is not None
+            and self.codex.sandbox_mode != "danger-full-access"
+        ):
+            raise ValueError(
+                "Codex runs require sandbox_mode=`danger-full-access` because the runtime "
+                "must finish commit, push, and draft PR delivery itself."
+            )
         return self
 
 
