@@ -2,6 +2,8 @@
 
 This document gives a high-level view of the platform architecture without diving into internal implementation details.
 
+For the current runtime-boundary refactor and Claude Code reconciliation, see [Runtime Boundary RFC](runtime-boundary-rfc.md).
+
 ```mermaid
 flowchart LR
     U[User in Browser]
@@ -19,6 +21,7 @@ flowchart LR
         GT[git CLI]
         GH[gh CLI]
         CX[codex CLI]
+        CL[claude CLI]
         WS[Local Workspace]
     end
 
@@ -34,11 +37,13 @@ flowchart LR
     HX --> GT
     HX --> GH
     HX --> CX
+    HX --> CL
     HX --> WS
 
     GT --> GHUB
     GH --> GHUB
     CX --> WS
+    CL --> WS
 
     B -->|run status, events, terminal bridge| W
     HX -->|diagnostics, session state, terminal output| B
@@ -47,9 +52,9 @@ flowchart LR
 In short:
 
 - `Frontend` and `Backend` form the control plane.
-- `Host Executor` runs in the host user context and has access to local `git`, `gh`, and `codex`.
+- `Host Executor` runs in the host user context and has access to local `git`, `gh`, `codex`, and `claude`.
 - `Backend` orchestrates the run lifecycle, persists state in `PostgreSQL`, and serves status, history, and terminal data to the UI.
-- `Host Executor` prepares workspaces, starts Codex sessions, and performs git/GitHub operations.
+- `Host Executor` prepares workspaces, starts runtime sessions, and performs git/GitHub operations.
 - GitHub remains the external source for repositories, issues, and draft PRs.
 
 ## Run Lifecycle
@@ -62,8 +67,8 @@ flowchart TD
     B[Backend creates Run record]
     C[Backend asks Host Executor to prepare workspace]
     D[Clone repo and create working branch]
-    E[Materialize .codex and TASK.md]
-    F[Start codex session]
+    E[Materialize runtime bundle and TASK.md]
+    F[Start runtime session]
     G[Stream terminal and update run events]
     H[Run repo checks]
     I[Create commit]
@@ -84,7 +89,34 @@ flowchart TD
 In short:
 
 - a run is initiated from the UI, but orchestrated by the backend;
-- the host executor prepares the workspace and starts `codex`;
+- the host executor prepares the workspace and starts the selected runtime;
 - terminal output and run events flow back through the backend and into the UI;
 - on success, the flow ends with commit, push, and draft PR creation;
 - on failure or interruption, the platform may use resume or auto-recovery when session state is still available.
+
+## Runtime model
+
+The platform is now multi-runtime in practice:
+
+- `codex`
+- `claude_code`
+
+The current runtime boundary is:
+
+- one shared run pipeline in the backend for workspace preparation, setup, checks, git, and PR finalization
+- one backend runtime adapter registry for bundle materialization, session start/resume/cancel/get-events, terminal normalization, and execution-trace extraction
+- one shared host session engine for PTY or `tmux` lifecycle, recovery bookkeeping, and chunk persistence
+- runtime-specific host modules for command building, session-id semantics, and output parsing
+
+The main remaining compatibility debt is in persisted legacy fields and status labels:
+
+- `runtime_session_id` is the primary durable session identity
+- `codex_session_id` and `claude_session_id` still remain as backward-compatible mirrors
+- `starting_codex` is still accepted as a legacy status value and mapped into the generic runtime phase
+
+Claude and Codex both feed the same run details surface, but execution-trace extraction is runtime-specific:
+
+- Codex uses structured collaboration tool-call signals
+- Claude Code uses structured `Agent` tool and `task_started` signals from `stream-json`
+
+The implementation details and remaining cleanup items are described in [Runtime Boundary RFC](runtime-boundary-rfc.md).

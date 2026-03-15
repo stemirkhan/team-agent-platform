@@ -40,7 +40,7 @@ type BoardMetricPillProps = {
 
 const laneStatusMap: Record<RunsBoardLane, RunStatus[]> = {
   queued: ["queued", "preparing", "cloning_repo", "materializing_team"],
-  active: ["running_setup", "starting_codex", "resuming", "running", "running_checks"],
+  active: ["running_setup", "starting_runtime", "starting_codex", "resuming", "running", "running_checks"],
   finalizing: ["committing", "pushing", "creating_pr"],
   completed: ["completed"],
   failed: ["interrupted", "failed", "cancelled"]
@@ -67,8 +67,8 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       key: "active",
       title: t(locale, { ru: "В работе", en: "Active" }),
       description: t(locale, {
-        ru: "Setup, Codex execution и checks идут прямо сейчас.",
-        en: "Setup, Codex execution, and checks are currently in progress."
+        ru: "Setup, runtime execution и checks идут прямо сейчас.",
+        en: "Setup, runtime execution, and checks are currently in progress."
       }),
       emptyLabel: t(locale, {
         ru: "Сейчас ничего не выполняется.",
@@ -82,8 +82,8 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       key: "finalizing",
       title: t(locale, { ru: "Финализация", en: "Finalizing" }),
       description: t(locale, {
-        ru: "Run уже выходит из Codex и оформляет git/PR слой.",
-        en: "Codex is done and the run is finishing the git and PR layer."
+        ru: "Run уже завершил runtime phase и оформляет git/PR слой.",
+        en: "Runtime execution is done and the run is finishing the git and PR layer."
       }),
       emptyLabel: t(locale, {
         ru: "Нет запусков на финализации.",

@@ -2,9 +2,12 @@
 
 ## Status
 
-- Date: March 14, 2026
+- Date: March 15, 2026
 - Status: implemented, with follow-up polish still pending
 - Purpose: document the current recovery architecture for interrupted runs and the work that remains
+
+This document still uses some Codex-heavy examples because recovery work started there first.
+The current codebase supports analogous Claude Code interruption and resume flows under the runtime-neutral boundary described in [Runtime Boundary RFC](runtime-boundary-rfc.md).
 
 ## Current implementation status
 
@@ -16,15 +19,16 @@
 ## What already works
 
 - Codex no longer runs in a non-resumable `--ephemeral` mode for resumable flows.
-- Runs store `codex_session_id`, `resume_attempt_count`, `interrupted_at`, `transport_kind`, and `transport_ref`.
+- Runs store runtime session metadata including `runtime_session_id`, `resume_attempt_count`, `interrupted_at`, `transport_kind`, and `transport_ref`.
+- `codex_session_id` and `claude_session_id` remain in the run model temporarily for backward compatibility with older recovery data and runtime-specific APIs.
 - A run can move into `interrupted` instead of always becoming `failed`.
 - The backend exposes `POST /runs/{id}/resume`.
-- The UI exposes `Resume Codex session` for resumable interrupted runs.
-- The host executor supports `codex exec resume`.
+- The UI exposes runtime-specific resume actions for resumable interrupted runs.
+- The host executor supports runtime-specific resume commands for both Codex and Claude Code.
 - `tmux` is used as the durable transport layer.
 - If a `tmux` session survives a host-executor restart, the platform can reattach without a full rerun.
-- If transport is lost but `codex_session_id` was captured, the host executor can perform semantic resume automatically.
-- Diagnostics expose `tmux` readiness.
+- If transport is lost but a durable runtime session id was captured, the host executor can perform semantic resume automatically.
+- Diagnostics expose `tmux` readiness and runtime-aware tool readiness.
 - Activity and execution trace show the multi-agent bundle, startup prompt usage, confirmed sub-agent signals, and recovery events.
 
 ## What is not finished yet
@@ -39,8 +43,8 @@
 The platform can:
 
 - create a workspace;
-- materialize `.codex` and `TASK.md`;
-- launch `codex exec` through the host executor;
+- materialize a runtime bundle plus `TASK.md`;
+- launch the selected runtime through the host executor;
 - stream terminal output to the UI;
 - run setup, checks, commit, push, and draft PR steps.
 
@@ -60,7 +64,7 @@ Users needed to recover a run that had already done meaningful work.
 There are two distinct kinds of “continue”:
 
 1. continue the same live process;
-2. continue the same Codex conversation or session even if the original process died.
+2. continue the same runtime conversation or session even if the original process died.
 
 Those are different technical problems and must be treated separately.
 
@@ -72,7 +76,7 @@ The recovery layer should:
 - keep terminal history and run context available;
 - continue execution without a full relaunch whenever possible;
 - minimize repeated token burn;
-- avoid duplicate Codex processes;
+- avoid duplicate runtime processes;
 - keep the UX predictable.
 
 ## Non-goals
@@ -82,7 +86,7 @@ The recovery system does not currently aim to provide:
 - exact replay on the original git SHA;
 - cross-host migration of active run sessions;
 - fully autonomous recovery in every scenario;
-- reconciliation of multiple surviving duplicate Codex processes;
+- reconciliation of multiple surviving duplicate runtime processes;
 - distributed runner orchestration.
 
 ## The two recovery modes
@@ -106,13 +110,15 @@ Costs:
 
 ### 2. Semantic resume
 
-The original process is dead, but the Codex session survives on disk.
+The original process is dead, but the runtime session survives on disk.
 
 After restart, the executor launches:
 
 ```bash
 codex exec resume <session_id>
 ```
+
+For Claude Code, the equivalent flow uses the persisted Claude session id and the runtime's native resume flag.
 
 Benefits:
 
@@ -207,7 +213,7 @@ It means:
 The platform currently surfaces:
 
 - host and `tmux` readiness in diagnostics;
-- persisted Codex session ids;
+- persisted runtime session ids;
 - auto-recovery events in `Activity`;
 - structured sub-agent signals from collaboration tool calls;
 - bundle snapshots that prove which startup prompt and multi-agent configuration were materialized.
@@ -234,7 +240,7 @@ The implemented system should be validated against:
 1. a normal successful run;
 2. a host-executor restart while `tmux` transport is still alive;
 3. a host-executor restart after transport loss, with semantic resume available;
-4. a host-executor restart without a captured `codex_session_id`;
+4. a host-executor restart without a captured `runtime_session_id`;
 5. cancellation during recovery or resume;
 6. a completed run with preserved terminal history and audit events.
 
@@ -251,11 +257,11 @@ When debugging resume or recovery:
 
 ## Summary
 
-The platform now supports both manual resume and automatic recovery for interrupted runs.
+The platform now supports both manual resume and automatic recovery for interrupted runs across Codex and Claude Code.
 
 The core architecture is in place:
 
-- persisted Codex session state;
+- persisted runtime session state;
 - durable transport with `tmux`;
 - manual semantic resume;
 - automatic recovery after host-executor restart.

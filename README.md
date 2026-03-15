@@ -1,10 +1,10 @@
 # Team Agent Platform
 
-Team Agent Platform is a local-first execution platform for running Codex-powered agent teams against real GitHub repositories.
+Team Agent Platform is a local-first execution platform for running agent teams against real GitHub repositories through host-installed coding runtimes.
 
 The project is intentionally opinionated:
 
-- `Codex-first`
+- `runtime-neutral execution for Codex and Claude Code`
 - `local-first`
 - `single-user / self-hosted`
 - `host tools driven`
@@ -18,8 +18,8 @@ With the current platform you can:
 - define agent profiles and combine them into teams;
 - select a GitHub repository and base branch;
 - launch a run from an issue or a manual task;
-- materialize a `.codex` bundle and `TASK.md` inside a prepared workspace;
-- run `codex`, `git`, and `gh` through a host-side execution layer;
+- materialize a runtime bundle and `TASK.md` inside a prepared workspace;
+- run `codex` or `claude`, plus `git` and `gh`, through a host-side execution layer;
 - watch terminal output and run events in the browser;
 - create a branch, push it, and open a draft PR;
 - recover interrupted runs through resume and auto-recovery flows.
@@ -37,16 +37,18 @@ The system has two main layers:
 2. `Host Execution Layer`
    - Host Executor
    - `codex` CLI
+   - `claude` CLI
    - `gh` CLI
    - `git`
    - PTY / `tmux`
    - local workspaces
 
-The browser talks to the backend. The backend orchestrates runs and stores state. The host executor runs in the host user context, where `git`, `gh`, and `codex` are already installed and authenticated.
+The browser talks to the backend. The backend orchestrates runs and stores state. The host executor runs in the host user context, where `git`, `gh`, and the selected runtime CLI are already installed and authenticated.
 
 See:
 
 - [Architecture Overview](docs/architecture-overview.md)
+- [Runtime Boundary RFC](docs/runtime-boundary-rfc.md)
 - [Run Resume and Recovery](docs/run-resume-recovery-plan.md)
 - [Live-Fire Validation Plan](docs/live-fire-validation-plan.md)
 - [Contributing](CONTRIBUTING.md)
@@ -55,7 +57,7 @@ See:
 
 - `apps/backend` — FastAPI, SQLAlchemy, Alembic
 - `apps/web` — Next.js, TypeScript, Tailwind, shadcn/ui
-- `apps/host-executor` — host-side execution bridge for `codex`, `gh`, `git`, PTY, and `tmux`
+- `apps/host-executor` — host-side execution bridge for `codex`, `claude`, `gh`, `git`, PTY, and `tmux`
 - `docs` — architecture and operational documentation
 - `infra` — local compose setup and infrastructure assets
 - `scripts` — local development and operational scripts
@@ -72,13 +74,15 @@ gh auth status
 gh auth setup-git
 codex --help
 codex login status
+claude --version
+claude auth status
 ```
 
 Minimum expectations:
 
 - `git` is installed
 - `gh` is installed and already authenticated
-- `codex` is installed and already authenticated
+- at least one supported runtime CLI is installed and already authenticated
 - the host executor runs under the same OS user that owns those CLI sessions
 
 ## Quick start
@@ -176,8 +180,8 @@ At a high level, one run goes through these stages:
 1. create a run from the UI;
 2. prepare a workspace;
 3. clone the repository and create a working branch;
-4. materialize `.codex` and `TASK.md`;
-5. start Codex in the host execution layer;
+4. materialize the runtime bundle and `TASK.md`;
+5. start the selected runtime in the host execution layer;
 6. stream terminal output and run events;
 7. run repository checks;
 8. create a commit;
@@ -190,14 +194,16 @@ If the host executor or transport is interrupted, the platform supports resume a
 
 The platform already includes:
 
-- diagnostics for `git`, `gh`, `codex`, and host readiness;
+- runtime-aware diagnostics for `git`, `gh`, `codex`, `claude`, `tmux`, and host readiness;
 - agent profile and team management;
 - GitHub repository, issue, and PR browsing through `gh`;
 - run history and run details;
 - live terminal output;
 - workspace lifecycle and draft PR creation;
-- multi-agent bundle materialization;
-- run resume and recovery via persisted Codex sessions and `tmux`.
+- multi-agent bundle materialization for Codex and Claude Code;
+- run resume and recovery via persisted runtime sessions and `tmux`;
+- a shared host session engine with runtime-specific parsers and command builders;
+- runtime execution traces for Codex collaboration calls and Claude Agent-tool subagents.
 
 ## Open-source direction
 

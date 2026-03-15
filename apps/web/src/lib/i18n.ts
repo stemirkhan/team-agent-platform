@@ -63,6 +63,7 @@ export function formatRunStatus(
     | "cloning_repo"
     | "materializing_team"
     | "running_setup"
+    | "starting_runtime"
     | "starting_codex"
     | "running"
     | "interrupted"
@@ -86,8 +87,9 @@ export function formatRunStatus(
       return t(locale, { ru: "материализация команды", en: "materializing team" });
     case "running_setup":
       return t(locale, { ru: "setup", en: "running setup" });
+    case "starting_runtime":
     case "starting_codex":
-      return t(locale, { ru: "старт Codex", en: "starting Codex" });
+      return t(locale, { ru: "запуск runtime", en: "starting runtime" });
     case "running":
       return t(locale, { ru: "выполняется", en: "running" });
     case "interrupted":

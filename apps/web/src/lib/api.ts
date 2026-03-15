@@ -19,7 +19,7 @@ export type Agent = {
   markdown_files: AgentMarkdownFile[];
 };
 
-export type RuntimeTarget = "codex";
+export type RuntimeTarget = "codex" | "claude_code";
 export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type HostToolStatus = "ready" | "missing" | "outdated" | "not_authenticated" | "error";
@@ -30,6 +30,7 @@ export type RunStatus =
   | "cloning_repo"
   | "materializing_team"
   | "running_setup"
+  | "starting_runtime"
   | "starting_codex"
   | "running"
   | "interrupted"
@@ -121,6 +122,7 @@ export type HostDiagnosticsSnapshot = {
     git: HostToolDiagnostics;
     gh: HostToolDiagnostics;
     codex: HostToolDiagnostics;
+    claude: HostToolDiagnostics;
     tmux: HostToolDiagnostics;
   };
   warnings: string[];
@@ -130,6 +132,8 @@ export type HostExecutionReadiness = {
   generated_at: string;
   execution_source: HostExecutionSource;
   effective_ready: boolean;
+  requested_runtime: RuntimeTarget | null;
+  runtime_ready: Record<string, boolean>;
   host_executor_url: string | null;
   host_executor_reachable: boolean;
   host_executor_error: string | null;
@@ -141,7 +145,7 @@ export type Run = {
   team_id: string | null;
   team_slug: string;
   team_title: string;
-  runtime_target: "codex";
+  runtime_target: RuntimeTarget;
   repo_owner: string;
   repo_name: string;
   repo_full_name: string;
@@ -157,7 +161,9 @@ export type Run = {
   workspace_id: string | null;
   workspace_path: string | null;
   repo_path: string | null;
+  runtime_session_id: string | null;
   codex_session_id: string | null;
+  claude_session_id: string | null;
   transport_kind: string | null;
   transport_ref: string | null;
   resume_attempt_count: number;
@@ -205,7 +211,7 @@ export type RunEvent = {
   created_at: string;
 };
 
-export type RunReportPhaseKey = "preparation" | "setup" | "codex" | "checks" | "git_pr";
+export type RunReportPhaseKey = "preparation" | "setup" | "runtime" | "checks" | "git_pr";
 export type RunReportPhaseStatus =
   | "not_started"
   | "running"
@@ -261,6 +267,7 @@ export type RunCreatePayload = {
   task_text?: string;
   title?: string;
   summary?: string;
+  runtime_target?: RuntimeTarget;
   codex?: CodexExportOptions;
 };
 
@@ -271,7 +278,7 @@ export type FetchRunsOptions = {
   repo?: string;
 };
 
-export type CodexSessionStatus =
+export type TerminalSessionStatus =
   | "running"
   | "resuming"
   | "interrupted"
@@ -279,17 +286,20 @@ export type CodexSessionStatus =
   | "failed"
   | "cancelled";
 
-export type CodexSessionRead = {
+export type TerminalSessionRead = {
+  runtime_target: RuntimeTarget;
   run_id: string;
   workspace_id: string;
   repo_path: string;
   command: string[];
-  status: CodexSessionStatus;
+  status: TerminalSessionStatus;
   pid: number | null;
   exit_code: number | null;
   error_message: string | null;
   summary_text: string | null;
+  runtime_session_id: string | null;
   codex_session_id: string | null;
+  claude_session_id: string | null;
   transport_kind: "pty" | "tmux";
   transport_ref: string | null;
   resume_attempt_count: number;
@@ -303,15 +313,15 @@ export type CodexSessionRead = {
   last_output_offset: number;
 };
 
-export type CodexTerminalChunk = {
+export type TerminalChunk = {
   offset: number;
   text: string;
   created_at: string;
 };
 
-export type CodexSessionEventsResponse = {
-  session: CodexSessionRead;
-  items: CodexTerminalChunk[];
+export type TerminalSessionEventsResponse = {
+  session: TerminalSessionRead;
+  items: TerminalChunk[];
   next_offset: number;
 };
 
@@ -734,10 +744,19 @@ export async function refreshHostDiagnostics(): Promise<HostDiagnosticsSnapshot>
   return json as HostDiagnosticsSnapshot;
 }
 
-export async function fetchHostReadiness(): Promise<HostExecutionReadiness> {
-  const response = await fetch(`${getApiBaseUrl()}/host/readiness`, {
-    cache: "no-store"
-  });
+export async function fetchHostReadiness(
+  runtimeTarget?: RuntimeTarget
+): Promise<HostExecutionReadiness> {
+  const params = new URLSearchParams();
+  if (runtimeTarget) {
+    params.set("runtime_target", runtimeTarget);
+  }
+  const response = await fetch(
+    `${getApiBaseUrl()}/host/readiness${params.size ? `?${params.toString()}` : ""}`,
+    {
+      cache: "no-store"
+    }
+  );
 
   const json = await readResponsePayload(response);
   if (!response.ok) {
@@ -747,10 +766,19 @@ export async function fetchHostReadiness(): Promise<HostExecutionReadiness> {
   return json as HostExecutionReadiness;
 }
 
-export async function refreshHostReadiness(): Promise<HostExecutionReadiness> {
-  const response = await fetch(`${getApiBaseUrl()}/host/readiness/refresh`, {
-    method: "POST"
-  });
+export async function refreshHostReadiness(
+  runtimeTarget?: RuntimeTarget
+): Promise<HostExecutionReadiness> {
+  const params = new URLSearchParams();
+  if (runtimeTarget) {
+    params.set("runtime_target", runtimeTarget);
+  }
+  const response = await fetch(
+    `${getApiBaseUrl()}/host/readiness/refresh${params.size ? `?${params.toString()}` : ""}`,
+    {
+      method: "POST"
+    }
+  );
 
   const json = await readResponsePayload(response);
   if (!response.ok) {
@@ -890,7 +918,7 @@ export async function resumeRun(runId: string, token: string): Promise<Run> {
 export async function fetchRunTerminalSession(
   runId: string,
   token: string
-): Promise<CodexSessionRead | null> {
+): Promise<TerminalSessionRead | null> {
   const response = await fetch(`${getApiBaseUrl()}/runs/${runId}/terminal/session`, {
     headers: {
       Authorization: `Bearer ${token}`
@@ -907,14 +935,14 @@ export async function fetchRunTerminalSession(
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch terminal session.");
   }
 
-  return json as CodexSessionRead;
+  return json as TerminalSessionRead;
 }
 
 export async function fetchRunTerminalEvents(
   runId: string,
   token: string,
   offset = 0
-): Promise<CodexSessionEventsResponse | null> {
+): Promise<TerminalSessionEventsResponse | null> {
   const response = await fetch(`${getApiBaseUrl()}/runs/${runId}/terminal/events?offset=${offset}`, {
     headers: {
       Authorization: `Bearer ${token}`
@@ -931,7 +959,7 @@ export async function fetchRunTerminalEvents(
     throw new Error(extractErrorMessage(json) ?? "Failed to fetch terminal events.");
   }
 
-  return json as CodexSessionEventsResponse;
+  return json as TerminalSessionEventsResponse;
 }
 
 export function buildRunTerminalWebSocketUrl(runId: string, token: string): string {
