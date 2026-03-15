@@ -9,6 +9,7 @@ import {
   Github,
   RefreshCcw,
   ServerCog,
+  Sparkles,
   TerminalSquare
 } from "lucide-react";
 
@@ -76,11 +77,36 @@ function getToolEntries(snapshot: HostDiagnosticsSnapshot) {
       tool: snapshot.tools.codex
     },
     {
+      key: "claude",
+      icon: <Sparkles className="h-5 w-5" />,
+      tool: snapshot.tools.claude
+    },
+    {
       key: "tmux",
       icon: <TerminalSquare className="h-5 w-5" />,
       tool: snapshot.tools.tmux
     }
   ];
+}
+
+function runtimeStatusBadge(
+  locale: Locale,
+  label: string,
+  ready: boolean | undefined
+): ReactNode {
+  return (
+    <span
+      className={[
+        "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold",
+        ready
+          ? "bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/30"
+          : "bg-amber-100 text-amber-800 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30"
+      ].join(" ")}
+    >
+      {ready ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+      {label}: {ready ? t(locale, { ru: "готов", en: "ready" }) : t(locale, { ru: "не готов", en: "not ready" })}
+    </span>
+  );
 }
 
 function ToolCard({
@@ -390,8 +416,8 @@ export function HostDiagnosticsPanel({
             </h2>
             <p className="mt-2 max-w-3xl text-sm text-slate-600 dark:text-slate-300">
               {t(locale, {
-                ru: "Здесь видно, какой execution source сейчас выбран для реального запуска и готов ли он к `gh` и `codex` workflow.",
-                en: "This view shows which execution source is currently selected for real runs and whether it is ready for the `gh` and `codex` workflow."
+                ru: "Здесь видно, готов ли текущий execution source к `git`, `gh` и runtime-specific workflow для Codex и Claude Code.",
+                en: "This view shows whether the current execution source is ready for `git`, `gh`, and runtime-specific workflows for Codex and Claude Code."
               })}
             </p>
           </div>
@@ -474,6 +500,10 @@ export function HostDiagnosticsPanel({
                   {snapshot.host_executor_error}
                 </p>
               ) : null}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {runtimeStatusBadge(locale, "Codex", snapshot.runtime_ready.codex)}
+                {runtimeStatusBadge(locale, "Claude Code", snapshot.runtime_ready.claude_code)}
+              </div>
             </div>
           </div>
         ) : null}
@@ -484,8 +514,8 @@ export function HostDiagnosticsPanel({
           locale={locale}
           snapshot={snapshot.host_executor}
           subtitle={t(locale, {
-            ru: "Это целевой execution layer. Именно он должен видеть host `git`, `gh` и `codex` и позже запускать реальные PTY-сессии.",
-            en: "This is the target execution layer. It should be the process that sees host `git`, `gh`, and `codex`, and later starts real PTY sessions."
+            ru: "Это целевой execution layer. Именно он должен видеть host `git`, `gh`, поддерживаемые runtime CLI и позже запускать реальные PTY-сессии.",
+            en: "This is the target execution layer. It should be the process that sees host `git`, `gh`, the supported runtime CLIs, and later starts real PTY sessions."
           })}
           title={t(locale, { ru: "Host Executor", en: "Host Executor" })}
           tone="primary"
