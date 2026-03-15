@@ -29,7 +29,9 @@ type BoardColumn = {
   description: string;
   emptyLabel: string;
   statuses: RunStatus[];
-  columnClassName: string;
+  accentClassName: string;
+  countClassName: string;
+  emptyRuleClassName: string;
 };
 
 type BoardMetricPillProps = {
@@ -57,11 +59,13 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       }),
       emptyLabel: t(locale, {
         ru: "Нет запусков в очереди.",
-        en: "No queued runs."
+        en: "Nothing waiting yet."
       }),
       statuses: laneStatusMap.queued,
-      columnClassName:
-        "border-slate-200 bg-slate-50/70 dark:border-zinc-800 dark:bg-zinc-900/70"
+      accentClassName: "border-t-slate-400 dark:border-t-slate-500",
+      countClassName:
+        "bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-slate-300",
+      emptyRuleClassName: "bg-slate-400"
     },
     {
       key: "active",
@@ -72,11 +76,13 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       }),
       emptyLabel: t(locale, {
         ru: "Сейчас ничего не выполняется.",
-        en: "Nothing is actively executing right now."
+        en: "Nothing running right now."
       }),
       statuses: laneStatusMap.active,
-      columnClassName:
-        "border-emerald-200 bg-emerald-50/70 dark:border-emerald-500/20 dark:bg-emerald-500/5"
+      accentClassName: "border-t-emerald-500 dark:border-t-emerald-400",
+      countClassName:
+        "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+      emptyRuleClassName: "bg-emerald-500"
     },
     {
       key: "finalizing",
@@ -87,11 +93,13 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       }),
       emptyLabel: t(locale, {
         ru: "Нет запусков на финализации.",
-        en: "No runs are in the finalization phase."
+        en: "No runs wrapping up."
       }),
       statuses: laneStatusMap.finalizing,
-      columnClassName:
-        "border-amber-200 bg-amber-50/70 dark:border-amber-500/20 dark:bg-amber-500/5"
+      accentClassName: "border-t-amber-400 dark:border-t-amber-400",
+      countClassName:
+        "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+      emptyRuleClassName: "bg-amber-400"
     },
     {
       key: "completed",
@@ -102,11 +110,13 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       }),
       emptyLabel: t(locale, {
         ru: "Успешных запусков пока нет.",
-        en: "There are no completed runs yet."
+        en: "No completed runs yet."
       }),
       statuses: laneStatusMap.completed,
-      columnClassName:
-        "border-sky-200 bg-sky-50/70 dark:border-sky-500/20 dark:bg-sky-500/5"
+      accentClassName: "border-t-sky-500 dark:border-t-sky-400",
+      countClassName:
+        "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
+      emptyRuleClassName: "bg-sky-500"
     },
     {
       key: "failed",
@@ -117,11 +127,13 @@ function buildBoardColumns(locale: Locale): BoardColumn[] {
       }),
       emptyLabel: t(locale, {
         ru: "Нет прерванных, упавших или отмененных запусков.",
-        en: "No interrupted, failed, or cancelled runs."
+        en: "Clean — no failures."
       }),
       statuses: laneStatusMap.failed,
-      columnClassName:
-        "border-rose-200 bg-rose-50/70 dark:border-rose-500/20 dark:bg-rose-500/5"
+      accentClassName: "border-t-rose-500 dark:border-t-rose-400",
+      countClassName:
+        "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300",
+      emptyRuleClassName: "bg-rose-500"
     }
   ];
 }
@@ -402,31 +414,49 @@ export function ExecutionBoardPanel({ locale }: ExecutionBoardPanelProps) {
       ) : null}
 
       {user && totalRuns > 0 ? (
-        <div className="grid gap-4 xl:grid-cols-5 xl:items-start">
+        <div className="grid gap-3 xl:grid-cols-5 xl:items-start">
           {boardColumns.map((column) => (
             <section
               className={cn(
-                "flex min-h-[18rem] self-start flex-col rounded-3xl border p-4",
-                column.columnClassName
+                "flex min-h-[18rem] self-start flex-col rounded-2xl border border-t-2 border-slate-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950",
+                column.accentClassName
               )}
               key={column.key}
             >
-              <div className="mb-4">
+              {/* Lane header */}
+              <div className="mb-3">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-lg font-black text-slate-900 dark:text-slate-50">
+                  <h3 className="text-sm font-bold tracking-wide text-slate-800 dark:text-slate-100">
                     {column.title}
                   </h3>
-                  <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-black/5 dark:bg-zinc-950/80 dark:text-slate-200 dark:ring-white/10">
+                  <span
+                    className={cn(
+                      "min-w-[1.5rem] rounded-full px-2 py-0.5 text-center text-xs font-semibold tabular-nums",
+                      column.countClassName
+                    )}
+                  >
                     {groupedRuns[column.key].length}
                   </span>
                 </div>
-                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{column.description}</p>
+                <p className="mt-1.5 text-[11px] leading-snug text-slate-400 dark:text-slate-500">
+                  {column.description}
+                </p>
               </div>
+
+              <div className="mb-3 border-t border-slate-100 dark:border-zinc-800" />
 
               <div className="space-y-3">
                 {groupedRuns[column.key].length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300/80 bg-white/60 px-4 py-4 text-sm text-slate-500 dark:border-zinc-700 dark:bg-zinc-950/40 dark:text-slate-400">
-                    {column.emptyLabel}
+                  <div className="flex flex-col items-center gap-2 py-8 text-center">
+                    <div
+                      className={cn(
+                        "h-0.5 w-8 rounded-full opacity-40",
+                        column.emptyRuleClassName
+                      )}
+                    />
+                    <p className="text-xs font-medium text-slate-400 dark:text-slate-500">
+                      {column.emptyLabel}
+                    </p>
                   </div>
                 ) : null}
 
