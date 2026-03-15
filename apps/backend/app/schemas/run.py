@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.models.export_job import RuntimeTarget
 from app.models.run import RunEventType, RunStatus
 from app.schemas.export import CodexExportOptions
 
@@ -23,6 +24,7 @@ class RunCreate(BaseModel):
     task_text: str | None = Field(default=None, min_length=1, max_length=20_000)
     title: str | None = Field(default=None, min_length=1, max_length=255)
     summary: str | None = Field(default=None, max_length=4_000)
+    runtime_target: RuntimeTarget = RuntimeTarget.CODEX
     codex: CodexExportOptions | None = None
 
     @model_validator(mode="after")
@@ -33,7 +35,7 @@ class RunCreate(BaseModel):
         return self
 
 
-RunReportPhaseKey = Literal["preparation", "setup", "codex", "checks", "git_pr"]
+RunReportPhaseKey = Literal["preparation", "setup", "runtime", "checks", "git_pr"]
 RunReportPhaseStatus = Literal[
     "not_started",
     "running",
@@ -85,7 +87,7 @@ class RunRead(BaseModel):
     team_id: UUID | None = None
     team_slug: str
     team_title: str
-    runtime_target: Literal["codex"]
+    runtime_target: RuntimeTarget
     repo_owner: str
     repo_name: str
     repo_full_name: str
@@ -101,7 +103,9 @@ class RunRead(BaseModel):
     workspace_id: str | None = None
     workspace_path: str | None = None
     repo_path: str | None = None
+    runtime_session_id: str | None = None
     codex_session_id: str | None = None
+    claude_session_id: str | None = None
     transport_kind: str | None = None
     transport_ref: str | None = None
     resume_attempt_count: int = 0

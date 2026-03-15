@@ -1,8 +1,9 @@
 """Host diagnostics endpoints for local execution prerequisites."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.core.config import get_settings
+from app.models.export_job import RuntimeTarget
 from app.schemas.host import HostDiagnosticsResponse, HostExecutionReadinessResponse
 from app.services.host_execution_service import (
     HostExecutionReadinessService,
@@ -38,12 +39,20 @@ def refresh_host_diagnostics() -> HostDiagnosticsResponse:
 
 
 @router.get("/readiness", response_model=HostExecutionReadinessResponse)
-def get_host_readiness() -> HostExecutionReadinessResponse:
+def get_host_readiness(
+    runtime_target: RuntimeTarget | None = Query(default=None),
+) -> HostExecutionReadinessResponse:
     """Return host-executor readiness."""
-    return readiness_service.build_readiness()
+    return readiness_service.build_readiness(
+        runtime_target=runtime_target.value if runtime_target is not None else None
+    )
 
 
 @router.post("/readiness/refresh", response_model=HostExecutionReadinessResponse)
-def refresh_host_readiness() -> HostExecutionReadinessResponse:
+def refresh_host_readiness(
+    runtime_target: RuntimeTarget | None = Query(default=None),
+) -> HostExecutionReadinessResponse:
     """Return a fresh host-executor readiness snapshot."""
-    return readiness_service.build_readiness()
+    return readiness_service.build_readiness(
+        runtime_target=runtime_target.value if runtime_target is not None else None
+    )

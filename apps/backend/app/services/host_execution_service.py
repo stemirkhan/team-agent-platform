@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 from app.core.config import Settings
+from app.models.export_job import RuntimeTarget
 from app.schemas.host import (
     HostDiagnosticsResponse,
     HostExecutionReadinessResponse,
     HostExecutionSource,
+    HostToolStatus,
 )
 
 
@@ -33,7 +36,11 @@ class HostExecutionReadinessService:
     ) -> None:
         self.settings = settings
 
-    def build_readiness(self) -> HostExecutionReadinessResponse:
+    def build_readiness(
+        self,
+        *,
+        runtime_target: str | None = None,
+    ) -> HostExecutionReadinessResponse:
         """Build readiness for the host executor bridge only."""
         host_executor_url = self._normalize_base_url(self.settings.host_executor_base_url)
 
@@ -42,6 +49,8 @@ class HostExecutionReadinessService:
                 generated_at=datetime.now(UTC),
                 execution_source=HostExecutionSource.HOST_EXECUTOR,
                 effective_ready=False,
+                requested_runtime=RuntimeTarget(runtime_target) if runtime_target else None,
+                runtime_ready={},
                 host_executor_url=None,
                 host_executor_reachable=False,
                 host_executor_error=(
@@ -59,16 +68,27 @@ class HostExecutionReadinessService:
                 generated_at=datetime.now(UTC),
                 execution_source=HostExecutionSource.HOST_EXECUTOR,
                 effective_ready=False,
+                requested_runtime=RuntimeTarget(runtime_target) if runtime_target else None,
+                runtime_ready={},
                 host_executor_url=host_executor_url,
                 host_executor_reachable=False,
                 host_executor_error=error_message,
                 host_executor=None,
             )
 
+        runtime_ready = self._build_runtime_ready_map(host_executor_snapshot)
+        effective_ready = (
+            runtime_ready.get(runtime_target, False)
+            if runtime_target is not None
+            else any(runtime_ready.values())
+        )
+
         return HostExecutionReadinessResponse(
             generated_at=datetime.now(UTC),
             execution_source=HostExecutionSource.HOST_EXECUTOR,
-            effective_ready=host_executor_snapshot.ready,
+            effective_ready=effective_ready,
+            requested_runtime=RuntimeTarget(runtime_target) if runtime_target else None,
+            runtime_ready=runtime_ready,
             host_executor_url=host_executor_url,
             host_executor_reachable=True,
             host_executor_error=None,
@@ -98,6 +118,26 @@ class HostExecutionReadinessService:
         base_url: str,
     ) -> tuple[HostDiagnosticsResponse | None, str | None]:
         """Fetch diagnostics from the host executor over HTTP."""
+        max_attempts = 2
+        last_error: str | None = None
+
+        for attempt in range(max_attempts):
+            snapshot, error_message = self._fetch_host_executor_snapshot_once(base_url)
+            if snapshot is not None:
+                return snapshot, None
+
+            last_error = error_message
+            if attempt + 1 >= max_attempts or not self._is_retryable_snapshot_error(error_message):
+                break
+            time.sleep(0.2)
+
+        return None, last_error
+
+    def _fetch_host_executor_snapshot_once(
+        self,
+        base_url: str,
+    ) -> tuple[HostDiagnosticsResponse | None, str | None]:
+        """Fetch one diagnostics snapshot attempt from the host executor."""
         url = urljoin(f"{base_url}/", "diagnostics")
         request = Request(url, headers={"Accept": "application/json"})
 
@@ -124,9 +164,41 @@ class HostExecutionReadinessService:
         return snapshot, None
 
     @staticmethod
+    def _is_retryable_snapshot_error(error_message: str | None) -> bool:
+        """Return whether one diagnostics fetch error is likely transient."""
+        if not error_message:
+            return False
+
+        normalized = error_message.lower()
+        if normalized.startswith("host executor is unreachable:"):
+            return True
+        if normalized.startswith("host executor request failed:"):
+            return True
+        if normalized.startswith("host executor returned http "):
+            try:
+                code = int(normalized.removeprefix("host executor returned http ").split(".", 1)[0])
+            except ValueError:
+                return False
+            return code >= 500
+        return False
+
+    @staticmethod
     def _normalize_base_url(value: str | None) -> str | None:
         """Normalize optional base URL configuration."""
         if value is None:
             return None
         normalized = value.strip().rstrip("/")
         return normalized or None
+
+    @staticmethod
+    def _build_runtime_ready_map(snapshot: HostDiagnosticsResponse) -> dict[str, bool]:
+        """Return runtime-specific readiness from the diagnostics snapshot."""
+        core_ready = snapshot.pty_supported and all(
+            tool.status == HostToolStatus.READY for tool in (snapshot.tools.git, snapshot.tools.gh)
+        )
+        return {
+            RuntimeTarget.CODEX.value: core_ready
+            and snapshot.tools.codex.status == HostToolStatus.READY,
+            RuntimeTarget.CLAUDE_CODE.value: core_ready
+            and snapshot.tools.claude.status == HostToolStatus.READY,
+        }

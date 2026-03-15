@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from host_executor_app.api.claude import router as claude_router
 from host_executor_app.api.codex import router as codex_router
 from host_executor_app.api.github import router as github_router
 from host_executor_app.api.workspaces import router as workspaces_router
@@ -43,3 +44,4 @@ def diagnostics() -> HostDiagnosticsResponse:
 app.include_router(github_router)
 app.include_router(workspaces_router)
 app.include_router(codex_router)
+app.include_router(claude_router)

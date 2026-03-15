@@ -2,9 +2,16 @@
 
 from fastapi.testclient import TestClient
 
+from host_executor_app.api import claude as claude_api
 from host_executor_app.api import codex as codex_api
 from host_executor_app.api import github as github_api
 from host_executor_app.main import app
+from host_executor_app.schemas.claude import (
+    ClaudeSessionEventsResponse,
+    ClaudeSessionRead,
+    ClaudeSessionStart,
+    ClaudeTerminalChunk,
+)
 from host_executor_app.schemas.codex import (
     CodexSessionEventsResponse,
     CodexSessionRead,
@@ -51,6 +58,7 @@ def test_host_executor_diagnostics_shape() -> None:
     payload = response.json()
     assert "ready" in payload
     assert "tools" in payload
+    assert "claude" in payload["tools"]
     assert "codex" in payload["tools"]
 
 
@@ -380,6 +388,96 @@ def test_host_executor_codex_session_endpoints(monkeypatch) -> None:
     assert cancel_response.json()["status"] == "cancelled"
 
     resume_response = client.post("/codex/sessions/run-1/resume")
+    assert resume_response.status_code == 200
+    assert resume_response.json()["status"] == "resuming"
+    assert resume_response.json()["resume_attempt_count"] == 1
+
+
+def test_host_executor_claude_session_endpoints(monkeypatch) -> None:
+    """Claude endpoints should expose normalized session payloads."""
+    client = TestClient(app)
+
+    session = ClaudeSessionRead(
+        run_id="run-claude-1",
+        workspace_id="ws-claude-1",
+        repo_path="/tmp/ws-claude-1/repo",
+        command=[
+            "claude",
+            "-p",
+            "--verbose",
+            "--output-format",
+            "stream-json",
+            "--session-id",
+            "88a7b103-6ca7-52f1-a774-a713ca889ed8",
+        ],
+        status="running",
+        pid=23456,
+        claude_session_id="88a7b103-6ca7-52f1-a774-a713ca889ed8",
+        started_at="2026-03-14T10:00:00Z",
+        last_output_offset=1,
+    )
+    events = ClaudeSessionEventsResponse(
+        session=session,
+        items=[
+            ClaudeTerminalChunk(
+                offset=0,
+                text='{"type":"assistant","message":{"content":[{"type":"text","text":"running claude"}]}}\n',
+                created_at="2026-03-14T10:00:01Z",
+            )
+        ],
+        next_offset=1,
+    )
+
+    monkeypatch.setattr(
+        claude_api.claude_session_service,
+        "start_session",
+        lambda payload: session,
+    )
+    monkeypatch.setattr(
+        claude_api.claude_session_service,
+        "get_session",
+        lambda run_id: session,
+    )
+    monkeypatch.setattr(
+        claude_api.claude_session_service,
+        "get_events",
+        lambda run_id, offset: events,
+    )
+    monkeypatch.setattr(
+        claude_api.claude_session_service,
+        "cancel_session",
+        lambda run_id: session.model_copy(update={"status": "cancelled"}),
+    )
+    monkeypatch.setattr(
+        claude_api.claude_session_service,
+        "resume_session",
+        lambda run_id: session.model_copy(update={"status": "resuming", "resume_attempt_count": 1}),
+    )
+
+    start_response = client.post(
+        "/claude/sessions/start",
+        json=ClaudeSessionStart(
+            run_id="run-claude-1",
+            workspace_id="ws-claude-1",
+            prompt_text="Run TASK.md with Claude.",
+        ).model_dump(),
+    )
+    assert start_response.status_code == 201
+    assert start_response.json()["status"] == "running"
+
+    get_response = client.get("/claude/sessions/run-claude-1")
+    assert get_response.status_code == 200
+    assert get_response.json()["repo_path"] == "/tmp/ws-claude-1/repo"
+
+    events_response = client.get("/claude/sessions/run-claude-1/events?offset=0")
+    assert events_response.status_code == 200
+    assert "running claude" in events_response.json()["items"][0]["text"]
+
+    cancel_response = client.post("/claude/sessions/run-claude-1/cancel")
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "cancelled"
+
+    resume_response = client.post("/claude/sessions/run-claude-1/resume")
     assert resume_response.status_code == 200
     assert resume_response.json()["status"] == "resuming"
     assert resume_response.json()["resume_attempt_count"] == 1

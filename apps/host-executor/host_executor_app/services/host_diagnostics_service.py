@@ -20,13 +20,14 @@ from host_executor_app.schemas.host import (
 
 
 class HostDiagnosticsService:
-    """Collect readiness diagnostics for git, gh, codex, tmux, and PTY support."""
+    """Collect readiness diagnostics for git, gh, codex, claude, tmux, and PTY support."""
 
     command_timeout_seconds = 10
     minimum_versions = {
         "git": "2.39.0",
         "gh": "2.80.0",
         "codex": "0.100.0",
+        "claude": "2.0.0",
         "tmux": "3.2.0",
     }
 
@@ -35,6 +36,7 @@ class HostDiagnosticsService:
         git = self._inspect_git()
         gh = self._inspect_gh()
         codex = self._inspect_codex()
+        claude = self._inspect_claude()
         tmux = self._inspect_tmux()
         executor_context = self._build_executor_context()
         pty_supported = self._pty_supported()
@@ -56,7 +58,7 @@ class HostDiagnosticsService:
             pty_supported=pty_supported,
             durable_transport_ready=durable_transport_ready,
             executor_context=executor_context,
-            tools=HostDiagnosticsTools(git=git, gh=gh, codex=codex, tmux=tmux),
+            tools=HostDiagnosticsTools(git=git, gh=gh, codex=codex, claude=claude, tmux=tmux),
             warnings=warnings,
         )
 
@@ -281,6 +283,88 @@ class HostDiagnosticsService:
             message="Codex CLI is ready and authenticated.",
         )
 
+    def _inspect_claude(self) -> HostToolDiagnostics:
+        """Return Claude Code CLI diagnostics."""
+        path = self._resolve_tool_path("claude")
+        minimum_version = self.minimum_versions["claude"]
+        if not path:
+            return self._missing_tool(
+                name="claude",
+                minimum_version=minimum_version,
+                steps=[
+                    "Install Claude Code CLI on the host machine.",
+                    "Run `claude auth status` as the same OS user that will execute runs.",
+                ],
+            )
+
+        version, version_ok, error_message = self._resolve_version(
+            path,
+            ["-v"],
+            minimum_version,
+        )
+        if error_message:
+            return self._error_tool(
+                name="claude",
+                path=path,
+                minimum_version=minimum_version,
+                message=error_message,
+                steps=[
+                    "Run `claude -v` directly in the same environment as the host executor.",
+                    "Fix PATH or reinstall Claude Code CLI if the command fails.",
+                ],
+            )
+
+        if not version_ok:
+            return self._outdated_tool(
+                name="claude",
+                path=path,
+                version=version,
+                minimum_version=minimum_version,
+                message=(
+                    f"Claude Code CLI version {version} is older than required "
+                    f"{minimum_version}."
+                ),
+                steps=[
+                    f"Update Claude Code CLI to at least {minimum_version}.",
+                    "Re-run `claude auth status --json` after upgrading.",
+                ],
+            )
+
+        auth_ok, auth_message = self._check_claude_auth(path)
+        if not auth_ok:
+            return HostToolDiagnostics(
+                name="claude",
+                found=True,
+                path=path,
+                version=version,
+                minimum_version=minimum_version,
+                version_ok=True,
+                auth_required=True,
+                auth_ok=False,
+                status=HostToolStatus.NOT_AUTHENTICATED,
+                message=auth_message,
+                remediation_steps=[
+                    (
+                        "Run `claude auth login` or `claude setup-token` as the same OS user "
+                        "that starts the host executor."
+                    ),
+                    "Verify access with `claude auth status --json`.",
+                ],
+            )
+
+        return HostToolDiagnostics(
+            name="claude",
+            found=True,
+            path=path,
+            version=version,
+            minimum_version=minimum_version,
+            version_ok=True,
+            auth_required=True,
+            auth_ok=True,
+            status=HostToolStatus.READY,
+            message="Claude Code CLI is ready and authenticated.",
+        )
+
     def _inspect_tmux(self) -> HostToolDiagnostics:
         """Return tmux diagnostics for durable transport mode."""
         path = self._resolve_tool_path("tmux")
@@ -456,6 +540,30 @@ class HostDiagnosticsService:
 
         return False, detail or "Codex CLI does not report an active login."
 
+    def _check_claude_auth(self, path: str) -> tuple[bool, str]:
+        """Return Claude Code CLI authentication status."""
+        try:
+            result = self._run_command([path, "auth", "status", "--json"])
+        except (OSError, subprocess.SubprocessError) as exc:
+            return False, f"Failed to run claude auth status: {exc}"
+
+        detail = self._combine_output(result)
+        if result.returncode != 0:
+            return False, detail or "Claude Code CLI authentication is not available."
+
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return False, "Could not parse `claude auth status --json` output."
+
+        if payload.get("loggedIn") is True:
+            email = payload.get("email")
+            if isinstance(email, str) and email.strip():
+                return True, f"Authenticated Claude Code session detected for {email.strip()}."
+            return True, "Authenticated Claude Code session detected."
+
+        return False, detail or "Claude Code CLI does not report an active login."
+
     @staticmethod
     def _combine_output(result: subprocess.CompletedProcess[str]) -> str:
         """Merge stdout and stderr into one readable text block."""
@@ -522,8 +630,8 @@ class HostDiagnosticsService:
             found=False,
             minimum_version=minimum_version,
             version_ok=False,
-            auth_required=name in {"gh", "codex"},
-            auth_ok=False if name in {"gh", "codex"} else None,
+            auth_required=name in {"gh", "codex", "claude"},
+            auth_ok=False if name in {"gh", "codex", "claude"} else None,
             status=HostToolStatus.MISSING,
             message=f"{name} was not found in PATH.",
             remediation_steps=steps,
@@ -545,8 +653,8 @@ class HostDiagnosticsService:
             path=path,
             minimum_version=minimum_version,
             version_ok=False,
-            auth_required=name in {"gh", "codex"},
-            auth_ok=False if name in {"gh", "codex"} else None,
+            auth_required=name in {"gh", "codex", "claude"},
+            auth_ok=False if name in {"gh", "codex", "claude"} else None,
             status=HostToolStatus.ERROR,
             message=message,
             remediation_steps=steps,
@@ -570,7 +678,7 @@ class HostDiagnosticsService:
             version=version,
             minimum_version=minimum_version,
             version_ok=False,
-            auth_required=name in {"gh", "codex"},
+            auth_required=name in {"gh", "codex", "claude"},
             auth_ok=None,
             status=HostToolStatus.OUTDATED,
             message=message,

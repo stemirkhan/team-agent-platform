@@ -2,22 +2,16 @@
 
 from __future__ import annotations
 
-import json
-import tomllib
 from datetime import UTC, datetime
-from io import BytesIO
-from pathlib import PurePosixPath
-from zipfile import ZipFile
 
 from fastapi import HTTPException, status
 
-from app.models.export_job import ExportEntityType, RuntimeTarget
+from app.models.export_job import RuntimeTarget
 from app.models.run import RunEventType, RunStatus
 from app.models.team import TeamStatus
 from app.models.user import User
 from app.repositories.run import RunRepository
 from app.repositories.team import TeamRepository
-from app.schemas.codex import CodexSessionEventsResponse, CodexSessionRead, CodexSessionStart
 from app.schemas.export import CodexExportOptions
 from app.schemas.run import (
     RunCreate,
@@ -28,6 +22,7 @@ from app.schemas.run import (
     RunReportPhaseStatus,
     RunReportRead,
 )
+from app.schemas.terminal import TerminalSessionEventsResponse, TerminalSessionRead
 from app.schemas.workspace import (
     WorkspaceCommandsRun,
     WorkspaceCommandsRunResponse,
@@ -39,20 +34,30 @@ from app.schemas.workspace import (
     WorkspacePullRequestCreate,
     WorkspaceRead,
 )
-from app.services.codex_proxy_service import CodexProxyService, CodexProxyServiceError
+from app.services.claude_proxy_service import ClaudeProxyService
+from app.services.codex_proxy_service import CodexProxyService
 from app.services.export_service import ExportService
 from app.services.github_proxy_service import GitHubProxyService, GitHubProxyServiceError
 from app.services.host_execution_service import HostExecutionReadinessService
+from app.services.runtime_adapters import (
+    BackendRuntimeAdapter,
+    ClaudeRuntimeAdapter,
+    CodexRuntimeAdapter,
+    RuntimeAdapterError,
+    RuntimeAdapterRegistry,
+    RuntimeSessionRead,
+)
 from app.services.workspace_proxy_service import WorkspaceProxyService, WorkspaceProxyServiceError
 
 
 class RunService:
-    """Create and inspect local-first Codex runs."""
+    """Create and inspect local-first runtime runs."""
 
     _READY_MESSAGE = (
-        "Workspace is prepared and `.codex` plus `TASK.md` are materialized. "
-        "Codex PTY execution is the next layer."
+        "Workspace is prepared and the runtime bundle plus `TASK.md` are materialized. "
+        "Terminal execution is the next layer."
     )
+    _NO_CHANGES_TO_COMMIT_DETAIL = "Workspace has no changes to commit."
 
     def __init__(
         self,
@@ -61,28 +66,44 @@ class RunService:
         export_service: ExportService,
         workspace_proxy_service: WorkspaceProxyService,
         codex_proxy_service: CodexProxyService,
+        claude_proxy_service: ClaudeProxyService,
         github_proxy_service: GitHubProxyService,
         readiness_service: HostExecutionReadinessService,
+        runtime_adapters: RuntimeAdapterRegistry | None = None,
     ) -> None:
         self.run_repository = run_repository
         self.team_repository = team_repository
         self.export_service = export_service
         self.workspace_proxy_service = workspace_proxy_service
-        self.codex_proxy_service = codex_proxy_service
         self.github_proxy_service = github_proxy_service
         self.readiness_service = readiness_service
+        self.runtime_adapters = runtime_adapters or RuntimeAdapterRegistry(
+            adapters=[
+                CodexRuntimeAdapter(codex_proxy_service),
+                ClaudeRuntimeAdapter(claude_proxy_service),
+            ]
+        )
 
     def create_run(self, payload: RunCreate, current_user: User):
-        """Create a run, prepare its workspace, and materialize Codex inputs."""
+        """Create a run, prepare its workspace, and materialize runtime inputs."""
+        runtime_target = payload.runtime_target.value
+        adapter = self._get_runtime_adapter(runtime_target)
         readiness = self.readiness_service.build_readiness()
-        if not readiness.effective_ready:
+        runtime_ready_map = getattr(readiness, "runtime_ready", None)
+        effective_ready = (
+            runtime_ready_map.get(runtime_target, readiness.effective_ready)
+            if isinstance(runtime_ready_map, dict)
+            else readiness.effective_ready
+        )
+        if not effective_ready:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    "Local execution is not ready. Open diagnostics, fix `git`/`gh`/`codex`, "
-                    "and retry the run."
+                    "Local execution is not ready. Open diagnostics, fix `git`/`gh`/runtime "
+                    "tooling, and retry the run."
                 ),
             )
+        runtime_label = adapter.label
 
         team = self.team_repository.get_by_slug(payload.team_slug)
         if team is None:
@@ -111,7 +132,7 @@ class RunService:
             created_by=current_user.id,
             team_slug=team.slug,
             team_title=team.title,
-            runtime_target=RuntimeTarget.CODEX.value,
+            runtime_target=runtime_target,
             repo_owner=repo.owner,
             repo_name=repo.name,
             repo_full_name=repo.full_name,
@@ -130,7 +151,10 @@ class RunService:
                 issue_title=issue.title if issue else None,
             ),
             task_text=payload.task_text,
-            runtime_config_json=self._build_runtime_config(payload.codex),
+            runtime_config_json=self._build_runtime_config(
+                runtime_target=runtime_target,
+                codex=payload.codex,
+            ),
         )
         self._append_event(
             run_id=run.id,
@@ -185,7 +209,7 @@ class RunService:
                 run = self._transition_run(
                     run,
                     status_value=RunStatus.RUNNING_SETUP,
-                    message="Running repo setup commands before starting Codex.",
+                    message=f"Running repo setup commands before starting {runtime_label}.",
                 )
                 setup_result = self.workspace_proxy_service.run_commands(
                     workspace.id,
@@ -214,7 +238,7 @@ class RunService:
                     return self._fail_run(
                         run,
                         detail=(
-                            "Repo setup commands modified tracked files before Codex execution. "
+                            "Repo setup commands modified tracked files before runtime execution. "
                             f"Review `{execution_config.source_path}` and keep setup read-only. "
                             f"Changed files: {changed_files}."
                         ),
@@ -223,9 +247,13 @@ class RunService:
             run = self._transition_run(
                 run,
                 status_value=RunStatus.MATERIALIZING_TEAM,
-                message="Writing `.codex` bundle and `TASK.md` into the workspace.",
+                message=(
+                    f"Writing {adapter.bundle_label} "
+                    "and `TASK.md` into the workspace."
+                ),
             )
             workspace_files = self._build_workspace_files(
+                runtime_target=runtime_target,
                 team_slug=team.slug,
                 team_startup_prompt=team.startup_prompt,
                 payload=payload,
@@ -253,21 +281,20 @@ class RunService:
             )
             self._append_materialization_audit_event(
                 run_id=run.id,
+                adapter=adapter,
                 files=workspace_files,
             )
             task_markdown = self._find_workspace_file_content(workspace_files, "TASK.md")
             run = self._transition_run(
                 run,
-                status_value=RunStatus.STARTING_CODEX,
-                message="Starting host-side Codex session.",
+                status_value=RunStatus.STARTING_RUNTIME,
+                message=f"Starting host-side {adapter.label} session.",
             )
-            session = self.codex_proxy_service.start_session(
-                payload=self._build_codex_session_payload(
-                    run_id=str(run.id),
-                    workspace_id=workspace.id,
-                    task_markdown=task_markdown,
-                    codex_options=payload.codex,
-                )
+            session = adapter.start_session(
+                run_id=str(run.id),
+                workspace_id=workspace.id,
+                task_markdown=task_markdown,
+                codex_options=payload.codex,
             )
             run = self.run_repository.update(
                 run,
@@ -276,11 +303,15 @@ class RunService:
             run = self._transition_run(
                 run,
                 status_value=RunStatus.RUNNING,
-                message="Codex session is running in the prepared workspace.",
+                message=f"{adapter.label} session is running in the prepared workspace.",
             )
             return run
-        except (WorkspaceProxyServiceError, GitHubProxyServiceError, CodexProxyServiceError) as exc:
-            return self._fail_run(run, detail=exc.detail)
+        except (
+            WorkspaceProxyServiceError,
+            GitHubProxyServiceError,
+            RuntimeAdapterError,
+        ) as exc:
+            return self._fail_run(run, detail=getattr(exc, "detail", str(exc)))
         except HTTPException as exc:
             return self._fail_run(run, detail=str(exc.detail))
         except Exception as exc:  # noqa: BLE001
@@ -305,7 +336,7 @@ class RunService:
             status=status_value,
             repo_full_name=normalized_repo_full_name,
         )
-        items = [self._sync_run_with_codex_session(item) for item in items]
+        items = [self._sync_run_with_runtime_session(item) for item in items]
         return RunListResponse(items=items, total=total, limit=limit, offset=offset)
 
     def get_run(self, run_id, current_user: User):
@@ -314,7 +345,7 @@ class RunService:
         if run is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
         self._ensure_owner(run.created_by, current_user.id)
-        run = self._sync_run_with_codex_session(run)
+        run = self._sync_run_with_runtime_session(run)
         run.run_report = self._build_run_report(run)
         return run
 
@@ -325,8 +356,9 @@ class RunService:
         return RunEventListResponse(items=items, total=len(items))
 
     def cancel_run(self, run_id, current_user: User):
-        """Cancel one running host-side Codex session."""
+        """Cancel one running host-side runtime session."""
         run = self.get_run(run_id, current_user)
+        adapter = self._get_runtime_adapter(run.runtime_target)
         if run.status in {
             RunStatus.COMPLETED.value,
             RunStatus.FAILED.value,
@@ -352,8 +384,8 @@ class RunService:
             )
             return run
         try:
-            session = self.codex_proxy_service.cancel_session(str(run.id))
-        except CodexProxyServiceError as exc:
+            session = adapter.cancel_session(str(run.id))
+        except RuntimeAdapterError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
         if session.status in {"running", "resuming", "cancelled"}:
@@ -376,37 +408,53 @@ class RunService:
         return run
 
     def resume_run(self, run_id, current_user: User):
-        """Resume one interrupted run by restarting Codex from the persisted session id."""
+        """Resume one interrupted run by restarting the persisted runtime session."""
         run = self.get_run(run_id, current_user)
         if run.status != RunStatus.INTERRUPTED.value:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Only interrupted runs can be resumed.",
             )
-        if not run.workspace_id or not run.codex_session_id:
+        if not run.workspace_id:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Run is missing workspace or Codex session metadata required for resume.",
+                detail="Run is missing workspace metadata required for resume.",
             )
+        adapter = self._get_runtime_adapter(run.runtime_target)
+        persisted_runtime_session_id = (
+            run.runtime_session_id or run.codex_session_id or run.claude_session_id
+        )
+        if not persisted_runtime_session_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Run is missing {adapter.label} session metadata required for resume."
+                ),
+            )
+
+        runtime_label = adapter.label
+        runtime_event_prefix = adapter.event_prefix
 
         run = self._transition_run(
             run,
             status_value=RunStatus.RESUMING,
-            message="Resuming the persisted Codex session after host interruption.",
+            message=f"Resuming the persisted {runtime_label} session after host interruption.",
         )
         self._append_event(
             run_id=run.id,
             event_type=RunEventType.NOTE,
             payload={
-                "kind": "codex_resume_requested",
+                "kind": f"{runtime_event_prefix}_resume_requested",
                 "message": "Resume was requested from the interrupted run state.",
+                "runtime_session_id": persisted_runtime_session_id,
                 "codex_session_id": run.codex_session_id,
+                "claude_session_id": run.claude_session_id,
             },
         )
 
         try:
-            session = self.codex_proxy_service.resume_session(str(run.id))
-        except CodexProxyServiceError as exc:
+            session = adapter.resume_session(str(run.id))
+        except RuntimeAdapterError as exc:
             run = self.run_repository.update(
                 run,
                 fields={
@@ -419,8 +467,9 @@ class RunService:
                 run_id=run.id,
                 event_type=RunEventType.NOTE,
                 payload={
-                    "kind": "codex_resume_failed",
+                    "kind": f"{runtime_event_prefix}_resume_failed",
                     "message": exc.detail,
+                    "runtime_session_id": persisted_runtime_session_id,
                 },
             )
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -438,21 +487,26 @@ class RunService:
             run_id=run.id,
             event_type=RunEventType.NOTE,
             payload={
-                "kind": "codex_resume_started",
-                "message": "Host executor started `codex exec resume` for this run.",
+                "kind": f"{runtime_event_prefix}_resume_started",
+                "message": (
+                    "Host executor started runtime resume for this run."
+                    if run.runtime_target == RuntimeTarget.CLAUDE_CODE.value
+                    else "Host executor started `codex exec resume` for this run."
+                ),
                 "resume_attempt_count": session.resume_attempt_count,
-                "codex_session_id": session.codex_session_id,
+                **adapter.build_session_identity_payload(session),
             },
         )
         return run
 
-    def get_terminal_session(self, run_id, current_user: User) -> CodexSessionRead:
+    def get_terminal_session(self, run_id, current_user: User) -> TerminalSessionRead:
         """Return current host-side terminal session for one run."""
         run = self.get_run(run_id, current_user)
         try:
-            return self.codex_proxy_service.get_session(str(run.id))
-        except CodexProxyServiceError as exc:
+            session = self._get_runtime_adapter(run.runtime_target).get_session(str(run.id))
+        except RuntimeAdapterError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return self._get_runtime_adapter(run.runtime_target).normalize_terminal_session(session)
 
     def get_terminal_events(
         self,
@@ -460,13 +514,17 @@ class RunService:
         *,
         offset: int,
         current_user: User,
-    ) -> CodexSessionEventsResponse:
+    ) -> TerminalSessionEventsResponse:
         """Return incremental terminal output for one run."""
         run = self.get_run(run_id, current_user)
         try:
-            return self.codex_proxy_service.get_events(str(run.id), offset=offset)
-        except CodexProxyServiceError as exc:
+            events = self._get_runtime_adapter(run.runtime_target).get_events(
+                str(run.id),
+                offset=offset,
+            )
+        except RuntimeAdapterError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return self._get_runtime_adapter(run.runtime_target).normalize_terminal_events(events)
 
     def _fail_run(self, run, *, detail: str):
         """Persist failed run state and expose the updated run object."""
@@ -512,6 +570,7 @@ class RunService:
     def _build_workspace_files(
         self,
         *,
+        runtime_target: str,
         team_slug: str,
         team_startup_prompt: str | None,
         payload: RunCreate,
@@ -525,14 +584,8 @@ class RunService:
         issue_body: str | None,
     ) -> list[WorkspaceFileWrite]:
         """Return text files that should be written into the prepared workspace."""
-        _, bundle_bytes, _ = self.export_service.build_download_artifact(
-            entity_type=ExportEntityType.TEAM,
-            slug=team_slug,
-            runtime_target=RuntimeTarget.CODEX.value,
-            codex_options=payload.codex,
-        )
-        files = self._extract_text_files_from_zip(bundle_bytes)
-        files["TASK.md"] = self._build_task_markdown(
+        adapter = self._get_runtime_adapter(runtime_target)
+        task_markdown = self._build_task_markdown(
             payload=payload,
             team_startup_prompt=team_startup_prompt,
             repo_full_name=repo_full_name,
@@ -544,29 +597,15 @@ class RunService:
             issue_url=issue_url,
             issue_body=issue_body,
         )
-        return [
-            WorkspaceFileWrite(path=path, content=content)
-            for path, content in sorted(files.items())
-        ]
-
-    @staticmethod
-    def _extract_text_files_from_zip(content: bytes) -> dict[str, str]:
-        """Extract UTF-8 text files from a generated bundle zip."""
-        files: dict[str, str] = {}
-        with ZipFile(BytesIO(content)) as archive:
-            for member in archive.infolist():
-                if member.is_dir():
-                    continue
-                normalized = PurePosixPath(member.filename)
-                if normalized.is_absolute() or any(
-                    part in {"", ".", ".."} for part in normalized.parts
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail="Generated export bundle contains an invalid file path.",
-                    )
-                files[str(normalized)] = archive.read(member).decode("utf-8")
-        return files
+        try:
+            return adapter.build_workspace_files(
+                export_service=self.export_service,
+                team_slug=team_slug,
+                task_markdown=task_markdown,
+                codex_options=payload.codex,
+            )
+        except RuntimeAdapterError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     @classmethod
     def _build_task_markdown(
@@ -591,7 +630,7 @@ class RunService:
             lines.extend(
                 [
                     "",
-                    "## Codex Startup Prompt",
+                    "## Team Startup Prompt",
                     team_startup_prompt.strip(),
                 ]
             )
@@ -655,34 +694,26 @@ class RunService:
         return "\n".join(lines).strip() + "\n"
 
     @staticmethod
-    def _build_runtime_config(codex: CodexExportOptions | None) -> dict[str, object]:
+    def _build_runtime_config(
+        *,
+        runtime_target: str,
+        codex: CodexExportOptions | None,
+    ) -> dict[str, object]:
         """Persist selected runtime parameters for future execution steps."""
-        config: dict[str, object] = {"runtime_target": RuntimeTarget.CODEX.value}
-        if codex is not None:
+        config: dict[str, object] = {"runtime_target": runtime_target}
+        if runtime_target == RuntimeTarget.CODEX.value and codex is not None:
             config["codex"] = codex.model_dump(exclude_none=True)
         return config
 
-    @staticmethod
-    def _build_codex_session_payload(
-        *,
-        run_id: str,
-        workspace_id: str,
-        task_markdown: str,
-        codex_options: CodexExportOptions | None,
-    ) -> CodexSessionStart:
-        """Build payload sent to the host executor for Codex session startup."""
-        return CodexSessionStart(
-            run_id=run_id,
-            workspace_id=workspace_id,
-            prompt_text=task_markdown,
-            model=codex_options.model if codex_options is not None else None,
-            model_reasoning_effort=(
-                codex_options.model_reasoning_effort if codex_options is not None else None
-            ),
-            sandbox_mode=(
-                codex_options.sandbox_mode if codex_options is not None else "workspace-write"
-            ),
-        )
+    def _get_runtime_adapter(self, runtime_target: str) -> BackendRuntimeAdapter:
+        """Return one registered runtime adapter or raise a normalized HTTP error."""
+        adapter = self.runtime_adapters.get(runtime_target)
+        if adapter is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Runtime '{runtime_target}' runs are not implemented yet.",
+            )
+        return adapter
 
     @staticmethod
     def _derive_title(
@@ -765,71 +796,18 @@ class RunService:
         self,
         *,
         run_id,
+        adapter: BackendRuntimeAdapter,
         files: list[WorkspaceFileWrite],
     ) -> None:
-        """Persist one snapshot of the materialized Codex bundle before cleanup."""
-        file_map = {item.path: item.content for item in files}
-        config_toml = file_map.get(".codex/config.toml")
-        task_markdown = file_map.get("TASK.md")
-        configured_agents = self._extract_configured_agents(config_toml)
-        multi_agent_enabled = self._config_enables_multi_agent(config_toml)
-        agent_configs = [
-            {
-                "key": path.rsplit("/", maxsplit=1)[-1].removesuffix(".toml"),
-                "path": path,
-                "content": content,
-            }
-            for path, content in sorted(file_map.items())
-            if path.startswith(".codex/agents/") and path.endswith(".toml")
-        ]
-
-        if multi_agent_enabled:
-            message = (
-                f"Materialized Codex multi-agent bundle with "
-                f"{len(configured_agents)} configured role(s)."
-            )
-        else:
-            message = "Materialized Codex bundle for the run workspace."
-
+        """Persist one snapshot of the materialized runtime bundle before cleanup."""
+        payload = adapter.build_materialization_audit_payload(files=files)
+        if payload is None:
+            return
         self._append_event(
             run_id=run_id,
             event_type=RunEventType.NOTE,
-            payload={
-                "kind": "codex_bundle",
-                "message": message,
-                "multi_agent_enabled": multi_agent_enabled,
-                "configured_agents": configured_agents,
-                "config_toml": config_toml,
-                "agent_configs": agent_configs,
-                "task_markdown": task_markdown,
-            },
+            payload=payload,
         )
-
-    @classmethod
-    def _extract_configured_agents(cls, config_toml: str | None) -> list[str]:
-        """Return configured Codex agent keys from one materialized config."""
-        if not config_toml:
-            return []
-        try:
-            parsed = tomllib.loads(config_toml)
-        except tomllib.TOMLDecodeError:
-            return []
-        agents = parsed.get("agents")
-        if not isinstance(agents, dict):
-            return []
-        return [str(key) for key in agents.keys()]
-
-    @staticmethod
-    def _config_enables_multi_agent(config_toml: str | None) -> bool:
-        """Return whether one materialized config explicitly enables multi-agent mode."""
-        if not config_toml:
-            return False
-        try:
-            parsed = tomllib.loads(config_toml)
-        except tomllib.TOMLDecodeError:
-            return False
-        features = parsed.get("features")
-        return isinstance(features, dict) and bool(features.get("multi_agent"))
 
     @staticmethod
     def _find_workspace_file_content(
@@ -867,9 +845,10 @@ class RunService:
             f"(exit code {failed_item.exit_code})."
         )
 
-    def _sync_run_with_codex_session(self, run):
-        """Reconcile DB run state with host-side Codex session state when needed."""
+    def _sync_run_with_runtime_session(self, run):
+        """Reconcile DB run state with host-side runtime session state when needed."""
         if run.status not in {
+            RunStatus.STARTING_RUNTIME.value,
             RunStatus.STARTING_CODEX.value,
             RunStatus.RUNNING.value,
             RunStatus.RESUMING.value,
@@ -877,13 +856,14 @@ class RunService:
             return run
 
         try:
-            session = self.codex_proxy_service.get_session(str(run.id))
-        except CodexProxyServiceError as exc:
+            adapter = self._get_runtime_adapter(run.runtime_target)
+            session = adapter.get_session(str(run.id))
+        except RuntimeAdapterError as exc:
             if exc.status_code == 404:
                 return self._fail_run(
                     run,
                     detail=(
-                        "Host-side Codex session state was lost. "
+                        f"Host-side {adapter.label} session state was lost. "
                         "This usually means the host executor restarted during the run. "
                         "Relaunch the run."
                     ),
@@ -911,25 +891,17 @@ class RunService:
                     event_type=RunEventType.STATUS,
                     payload={
                         "status": RunStatus.RUNNING.value,
-                        "message": "Codex session resumed and is running again.",
+                        "message": f"{adapter.label} session resumed and is running again.",
                     },
                 )
                 self._append_event(
                     run_id=updated.id,
                     event_type=RunEventType.NOTE,
-                    payload={
-                        "kind": (
-                            "codex_auto_resume_completed"
-                            if session.recovered_from_restart
-                            else "codex_resume_completed"
-                        ),
-                        "message": (
-                            "Automatic recovery completed and terminal output is live again."
-                            if session.recovered_from_restart
-                            else "Resume completed and terminal output is live again."
-                        ),
-                        "resume_attempt_count": session.resume_attempt_count,
-                    },
+                    payload=self._build_runtime_resume_completed_note_payload(
+                        adapter=adapter,
+                        session=session,
+                        recovered_before_poll=False,
+                    ),
                 )
                 return updated
             if auto_resume_advanced:
@@ -945,14 +917,11 @@ class RunService:
                 self._append_event(
                     run_id=updated.id,
                     event_type=RunEventType.NOTE,
-                    payload={
-                        "kind": "codex_auto_resume_completed",
-                        "message": (
-                            "Host executor recovered the Codex session automatically "
-                            "before the next poll and terminal output is live again."
-                        ),
-                        "resume_attempt_count": session.resume_attempt_count,
-                    },
+                    payload=self._build_runtime_resume_completed_note_payload(
+                        adapter=adapter,
+                        session=session,
+                        recovered_before_poll=True,
+                    ),
                 )
                 return updated
             if fields:
@@ -976,28 +945,23 @@ class RunService:
                     event_type=RunEventType.STATUS,
                     payload={
                         "status": RunStatus.RESUMING.value,
-                        "message": (
-                            "Host executor restarted and automatic Codex recovery "
-                            "is in progress."
-                        ),
+                        "message": f"Host executor restarted and automatic {adapter.label} recovery is in progress.",
                     },
                 )
                 self._append_event(
                     run_id=updated.id,
                     event_type=RunEventType.NOTE,
-                    payload={
-                        "kind": "codex_auto_resume_started",
-                        "message": (
-                            "Host executor restarted and semantic resume started automatically "
-                            "from the persisted Codex session."
-                        ),
-                        "resume_attempt_count": session.resume_attempt_count,
-                        "codex_session_id": session.codex_session_id,
-                    },
+                    payload=self._build_runtime_resume_started_note_payload(
+                        adapter=adapter,
+                        session=session,
+                    ),
                 )
             return updated
 
-        self._append_codex_terminal_audit_event(run_id=run.id)
+        self._append_runtime_terminal_audit_event(
+            run_id=run.id,
+            adapter=adapter,
+        )
 
         if session.status == "interrupted":
             interrupted_at = self._parse_terminal_timestamp(session.interrupted_at)
@@ -1016,32 +980,25 @@ class RunService:
                 event_type=RunEventType.STATUS,
                 payload={
                     "status": RunStatus.INTERRUPTED.value,
-                    "message": session.error_message or "Codex session was interrupted.",
+                    "message": session.error_message or f"{adapter.label} session was interrupted.",
                 },
             )
             self._append_event(
                 run_id=updated.id,
                 event_type=RunEventType.NOTE,
-                payload={
-                    "kind": "codex_session_interrupted",
-                    "message": session.error_message or "Codex session was interrupted.",
-                    "resumable": session.resumable,
-                    "codex_session_id": session.codex_session_id,
-                    "resume_attempt_count": session.resume_attempt_count,
-                },
+                payload=self._build_runtime_interrupted_note_payload(
+                    adapter=adapter,
+                    session=session,
+                ),
             )
             if session.resumable:
                 self._append_event(
                     run_id=updated.id,
                     event_type=RunEventType.NOTE,
-                    payload={
-                        "kind": "codex_resume_available",
-                        "message": (
-                            "The interrupted Codex session can be resumed "
-                            "from the same run."
-                        ),
-                        "codex_session_id": session.codex_session_id,
-                    },
+                    payload=self._build_runtime_resume_available_note_payload(
+                        adapter=adapter,
+                        session=session,
+                    ),
                 )
             return updated
 
@@ -1065,7 +1022,7 @@ class RunService:
                 event_type=RunEventType.STATUS,
                 payload={
                     "status": RunStatus.CANCELLED.value,
-                    "message": "Codex session was cancelled.",
+                    "message": f"{adapter.label} session was cancelled.",
                 },
             )
             return updated
@@ -1075,7 +1032,7 @@ class RunService:
             fields={
                 **self._build_run_session_fields(session),
                 "status": RunStatus.FAILED.value,
-                "error_message": session.error_message or "Codex session failed.",
+                "error_message": session.error_message or f"{adapter.label} session failed.",
                 "finished_at": self._parse_terminal_timestamp(session.finished_at)
                 or datetime.now(UTC),
             },
@@ -1095,11 +1052,100 @@ class RunService:
         )
         return updated
 
-    @staticmethod
-    def _build_run_session_fields(session: CodexSessionRead) -> dict[str, object]:
-        """Return run fields that mirror host-side Codex session metadata."""
+    def _build_runtime_resume_completed_note_payload(
+        self,
+        *,
+        adapter: BackendRuntimeAdapter,
+        session: RuntimeSessionRead,
+        recovered_before_poll: bool,
+    ) -> dict[str, object]:
+        """Return the standardized runtime note payload for completed resume recovery."""
+        if recovered_before_poll:
+            payload = {
+                "kind": f"{adapter.event_prefix}_auto_resume_completed",
+                "message": (
+                    f"Host executor recovered the {adapter.label} session automatically "
+                    "before the next poll and terminal output is live again."
+                ),
+                "resume_attempt_count": session.resume_attempt_count,
+            }
+        else:
+            payload = {
+                "kind": (
+                    f"{adapter.event_prefix}_auto_resume_completed"
+                    if session.recovered_from_restart
+                    else f"{adapter.event_prefix}_resume_completed"
+                ),
+                "message": (
+                    "Automatic recovery completed and terminal output is live again."
+                    if session.recovered_from_restart
+                    else "Resume completed and terminal output is live again."
+                ),
+                "resume_attempt_count": session.resume_attempt_count,
+            }
+        return {
+            **payload,
+            **adapter.build_note_session_payload(session),
+        }
+
+    def _build_runtime_resume_started_note_payload(
+        self,
+        *,
+        adapter: BackendRuntimeAdapter,
+        session: RuntimeSessionRead,
+    ) -> dict[str, object]:
+        """Return the standardized runtime note payload for automatic resume start."""
+        return {
+            "kind": f"{adapter.event_prefix}_auto_resume_started",
+            "message": (
+                "Host executor restarted and semantic resume started automatically "
+                f"from the persisted {adapter.label} session."
+            ),
+            "resume_attempt_count": session.resume_attempt_count,
+            **adapter.build_note_session_payload(session),
+        }
+
+    def _build_runtime_interrupted_note_payload(
+        self,
+        *,
+        adapter: BackendRuntimeAdapter,
+        session: RuntimeSessionRead,
+    ) -> dict[str, object]:
+        """Return the standardized runtime note payload for interrupted sessions."""
+        return {
+            "kind": f"{adapter.event_prefix}_session_interrupted",
+            "message": session.error_message or f"{adapter.label} session was interrupted.",
+            "resumable": session.resumable,
+            "resume_attempt_count": session.resume_attempt_count,
+            **adapter.build_note_session_payload(session),
+        }
+
+    def _build_runtime_resume_available_note_payload(
+        self,
+        *,
+        adapter: BackendRuntimeAdapter,
+        session: RuntimeSessionRead,
+    ) -> dict[str, object]:
+        """Return the standardized runtime note payload when resume is available."""
+        return {
+            "kind": f"{adapter.event_prefix}_resume_available",
+            "message": (
+                f"The interrupted {adapter.label} session can be resumed "
+                "from the same run."
+            ),
+            **adapter.build_note_session_payload(session),
+        }
+
+    def _build_run_session_fields(
+        self,
+        session: RuntimeSessionRead,
+    ) -> dict[str, object]:
+        """Return run fields that mirror host-side runtime session metadata."""
+        adapter = self._get_runtime_adapter(
+            getattr(session, "runtime_target", None) or self._infer_runtime_target_from_session(session)
+        )
         fields: dict[str, object] = {
-            "codex_session_id": session.codex_session_id,
+            **adapter.build_session_identity_payload(session),
             "transport_kind": session.transport_kind,
             "transport_ref": session.transport_ref,
             "resume_attempt_count": session.resume_attempt_count,
@@ -1108,6 +1154,13 @@ class RunService:
         if interrupted_at is not None:
             fields["interrupted_at"] = interrupted_at
         return fields
+
+    @staticmethod
+    def _infer_runtime_target_from_session(session: RuntimeSessionRead) -> str:
+        """Infer runtime target from a runtime-specific session payload shape."""
+        if getattr(session, "claude_session_id", None) is not None:
+            return RuntimeTarget.CLAUDE_CODE.value
+        return RuntimeTarget.CODEX.value
 
     @staticmethod
     def _parse_terminal_timestamp(value: str | None) -> datetime | None:
@@ -1119,193 +1172,55 @@ class RunService:
         except ValueError:
             return None
 
-    def _append_codex_terminal_audit_event(self, *, run_id) -> None:
-        """Persist one execution-trace snapshot derived from Codex terminal JSON."""
+    def _append_runtime_terminal_audit_event(
+        self,
+        *,
+        run_id,
+        adapter: BackendRuntimeAdapter,
+    ) -> None:
+        """Persist one runtime-specific execution trace when the runtime exposes it."""
         try:
-            session_events = self.codex_proxy_service.get_events(str(run_id), offset=0)
-        except CodexProxyServiceError as exc:
+            payload = adapter.get_terminal_audit_payload(str(run_id))
+        except RuntimeAdapterError as exc:
             self._append_event(
                 run_id=run_id,
                 event_type=RunEventType.NOTE,
                 payload={
-                    "kind": "codex_execution_trace",
-                    "message": "Codex terminal trace could not be captured.",
+                    "kind": f"{adapter.event_prefix}_execution_trace",
+                    "message": f"{adapter.label} terminal trace could not be captured.",
                     "trace_capture_error": exc.detail,
                 },
             )
             return
 
-        trace_payload = self._build_codex_terminal_audit_payload(session_events)
+        if payload is None:
+            return
         self._append_event(
             run_id=run_id,
             event_type=RunEventType.NOTE,
-            payload=trace_payload,
+            payload=payload,
         )
 
-    @classmethod
-    def _build_codex_terminal_audit_payload(
-        cls,
-        session_events: CodexSessionEventsResponse,
-    ) -> dict[str, object]:
-        """Summarize structured collaboration events into one audit-friendly payload."""
-        spawned_agents_by_thread: dict[str, dict[str, str | None]] = {}
-        item_type_counts: dict[str, int] = {}
-
-        for line in cls._iter_terminal_lines(session_events):
-            if "WARN codex_core::file_watcher: failed to unwatch" in line:
-                continue
-            if not line.strip():
-                continue
-
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            item = payload.get("item")
-            if not isinstance(item, dict):
-                continue
-
-            item_type = item.get("type")
-            if not isinstance(item_type, str):
-                continue
-            item_type_counts[item_type] = item_type_counts.get(item_type, 0) + 1
-
-            if item_type != "collab_tool_call":
-                continue
-
-            tool = item.get("tool")
-            receiver_thread_ids = cls._coerce_receiver_thread_ids(item.get("receiver_thread_ids"))
-            if not receiver_thread_ids:
-                continue
-
-            if tool == "spawn_agent":
-                cls._merge_spawned_agent_states(
-                    spawned_agents_by_thread=spawned_agents_by_thread,
-                    receiver_thread_ids=receiver_thread_ids,
-                    role=cls._read_structured_role(item),
-                    agents_states=item.get("agents_states"),
-                )
-                continue
-
-            if tool in {"wait", "close_agent"}:
-                cls._merge_spawned_agent_states(
-                    spawned_agents_by_thread=spawned_agents_by_thread,
-                    receiver_thread_ids=receiver_thread_ids,
-                    role=None,
-                    agents_states=item.get("agents_states"),
-                )
-
-        spawned_agents = list(spawned_agents_by_thread.values())
-
-        if spawned_agents:
-            signal_level = "confirmed"
-            message = (
-                f"Observed {len(spawned_agents)} spawned agent(s) via collaboration tool calls; "
-                "this is confirmed sub-agent execution."
-            )
-        else:
-            signal_level = "none"
-            message = (
-                "No confirmed sub-agent spawn signals were captured in the Codex terminal output."
-            )
-
-        return {
-            "kind": "codex_execution_trace",
-            "message": message,
-            "multi_agent_signal_level": signal_level,
-            "chunk_count": len(session_events.items),
-            "spawned_agents": spawned_agents[:10],
-            "item_type_counts": item_type_counts,
-        }
-
-    @staticmethod
-    def _iter_terminal_lines(session_events: CodexSessionEventsResponse) -> list[str]:
-        """Return complete terminal lines reconstructed from raw chunk output."""
-        lines: list[str] = []
-        buffer = ""
-        for item in session_events.items:
-            combined = f"{buffer}{item.text}"
-            normalized = combined.replace("\r\n", "\n")
-            parts = normalized.split("\n")
-            buffer = parts.pop() if parts else normalized
-            lines.extend(parts)
-        if buffer.strip():
-            lines.append(buffer)
-        return lines
-
-    @staticmethod
-    def _read_structured_role(value: object) -> str | None:
-        """Return one explicit role slug when it is present in structured tool payloads."""
-        if not isinstance(value, dict):
-            return None
-        for key in ("role", "role_name", "agent_role"):
-            role = value.get(key)
-            if isinstance(role, str) and role.strip():
-                return role.strip()
-        return None
-
-    @staticmethod
-    def _coerce_receiver_thread_ids(value: object) -> list[str]:
-        """Return one stable list of receiver thread ids."""
-        if not isinstance(value, list):
-            return []
-        thread_ids: list[str] = []
-        for item in value:
-            if not isinstance(item, str):
-                continue
-            normalized = item.strip()
-            if not normalized:
-                continue
-            thread_ids.append(normalized)
-        return thread_ids
-
-    @classmethod
-    def _merge_spawned_agent_states(
-        cls,
-        *,
-        spawned_agents_by_thread: dict[str, dict[str, str | None]],
-        receiver_thread_ids: list[str],
-        role: str | None,
-        agents_states: object,
-    ) -> None:
-        """Merge spawned-agent metadata from collab tool calls."""
-        agent_state_map = agents_states if isinstance(agents_states, dict) else {}
-        for thread_id in receiver_thread_ids:
-            agent = spawned_agents_by_thread.setdefault(
-                thread_id,
-                {
-                    "thread_id": thread_id,
-                    "role": None,
-                    "status": None,
-                },
-            )
-            if role and not agent.get("role"):
-                agent["role"] = role
-
-            state_payload = agent_state_map.get(thread_id)
-            if not isinstance(state_payload, dict):
-                continue
-            structured_role = cls._read_structured_role(state_payload)
-            if structured_role and not agent.get("role"):
-                agent["role"] = structured_role
-            status = state_payload.get("status")
-            if isinstance(status, str) and status.strip():
-                agent["status"] = status.strip()
-
-    def _finalize_completed_run(self, run, session: CodexSessionRead):
-        """Convert a completed Codex session into commit, push, and draft-PR artifacts."""
+    def _finalize_completed_run(self, run, session: RuntimeSessionRead):
+        """Convert a completed runtime session into commit, push, and draft-PR artifacts."""
         if run.workspace_id is None:
             return self._fail_run(
                 run,
-                detail="Run is missing workspace metadata required for post-Codex finalization.",
+                detail="Run is missing workspace metadata required for post-run finalization.",
             )
+
+        adapter = self._get_runtime_adapter(run.runtime_target)
+        runtime_label = adapter.label
+        runtime_slug = adapter.summary_label
 
         try:
             run = self._transition_run(
                 run,
                 status_value=RunStatus.COMMITTING,
-                message="Cleaning temporary `.codex` files and preparing a git commit.",
+                message=(
+                    f"Cleaning temporary runtime files and preparing a git commit "
+                    f"for the {runtime_slug} changes."
+                ),
             )
             workspace = self.workspace_proxy_service.cleanup_workspace(run.workspace_id)
             execution_config = self.workspace_proxy_service.get_execution_config(run.workspace_id)
@@ -1314,7 +1229,9 @@ class RunService:
                 return self._complete_run(
                     run,
                     summary_text=session.summary_text,
-                    message="Codex session completed with no repository changes to commit.",
+                    message=(
+                        f"{runtime_label} session completed with no repository changes to commit."
+                    ),
                 )
 
             if execution_config.check_commands:
@@ -1345,15 +1262,32 @@ class RunService:
                         ),
                     )
 
+            recovered = self._recover_from_existing_workspace_finalization(
+                run,
+                summary_text=session.summary_text,
+            )
+            if recovered is not None:
+                return recovered
+
             run = self._transition_run(
                 run,
                 status_value=RunStatus.COMMITTING,
-                message="Creating a git commit from the Codex changes.",
+                message=f"Creating a git commit from the {runtime_slug} changes.",
             )
-            workspace = self.workspace_proxy_service.commit_workspace(
-                run.workspace_id,
-                WorkspaceCommit(message=self._build_commit_message(run)),
-            )
+            try:
+                workspace = self.workspace_proxy_service.commit_workspace(
+                    run.workspace_id,
+                    WorkspaceCommit(message=self._build_commit_message(run)),
+                )
+            except WorkspaceProxyServiceError as exc:
+                if exc.detail == self._NO_CHANGES_TO_COMMIT_DETAIL:
+                    recovered = self._recover_from_existing_workspace_finalization(
+                        run,
+                        summary_text=session.summary_text,
+                    )
+                    if recovered is not None:
+                        return recovered
+                raise
             run = self.run_repository.update(
                 run,
                 fields={
@@ -1374,7 +1308,7 @@ class RunService:
             run = self._transition_run(
                 run,
                 status_value=RunStatus.CREATING_PR,
-                message="Creating a draft pull request for the Codex changes.",
+                message=f"Creating a draft pull request for the {runtime_slug} changes.",
             )
             workspace = self.workspace_proxy_service.create_pull_request(
                 run.workspace_id,
@@ -1403,7 +1337,7 @@ class RunService:
         message: str,
         pr_url: str | None = None,
     ):
-        """Persist final completed state after Codex and optional SCM post-processing."""
+        """Persist final completed state after runtime and optional SCM post-processing."""
         fields: dict[str, object] = {
             "status": RunStatus.COMPLETED.value,
             "error_message": None,
@@ -1433,13 +1367,104 @@ class RunService:
             )
         return updated
 
-    @staticmethod
-    def _build_commit_message(run) -> str:
+    def _recover_from_existing_workspace_finalization(
+        self,
+        run,
+        *,
+        summary_text: str | None,
+    ):
+        """Resume or complete finalization from the current workspace state."""
+        if run.workspace_id is None:
+            return None
+
+        workspace = self.workspace_proxy_service.get_workspace(run.workspace_id)
+        adapter = self._get_runtime_adapter(run.runtime_target)
+        runtime_label = adapter.label
+        runtime_slug = adapter.summary_label
+        run = self.run_repository.update(
+            run,
+            fields={
+                "working_branch": workspace.working_branch,
+                "workspace_path": workspace.workspace_path,
+                "repo_path": workspace.repo_path,
+                "summary": summary_text or run.summary,
+            },
+        )
+
+        if workspace.status == "pull_request_created":
+            return self._complete_run(
+                run,
+                summary_text=summary_text,
+                message="Draft pull request created from the working branch.",
+                pr_url=workspace.pull_request_url,
+            )
+
+        if workspace.status == "pushed":
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.CREATING_PR,
+                message=f"Creating a draft pull request for the {runtime_slug} changes.",
+            )
+            workspace = self.workspace_proxy_service.create_pull_request(
+                run.workspace_id,
+                WorkspacePullRequestCreate(
+                    title=self._build_pr_title(run),
+                    body=self._build_pr_body(run),
+                    draft=True,
+                ),
+            )
+            return self._complete_run(
+                run,
+                summary_text=summary_text,
+                message="Draft pull request created from the working branch.",
+                pr_url=workspace.pull_request_url,
+            )
+
+        if workspace.status == "committed":
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.PUSHING,
+                message="Pushing the working branch to origin.",
+            )
+            workspace = self.workspace_proxy_service.push_workspace(run.workspace_id)
+            run = self._transition_run(
+                run,
+                status_value=RunStatus.CREATING_PR,
+                message=f"Creating a draft pull request for the {runtime_slug} changes.",
+            )
+            workspace = self.workspace_proxy_service.create_pull_request(
+                run.workspace_id,
+                WorkspacePullRequestCreate(
+                    title=self._build_pr_title(run),
+                    body=self._build_pr_body(run),
+                    draft=True,
+                ),
+            )
+            return self._complete_run(
+                run,
+                summary_text=summary_text,
+                message="Draft pull request created from the working branch.",
+                pr_url=workspace.pull_request_url,
+            )
+
+        if workspace.status == "prepared" and not workspace.has_changes:
+            return self._complete_run(
+                run,
+                summary_text=summary_text,
+                message=(
+                    f"{runtime_label} session completed with no repository changes to commit."
+                ),
+            )
+
+        return None
+
+    def _build_commit_message(self, run) -> str:
         """Return a deterministic git commit message for one finalized run."""
         title = run.title.strip()
+        runtime_slug = self._get_runtime_adapter(run.runtime_target).summary_label
         if run.issue_number is not None:
             return f"chore(run): address #{run.issue_number} {title[:140]}".strip()
-        return f"chore(run): apply codex changes for {title[:160]}".strip()
+        return f"chore(run): apply {runtime_slug} changes for {title[:160]}".strip()
 
     @staticmethod
     def _build_pr_title(run) -> str:
@@ -1482,6 +1507,7 @@ class RunService:
         """Build a phase-oriented run report from structured events and workspace metadata."""
         events = self.run_repository.list_events(run_id=run.id)
         workspace = self._try_get_workspace(run.workspace_id)
+        runtime_label = self._get_runtime_adapter(run.runtime_target).label
 
         phases: dict[str, RunReportPhaseRead] = {
             "preparation": RunReportPhaseRead(
@@ -1496,11 +1522,11 @@ class RunService:
                 status="not_started",
                 description="Repository setup commands from execution config.",
             ),
-            "codex": RunReportPhaseRead(
-                key="codex",
+            "runtime": RunReportPhaseRead(
+                key="runtime",
                 order=3,
                 status="not_started",
-                description="Host-side Codex terminal execution.",
+                description=f"Host-side {runtime_label} terminal execution.",
             ),
             "checks": RunReportPhaseRead(
                 key="checks",
@@ -1595,10 +1621,11 @@ class RunService:
             RunStatus.CLONING_REPO.value: "preparation",
             RunStatus.MATERIALIZING_TEAM.value: "preparation",
             RunStatus.RUNNING_SETUP.value: "setup",
-            RunStatus.STARTING_CODEX.value: "codex",
-            RunStatus.RUNNING.value: "codex",
-            RunStatus.INTERRUPTED.value: "codex",
-            RunStatus.RESUMING.value: "codex",
+            RunStatus.STARTING_RUNTIME.value: "runtime",
+            RunStatus.STARTING_CODEX.value: "runtime",
+            RunStatus.RUNNING.value: "runtime",
+            RunStatus.INTERRUPTED.value: "runtime",
+            RunStatus.RESUMING.value: "runtime",
             RunStatus.RUNNING_CHECKS.value: "checks",
             RunStatus.COMMITTING.value: "git_pr",
             RunStatus.PUSHING.value: "git_pr",

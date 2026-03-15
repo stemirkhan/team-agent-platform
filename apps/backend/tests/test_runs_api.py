@@ -8,18 +8,22 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi.testclient import TestClient
 
+from app.schemas.claude import ClaudeSessionEventsResponse, ClaudeSessionRead, ClaudeTerminalChunk
 from app.schemas.codex import CodexSessionEventsResponse, CodexSessionRead, CodexTerminalChunk
 from app.schemas.github import GitHubIssueDetailRead, GitHubRepoRead
+from app.schemas.run import RunCreate
 from app.schemas.workspace import (
     WorkspaceCommandResult,
     WorkspaceCommandsRunResponse,
     WorkspaceExecutionConfigRead,
     WorkspaceRead,
 )
+from app.services.claude_proxy_service import ClaudeProxyService
 from app.services.codex_proxy_service import CodexProxyService, CodexProxyServiceError
 from app.services.export_service import ExportService
 from app.services.github_proxy_service import GitHubProxyService
 from app.services.host_execution_service import HostExecutionReadinessService
+from app.services.runtime_adapters import ClaudeRuntimeAdapter, CodexRuntimeAdapter
 from app.services.run_service import RunService
 from app.services.workspace_proxy_service import WorkspaceProxyService, WorkspaceProxyServiceError
 
@@ -366,7 +370,7 @@ def test_create_run_prepares_workspace_and_records_status_events(
     assert bundle_events[0]["multi_agent_enabled"] is True
     assert bundle_events[0]["configured_agents"] == ["orchestrator"]
     assert bundle_events[0]["task_markdown"].startswith("# Fix run preparation flow")
-    assert "## Codex Startup Prompt" in bundle_events[0]["task_markdown"]
+    assert "## Team Startup Prompt" in bundle_events[0]["task_markdown"]
     assert startup_prompt in bundle_events[0]["task_markdown"]
     assert startup_prompt in captured_prompt["text"]
     statuses = [
@@ -379,9 +383,268 @@ def test_create_run_prepares_workspace_and_records_status_events(
         "preparing",
         "cloning_repo",
         "materializing_team",
-        "starting_codex",
+        "starting_runtime",
         "running",
     ]
+
+
+def test_create_run_starts_claude_runtime_and_exposes_terminal_contract(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Claude runs should start, materialize `.claude`, and expose the shared terminal API."""
+    headers = _auth_headers(
+        client,
+        email="claude-runner@example.com",
+        display_name="Claude Runner",
+    )
+    _publish_agent(
+        client,
+        headers=headers,
+        slug="delivery-orchestrator",
+        title="Delivery Orchestrator",
+    )
+    startup_prompt = "Begin as the Claude lead and delegate focused work to subagents."
+    _publish_team(
+        client,
+        headers=headers,
+        slug="delivery-team-claude",
+        startup_prompt=startup_prompt,
+    )
+
+    monkeypatch.setattr(
+        HostExecutionReadinessService,
+        "build_readiness",
+        lambda self: SimpleNamespace(effective_ready=True),
+    )
+    monkeypatch.setattr(
+        GitHubProxyService,
+        "get_repo",
+        lambda self, owner, repo: GitHubRepoRead(
+            owner=owner,
+            name=repo,
+            full_name=f"{owner}/{repo}",
+            description="Demo repo",
+            url=f"https://github.com/{owner}/{repo}",
+            is_private=False,
+            default_branch="main",
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "prepare_workspace",
+        lambda self, payload: _workspace(),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "materialize_workspace",
+        lambda self, workspace_id, payload: _workspace().model_copy(
+            update={
+                "has_changes": True,
+                "changed_files": [file.path for file in payload.files],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(source_path=".team-agent-platform.toml"),
+    )
+    monkeypatch.setattr(
+        ExportService,
+        "build_download_artifact",
+        lambda self, **kwargs: (
+            "delivery-team-claude.zip",
+            _bundle_bytes(
+                {
+                    ".claude/agents/reviewer.md": (
+                        "---\n"
+                        'name: "reviewer"\n'
+                        'description: "Repository reviewer"\n'
+                        "---\n\n"
+                        "Inspect the repository and capture findings.\n"
+                    ),
+                }
+            ),
+            "application/zip",
+        ),
+    )
+    captured_prompt: dict[str, str] = {}
+
+    def _claude_session(run_id: str, status: str) -> ClaudeSessionRead:
+        return ClaudeSessionRead(
+            run_id=run_id,
+            workspace_id="ws-1",
+            repo_path="/tmp/ws-1/repo",
+            command=[
+                "claude",
+                "-p",
+                "--verbose",
+                "--output-format",
+                "stream-json",
+            ],
+            status=status,
+            pid=65432,
+            exit_code=None,
+            error_message=None,
+            summary_text=None,
+            claude_session_id="88a7b103-6ca7-52f1-a774-a713ca889ed8",
+            transport_kind="tmux",
+            transport_ref=f"tap-claude-run-{run_id}",
+            resume_attempt_count=0,
+            interrupted_at=None,
+            resumable=False,
+            recovered_from_restart=False,
+            input_tokens=120,
+            output_tokens=24,
+            started_at="2026-03-14T10:06:00Z",
+            finished_at=None,
+            last_output_offset=1,
+        )
+
+    def _start_claude_session(self, payload):
+        captured_prompt["text"] = payload.prompt_text
+        return _claude_session(payload.run_id, "running")
+
+    monkeypatch.setattr(ClaudeProxyService, "start_session", _start_claude_session)
+    monkeypatch.setattr(
+        ClaudeProxyService,
+        "get_session",
+        lambda self, run_id: _claude_session(run_id, "running"),
+    )
+    monkeypatch.setattr(
+        ClaudeProxyService,
+        "get_events",
+        lambda self, run_id, offset: ClaudeSessionEventsResponse(
+            session=_claude_session(run_id, "running"),
+            items=[
+                ClaudeTerminalChunk(
+                    offset=0,
+                    text=(
+                        '{"type":"assistant","message":{"content":[{"type":"text","text":"Scanning the repository."}]}}\n'
+                    ),
+                    created_at="2026-03-14T10:06:01Z",
+                )
+            ]
+            if offset == 0
+            else [],
+            next_offset=1,
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/runs",
+        headers=headers,
+        json={
+            "team_slug": "delivery-team-claude",
+            "repo_owner": "stemirkhan",
+            "repo_name": "team-agent-platform",
+            "task_text": "Try the Claude runtime.",
+            "runtime_target": "claude_code",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "running"
+    assert payload["runtime_target"] == "claude_code"
+
+    run_id = payload["id"]
+
+    terminal_session_response = client.get(
+        f"/api/v1/runs/{run_id}/terminal/session",
+        headers=headers,
+    )
+    assert terminal_session_response.status_code == 200
+    assert terminal_session_response.json()["runtime_target"] == "claude_code"
+    assert terminal_session_response.json()["claude_session_id"] == "88a7b103-6ca7-52f1-a774-a713ca889ed8"
+
+    terminal_events_response = client.get(
+        f"/api/v1/runs/{run_id}/terminal/events?offset=0",
+        headers=headers,
+    )
+    assert terminal_events_response.status_code == 200
+    assert "Scanning the repository." in terminal_events_response.json()["items"][0]["text"]
+
+    events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
+    assert events_response.status_code == 200
+    bundle_events = [
+        item["payload_json"]
+        for item in events_response.json()["items"]
+        if item["event_type"] == "note"
+        and item["payload_json"]
+        and item["payload_json"].get("kind") == "claude_bundle"
+    ]
+    assert len(bundle_events) == 1
+    assert bundle_events[0]["agent_files"][0]["name"] == "reviewer"
+    assert startup_prompt in captured_prompt["text"]
+
+
+def test_build_workspace_files_materializes_claude_bundle_and_task_markdown() -> None:
+    """Claude workspace materialization should unpack `.claude` files and append TASK.md."""
+    captured_export_call: dict[str, object] = {}
+    service = RunService(
+        run_repository=SimpleNamespace(),
+        team_repository=SimpleNamespace(),
+        export_service=SimpleNamespace(
+            build_download_artifact=lambda **kwargs: captured_export_call.update(kwargs)
+            or (
+                "delivery-team-claude.zip",
+                _bundle_bytes(
+                    {
+                        ".claude/agents/reviewer.md": (
+                            "---\n"
+                            'name: "reviewer"\n'
+                            'description: "Repository reviewer"\n'
+                            "---\n\n"
+                            "Inspect the repository and capture findings.\n"
+                        ),
+                        "agents/delivery-orchestrator/docs/architecture.md": (
+                            "# Architecture\n\nDocument service boundaries.\n"
+                        ),
+                    }
+                ),
+                "application/zip",
+            )
+        ),
+        workspace_proxy_service=SimpleNamespace(),
+        codex_proxy_service=SimpleNamespace(),
+        claude_proxy_service=SimpleNamespace(),
+        github_proxy_service=SimpleNamespace(),
+        readiness_service=SimpleNamespace(),
+    )
+
+    files = service._build_workspace_files(
+        runtime_target="claude_code",
+        team_slug="delivery-team",
+        team_startup_prompt=(
+            "Begin as the delivery orchestrator and delegate focused work to Claude subagents."
+        ),
+        payload=RunCreate(
+            team_slug="delivery-team",
+            repo_owner="stemirkhan",
+            repo_name="team-agent-platform",
+            runtime_target="claude_code",
+            task_text="Materialize the Claude workspace bundle.",
+        ),
+        repo_full_name="stemirkhan/team-agent-platform",
+        base_branch="main",
+        working_branch="tap/team-agent-platform/demo-branch",
+        execution_config=_execution_config(source_path=".team-agent-platform.toml"),
+        issue_title=None,
+        issue_number=None,
+        issue_url=None,
+        issue_body=None,
+    )
+
+    assert captured_export_call["runtime_target"] == "claude_code"
+    file_map = {item.path: item.content for item in files}
+    assert ".claude/agents/reviewer.md" in file_map
+    assert "agents/delivery-orchestrator/docs/architecture.md" in file_map
+    assert "TASK.md" in file_map
+    assert file_map["TASK.md"].startswith("# Execution Task")
+    assert "Materialize the Claude workspace bundle." in file_map["TASK.md"]
+    assert "## Team Startup Prompt" in file_map["TASK.md"]
 
 
 def test_create_run_returns_failed_state_when_workspace_prepare_breaks(
@@ -636,17 +899,15 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
             check_commands=["make compose-config"],
         ),
     )
+    workspace_state = {
+        "value": _workspace().model_copy(
+            update={"has_changes": True, "changed_files": ["apps/backend/app.py"]}
+        ),
+    }
     monkeypatch.setattr(
         WorkspaceProxyService,
         "get_workspace",
-        lambda self, workspace_id: _workspace().model_copy(
-            update={
-                "status": "pull_request_created",
-                "last_commit_sha": "abcdef1234567890",
-                "pull_request_number": 42,
-                "pull_request_url": "https://github.com/stemirkhan/team-agent-platform/pull/42",
-            }
-        ),
+        lambda self, workspace_id: workspace_state["value"],
     )
     scm_calls: list[str] = []
     monkeypatch.setattr(
@@ -680,33 +941,45 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
         WorkspaceProxyService,
         "commit_workspace",
         lambda self, workspace_id, payload: scm_calls.append(f"commit:{payload.message}")
-        or _workspace().model_copy(
-            update={
-                "status": "committed",
-                "has_changes": False,
-                "changed_files": [],
-                "last_commit_sha": "abcdef1234567890",
-                "last_commit_message": payload.message,
-            }
-        ),
+        or workspace_state.__setitem__(
+            "value",
+            _workspace().model_copy(
+                update={
+                    "status": "committed",
+                    "has_changes": False,
+                    "changed_files": [],
+                    "last_commit_sha": "abcdef1234567890",
+                    "last_commit_message": payload.message,
+                }
+            ),
+        )
+        or workspace_state["value"],
     )
     monkeypatch.setattr(
         WorkspaceProxyService,
         "push_workspace",
         lambda self, workspace_id: scm_calls.append("push")
-        or _workspace().model_copy(update={"status": "pushed"}),
+        or workspace_state.__setitem__(
+            "value",
+            workspace_state["value"].model_copy(update={"status": "pushed"}),
+        )
+        or workspace_state["value"],
     )
     monkeypatch.setattr(
         WorkspaceProxyService,
         "create_pull_request",
         lambda self, workspace_id, payload: scm_calls.append(f"pr:{payload.title}")
-        or _workspace().model_copy(
-            update={
-                "status": "pull_request_created",
-                "pull_request_number": 42,
-                "pull_request_url": "https://github.com/stemirkhan/team-agent-platform/pull/42",
-            }
-        ),
+        or workspace_state.__setitem__(
+            "value",
+            workspace_state["value"].model_copy(
+                update={
+                    "status": "pull_request_created",
+                    "pull_request_number": 42,
+                    "pull_request_url": "https://github.com/stemirkhan/team-agent-platform/pull/42",
+                }
+            ),
+        )
+        or workspace_state["value"],
     )
     monkeypatch.setattr(
         ExportService,
@@ -832,7 +1105,7 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
     phases = {item["key"]: item for item in report["phases"]}
     assert phases["preparation"]["status"] == "completed"
     assert phases["setup"]["status"] == "not_available"
-    assert phases["codex"]["status"] == "completed"
+    assert phases["runtime"]["status"] == "completed"
     assert phases["checks"]["status"] == "completed"
     assert phases["checks"]["commands"][0]["command"] == "make compose-config"
     assert phases["checks"]["commands"][0]["output"] == "ok"
@@ -881,7 +1154,7 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
 
 def test_build_codex_terminal_audit_payload_ignores_non_structured_mentions() -> None:
     """Plain text should not become sub-agent evidence without structured tool calls."""
-    payload = RunService._build_codex_terminal_audit_payload(
+    payload = CodexRuntimeAdapter(SimpleNamespace())._build_terminal_audit_payload(
         CodexSessionEventsResponse(
             session=CodexSessionRead(
                 run_id="run-docs",
@@ -919,7 +1192,7 @@ def test_build_codex_terminal_audit_payload_ignores_non_structured_mentions() ->
 
 def test_build_codex_terminal_audit_payload_confirms_spawned_agents() -> None:
     """spawn_agent tool calls should be treated as confirmed sub-agent execution."""
-    payload = RunService._build_codex_terminal_audit_payload(
+    payload = CodexRuntimeAdapter(SimpleNamespace())._build_terminal_audit_payload(
         CodexSessionEventsResponse(
             session=CodexSessionRead(
                 run_id="run-spawned-agents",
@@ -962,6 +1235,66 @@ def test_build_codex_terminal_audit_payload_confirms_spawned_agents() -> None:
             "role": None,
             "status": "completed",
         }
+    ]
+
+
+def test_build_claude_terminal_audit_payload_confirms_subagent_launches() -> None:
+    """Claude Agent tool calls should be treated as confirmed subagent execution."""
+    payload = ClaudeRuntimeAdapter(SimpleNamespace())._build_terminal_audit_payload(
+        ClaudeSessionEventsResponse(
+            session=ClaudeSessionRead(
+                run_id="run-claude-trace",
+                workspace_id="ws-claude-trace",
+                repo_path="/tmp/ws-claude-trace/repo",
+                command=["claude", "-p", "--verbose", "--output-format", "stream-json"],
+                status="completed",
+                claude_session_id="3256c57b-72fb-5a2c-a386-6dfa9de93a34",
+                runtime_session_id="3256c57b-72fb-5a2c-a386-6dfa9de93a34",
+                started_at="2026-03-14T21:12:18Z",
+                finished_at="2026-03-14T21:21:03Z",
+                last_output_offset=1,
+            ),
+            items=[
+                ClaudeTerminalChunk(
+                    offset=0,
+                    text=(
+                        '{"type":"assistant","message":{"content":[{"type":"tool_use",'
+                        '"id":"toolu_backend","name":"Agent","input":{"description":"Explore backend run structure",'
+                        '"subagent_type":"backend-engineer","run_in_background":true}}]}}\n'
+                        '{"type":"system","subtype":"task_started","task_id":"task-backend",'
+                        '"tool_use_id":"toolu_backend","description":"Explore backend run structure"}\n'
+                        '{"type":"system","subtype":"task_progress","task_id":"task-backend",'
+                        '"tool_use_id":"toolu_backend","description":"Reading apps/backend/app/services/run_service.py"}\n'
+                        '{"type":"assistant","message":{"content":[{"type":"tool_use",'
+                        '"id":"toolu_frontend","name":"Agent","input":{"description":"Explore frontend run UI structure",'
+                        '"subagent_type":"frontend-engineer","run_in_background":true}}]}}\n'
+                        '{"type":"system","subtype":"task_started","task_id":"task-frontend",'
+                        '"tool_use_id":"toolu_frontend","description":"Explore frontend run UI structure"}\n'
+                    ),
+                    created_at="2026-03-14T21:12:31Z",
+                )
+            ],
+            next_offset=1,
+        )
+    )
+
+    assert payload["kind"] == "claude_execution_trace"
+    assert payload["multi_agent_signal_level"] == "confirmed"
+    assert payload["spawned_agents"] == [
+        {
+            "tool_use_id": "toolu_backend",
+            "task_id": "task-backend",
+            "role": "backend-engineer",
+            "description": "Explore backend run structure",
+            "status": "running",
+        },
+        {
+            "tool_use_id": "toolu_frontend",
+            "task_id": "task-frontend",
+            "role": "frontend-engineer",
+            "description": "Explore frontend run UI structure",
+            "status": "running",
+        },
     ]
 
 
@@ -1146,6 +1479,233 @@ def test_get_run_completes_without_commit_when_only_materialized_files_changed(
     assert "Codex session completed with no repository changes to commit." in messages
 
 
+def test_get_run_recovers_when_workspace_was_already_finalized_by_parallel_poll(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """A duplicate finalizer should not fail when another poll already committed and opened a PR."""
+    headers = _auth_headers(
+        client,
+        email="runner-finalization-race@example.com",
+        display_name="Runner Finalization Race",
+    )
+    _publish_agent(
+        client,
+        headers=headers,
+        slug="delivery-orchestrator",
+        title="Delivery Orchestrator",
+    )
+    _publish_team(client, headers=headers, slug="delivery-team-finalization-race")
+
+    monkeypatch.setattr(
+        HostExecutionReadinessService,
+        "build_readiness",
+        lambda self: SimpleNamespace(effective_ready=True),
+    )
+    monkeypatch.setattr(
+        GitHubProxyService,
+        "get_repo",
+        lambda self, owner, repo: GitHubRepoRead(
+            owner=owner,
+            name=repo,
+            full_name=f"{owner}/{repo}",
+            description="Demo repo",
+            url=f"https://github.com/{owner}/{repo}",
+            is_private=False,
+            default_branch="main",
+        ),
+    )
+
+    prepared_workspace = _workspace().model_copy(
+        update={"has_changes": True, "changed_files": ["apps/backend/app.py"]}
+    )
+    finalized_workspace = _workspace().model_copy(
+        update={
+            "status": "pull_request_created",
+            "has_changes": False,
+            "changed_files": [],
+            "last_commit_sha": "abcdef1234567890",
+            "last_commit_message": "chore(run): address #20 Runs: add Run again action from an existing run",
+            "pull_request_number": 42,
+            "pull_request_url": "https://github.com/stemirkhan/team-agent-platform/pull/42",
+        }
+    )
+
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "prepare_workspace",
+        lambda self, payload: _workspace(),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "materialize_workspace",
+        lambda self, workspace_id, payload: _workspace().model_copy(
+            update={"has_changes": True, "changed_files": [".codex/config.toml", "TASK.md"]}
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "cleanup_workspace",
+        lambda self, workspace_id: _workspace().model_copy(
+            update={"has_changes": True, "changed_files": ["apps/backend/app.py"]}
+        ),
+    )
+    get_workspace_calls = {"count": 0}
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_workspace",
+        lambda self, workspace_id: (
+            get_workspace_calls.__setitem__("count", get_workspace_calls["count"] + 1)
+            or (
+                prepared_workspace
+                if get_workspace_calls["count"] == 1
+                else finalized_workspace
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "run_commands",
+        lambda self, workspace_id, payload: WorkspaceCommandsRunResponse(
+            label=payload.label,
+            working_directory=payload.working_directory,
+            success=True,
+            items=[
+                WorkspaceCommandResult(
+                    command="make compose-config",
+                    exit_code=0,
+                    output="ok",
+                    started_at="2026-03-08T10:07:00Z",
+                    finished_at="2026-03-08T10:07:02Z",
+                    succeeded=True,
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "commit_workspace",
+        lambda self, workspace_id, payload: (_ for _ in ()).throw(
+            WorkspaceProxyServiceError(409, "Workspace has no changes to commit.")
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "push_workspace",
+        lambda self, workspace_id: (_ for _ in ()).throw(
+            AssertionError("push_workspace should not be called when the PR already exists")
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "create_pull_request",
+        lambda self, workspace_id, payload: (_ for _ in ()).throw(
+            AssertionError(
+                "create_pull_request should not be called when the PR already exists"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        ExportService,
+        "build_download_artifact",
+        lambda self, **kwargs: (
+            "delivery-team-finalization-race-codex.zip",
+            _bundle_bytes({".codex/config.toml": "[features]\nmulti_agent = true\n"}),
+            "application/zip",
+        ),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "start_session",
+        lambda self, payload: CodexSessionRead(
+            run_id=payload.run_id,
+            workspace_id=payload.workspace_id,
+            repo_path="/tmp/ws-1/repo",
+            command=["codex", "exec", "--json"],
+            status="running",
+            pid=12345,
+            started_at="2026-03-08T10:06:00Z",
+            last_output_offset=0,
+        ),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_session",
+        lambda self, run_id: CodexSessionRead(
+            run_id=run_id,
+            workspace_id="ws-1",
+            repo_path="/tmp/ws-1/repo",
+            command=["codex", "exec", "--json"],
+            status="completed",
+            pid=12345,
+            exit_code=0,
+            summary_text="Codex finished successfully.",
+            started_at="2026-03-08T10:06:00Z",
+            finished_at="2026-03-08T10:08:00Z",
+            last_output_offset=4,
+        ),
+    )
+    monkeypatch.setattr(
+        CodexProxyService,
+        "get_events",
+        lambda self, run_id, offset: CodexSessionEventsResponse(
+            session=CodexSessionRead(
+                run_id=run_id,
+                workspace_id="ws-1",
+                repo_path="/tmp/ws-1/repo",
+                command=["codex", "exec", "--json"],
+                status="completed",
+                pid=12345,
+                exit_code=0,
+                summary_text="Codex finished successfully.",
+                started_at="2026-03-08T10:06:00Z",
+                finished_at="2026-03-08T10:08:00Z",
+                last_output_offset=2,
+            ),
+            items=[],
+            next_offset=0,
+        ),
+    )
+
+    create_response = client.post(
+        "/api/v1/runs",
+        headers=headers,
+        json={
+            "team_slug": "delivery-team-finalization-race",
+            "repo_owner": "stemirkhan",
+            "repo_name": "team-agent-platform",
+            "task_text": "Run codex and recover from duplicate finalization.",
+        },
+    )
+    assert create_response.status_code == 201
+    run_id = create_response.json()["id"]
+
+    get_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
+    assert get_response.status_code == 200
+    assert get_response.json()["status"] == "completed"
+    assert (
+        get_response.json()["pr_url"]
+        == "https://github.com/stemirkhan/team-agent-platform/pull/42"
+    )
+    assert get_response.json()["error_message"] is None
+    assert get_workspace_calls["count"] >= 2
+
+    events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
+    assert events_response.status_code == 200
+    statuses = [
+        item["payload_json"]["status"]
+        for item in events_response.json()["items"]
+        if item["event_type"] == "status"
+    ]
+    assert statuses[-1] == "completed"
+    assert "failed" not in statuses
+
+
 def test_resume_run_recovers_interrupted_codex_session(
     client: TestClient,
     monkeypatch,
@@ -1320,6 +1880,195 @@ def test_resume_run_recovers_interrupted_codex_session(
     assert "codex_resume_requested" in note_kinds
     assert "codex_resume_started" in note_kinds
     assert "codex_resume_completed" in note_kinds
+
+
+def test_resume_run_recovers_interrupted_claude_session(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Interrupted Claude runs should be resumable from the same run id."""
+    headers = _auth_headers(
+        client,
+        email="runner-claude-resume@example.com",
+        display_name="Runner Claude Resume",
+    )
+    _publish_agent(
+        client,
+        headers=headers,
+        slug="delivery-orchestrator",
+        title="Delivery Orchestrator",
+    )
+    _publish_team(client, headers=headers, slug="delivery-team-claude-resume")
+
+    monkeypatch.setattr(
+        HostExecutionReadinessService,
+        "build_readiness",
+        lambda self: SimpleNamespace(effective_ready=True),
+    )
+    monkeypatch.setattr(
+        GitHubProxyService,
+        "get_repo",
+        lambda self, owner, repo: GitHubRepoRead(
+            owner=owner,
+            name=repo,
+            full_name=f"{owner}/{repo}",
+            description="Demo repo",
+            url=f"https://github.com/{owner}/{repo}",
+            is_private=False,
+            default_branch="main",
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "prepare_workspace",
+        lambda self, payload: _workspace(),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "materialize_workspace",
+        lambda self, workspace_id, payload: _workspace().model_copy(
+            update={"has_changes": True, "changed_files": ["TASK.md"]}
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_execution_config",
+        lambda self, workspace_id: _execution_config(),
+    )
+    monkeypatch.setattr(
+        ExportService,
+        "build_download_artifact",
+        lambda self, **kwargs: (
+            "delivery-team-claude-resume.zip",
+            _bundle_bytes(
+                {
+                    ".claude/agents/reviewer.md": (
+                        "---\n"
+                        'name: "reviewer"\n'
+                        'description: "Repository reviewer"\n'
+                        "---\n\n"
+                        "Inspect the repository and capture findings.\n"
+                    )
+                }
+            ),
+            "application/zip",
+        ),
+    )
+
+    session_state = {"status": "running"}
+
+    def _session(run_id: str, status: str) -> ClaudeSessionRead:
+        interrupted_at = "2026-03-14T10:07:00Z" if status == "interrupted" else None
+        finished_at = interrupted_at if status == "interrupted" else None
+        pid = 65432 if status in {"resuming", "running"} else 32123
+        resume_attempt_count = 1 if status in {"resuming", "running"} else 0
+        return ClaudeSessionRead(
+            run_id=run_id,
+            workspace_id="ws-1",
+            repo_path="/tmp/ws-1/repo",
+            command=["claude", "-p", "--verbose", "--output-format", "stream-json"],
+            status=status,
+            pid=pid,
+            exit_code=None,
+            error_message=(
+                "Host executor restarted while Claude was running. The session can be resumed."
+                if status == "interrupted"
+                else None
+            ),
+            summary_text=None,
+            claude_session_id="88a7b103-6ca7-52f1-a774-a713ca889ed8",
+            transport_kind="tmux",
+            transport_ref=f"tap-claude-run-{run_id}",
+            resume_attempt_count=resume_attempt_count,
+            interrupted_at=interrupted_at,
+            resumable=status == "interrupted",
+            recovered_from_restart=status == "interrupted",
+            input_tokens=120,
+            output_tokens=24,
+            started_at="2026-03-14T10:06:00Z",
+            finished_at=finished_at,
+            last_output_offset=1,
+        )
+
+    monkeypatch.setattr(
+        ClaudeProxyService,
+        "start_session",
+        lambda self, payload: _session(payload.run_id, "running"),
+    )
+    monkeypatch.setattr(
+        ClaudeProxyService,
+        "get_session",
+        lambda self, run_id: _session(run_id, session_state["status"]),
+    )
+    monkeypatch.setattr(
+        ClaudeProxyService,
+        "resume_session",
+        lambda self, run_id: session_state.__setitem__("status", "resuming")
+        or _session(run_id, "resuming"),
+    )
+    monkeypatch.setattr(
+        ClaudeProxyService,
+        "get_events",
+        lambda self, run_id, offset: ClaudeSessionEventsResponse(
+            session=_session(run_id, session_state["status"]),
+            items=[
+                ClaudeTerminalChunk(
+                    offset=0,
+                    text='{"type":"assistant","message":{"content":[{"type":"text","text":"Resuming the task."}]}}\n',
+                    created_at="2026-03-14T10:06:01Z",
+                )
+            ]
+            if offset == 0
+            else [],
+            next_offset=1,
+        ),
+    )
+
+    create_response = client.post(
+        "/api/v1/runs",
+        headers=headers,
+        json={
+            "team_slug": "delivery-team-claude-resume",
+            "repo_owner": "stemirkhan",
+            "repo_name": "team-agent-platform",
+            "task_text": "Run Claude and recover from interruption.",
+            "runtime_target": "claude_code",
+        },
+    )
+    assert create_response.status_code == 201
+    run_id = create_response.json()["id"]
+
+    session_state["status"] = "interrupted"
+    interrupted_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
+    assert interrupted_response.status_code == 200
+    assert interrupted_response.json()["status"] == "interrupted"
+    assert interrupted_response.json()["resume_attempt_count"] == 0
+    assert interrupted_response.json()["run_report"]["phases"][2]["status"] == "interrupted"
+
+    resume_response = client.post(f"/api/v1/runs/{run_id}/resume", headers=headers)
+    assert resume_response.status_code == 200
+    assert resume_response.json()["status"] == "resuming"
+    assert resume_response.json()["resume_attempt_count"] == 1
+
+    session_state["status"] = "running"
+    resumed_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
+    assert resumed_response.status_code == 200
+    assert resumed_response.json()["status"] == "running"
+    assert resumed_response.json()["resume_attempt_count"] == 1
+    assert resumed_response.json()["run_report"]["phases"][2]["status"] == "running"
+
+    events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
+    assert events_response.status_code == 200
+    note_kinds = [
+        item["payload_json"].get("kind")
+        for item in events_response.json()["items"]
+        if item["event_type"] == "note" and item["payload_json"]
+    ]
+    assert "claude_session_interrupted" in note_kinds
+    assert "claude_resume_available" in note_kinds
+    assert "claude_resume_requested" in note_kinds
+    assert "claude_resume_started" in note_kinds
+    assert "claude_resume_completed" in note_kinds
 
 
 def test_get_run_auto_recovers_codex_session_after_host_restart(

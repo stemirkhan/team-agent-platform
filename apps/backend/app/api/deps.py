@@ -15,6 +15,7 @@ from app.repositories.team import TeamRepository
 from app.repositories.user import UserRepository
 from app.services.agent_service import AgentService
 from app.services.auth_service import AuthService
+from app.services.claude_proxy_service import ClaudeProxyService
 from app.services.codex_proxy_service import CodexProxyService
 from app.services.export_service import ExportService
 from app.services.github_proxy_service import GitHubProxyService
@@ -71,6 +72,7 @@ def get_run_service(db: Session = Depends(get_db)) -> RunService:
     )
     workspace_proxy_service = WorkspaceProxyService(settings)
     codex_proxy_service = CodexProxyService(settings)
+    claude_proxy_service = ClaudeProxyService(settings)
     github_proxy_service = GitHubProxyService(settings)
     readiness_service = HostExecutionReadinessService(settings)
     return RunService(
@@ -79,6 +81,7 @@ def get_run_service(db: Session = Depends(get_db)) -> RunService:
         export_service,
         workspace_proxy_service,
         codex_proxy_service,
+        claude_proxy_service,
         github_proxy_service,
         readiness_service,
     )

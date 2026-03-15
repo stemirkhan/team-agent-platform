@@ -21,6 +21,7 @@ class RuntimeTarget(StrEnum):
     """Supported runtime targets for export."""
 
     CODEX = "codex"
+    CLAUDE_CODE = "claude_code"
 
 
 class ExportStatus(StrEnum):
