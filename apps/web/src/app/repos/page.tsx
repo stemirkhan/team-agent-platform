@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { ExternalLink, FolderGit2, GitBranch, Search } from "lucide-react";
+import { ExternalLink, FolderGit2, GitBranch } from "lucide-react";
 
+import { RepoFiltersForm } from "@/components/repos/repo-filters-form";
 import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
 import { fetchGitHubRepos } from "@/lib/api";
 import { t } from "@/lib/i18n";
@@ -60,34 +61,7 @@ export default async function ReposPage({
         </div>
       </div>
 
-      <form className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20">
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
-          <label className="space-y-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
-            <span>{t(locale, { ru: "Owner / org", en: "Owner / org" })}</span>
-            <input
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none ring-0 transition placeholder:text-slate-400 focus:border-brand-400 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-slate-50 dark:placeholder:text-slate-500"
-              defaultValue={owner}
-              name="owner"
-              placeholder={t(locale, { ru: "например, stemirkhan", en: "for example, stemirkhan" })}
-            />
-          </label>
-          <label className="space-y-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
-            <span>{t(locale, { ru: "Поиск", en: "Search" })}</span>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                className="w-full rounded-2xl border border-slate-300 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-900 outline-none ring-0 transition placeholder:text-slate-400 focus:border-brand-400 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-slate-50 dark:placeholder:text-slate-500"
-                defaultValue={query}
-                name="q"
-                placeholder={t(locale, { ru: "repo, owner или описание", en: "repo, owner, or description" })}
-              />
-            </div>
-          </label>
-          <button className="inline-flex h-11 items-center justify-center rounded-2xl bg-brand-700 px-5 text-sm font-semibold text-white transition hover:bg-brand-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white" type="submit">
-            {t(locale, { ru: "Обновить", en: "Refresh" })}
-          </button>
-        </div>
-      </form>
+      <RepoFiltersForm locale={locale} owner={owner} query={query} />
 
       {error ? (
         <div className="rounded-3xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-200">
