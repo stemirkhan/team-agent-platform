@@ -15,8 +15,6 @@ Always read these files first before making meaningful changes:
 3. `docs/run-resume-recovery-plan.md` for recovery-related work
 4. `docs/live-fire-validation-plan.md` for validation-related work
 
-After that, check `memory/` and open only the memory file whose filename best matches the current task/topic to avoid loading unrelated context.
-
 If there is a conflict:
 
 - prefer `README.md`

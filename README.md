@@ -219,7 +219,6 @@ apps/
 docs/             Architecture and operational documentation
 images/           README and product screenshots
 infra/            Local compose setup and infrastructure assets
-memory/           Historical engineering notes and internal memory files
 scripts/          Local development and operational scripts
 ```
 
@@ -261,7 +260,7 @@ That means:
 
 - public-facing documentation should be in English;
 - product and architecture intent should live in versioned docs inside the repository;
-- historical internal notes may remain in `memory/`, but current guidance should come from this README and the docs listed above.
+- current guidance should come from this README and the docs listed above.
 
 ## License
 
