@@ -7,6 +7,8 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -31,8 +33,42 @@ class HostDiagnosticsService:
         "tmux": "3.2.0",
     }
 
-    def build_snapshot(self) -> HostDiagnosticsResponse:
+    def __init__(self, cache_ttl_seconds: float = 15.0) -> None:
+        self.cache_ttl_seconds = cache_ttl_seconds
+        self._cache_lock = threading.Lock()
+        self._cached_snapshot: HostDiagnosticsResponse | None = None
+        self._cached_snapshot_monotonic = 0.0
+
+    def build_snapshot(self, *, force_refresh: bool = False) -> HostDiagnosticsResponse:
         """Build a live readiness snapshot from the current process context."""
+        if not force_refresh:
+            cached_snapshot = self._get_cached_snapshot()
+            if cached_snapshot is not None:
+                return cached_snapshot
+
+        with self._cache_lock:
+            if not force_refresh:
+                cached_snapshot = self._get_cached_snapshot()
+                if cached_snapshot is not None:
+                    return cached_snapshot
+
+            snapshot = self._build_snapshot_live()
+            self._cached_snapshot = snapshot
+            self._cached_snapshot_monotonic = time.monotonic()
+            return snapshot.model_copy(deep=True)
+
+    def _get_cached_snapshot(self) -> HostDiagnosticsResponse | None:
+        """Return a fresh cached snapshot when one is available."""
+        if self.cache_ttl_seconds <= 0 or self._cached_snapshot is None:
+            return None
+
+        if (time.monotonic() - self._cached_snapshot_monotonic) > self.cache_ttl_seconds:
+            return None
+
+        return self._cached_snapshot.model_copy(deep=True)
+
+    def _build_snapshot_live(self) -> HostDiagnosticsResponse:
+        """Build a new diagnostics snapshot by probing the local execution context."""
         git = self._inspect_git()
         gh = self._inspect_gh()
         codex = self._inspect_codex()

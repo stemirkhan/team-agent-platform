@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink, MessageSquareText, PlaySquare } from "lucide-r
 
 import { GitHubIssueTrackerPanel } from "@/components/github/github-issue-tracker-panel";
 import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
+import { getRequestAccessToken } from "@/lib/auth-client.server";
 import { fetchGitHubIssue, fetchGitHubRepo } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { getRequestLocale } from "@/lib/i18n.server";
@@ -13,6 +14,7 @@ export default async function RepoIssuePage({
   params: { owner: string; repo: string; number: string };
 }) {
   const locale = getRequestLocale();
+  const token = getRequestAccessToken() ?? undefined;
   const issueNumber = Number(params.number);
 
   let issue = null;
@@ -21,8 +23,8 @@ export default async function RepoIssuePage({
 
   try {
     [repo, issue] = await Promise.all([
-      fetchGitHubRepo(params.owner, params.repo),
-      fetchGitHubIssue(params.owner, params.repo, issueNumber)
+      fetchGitHubRepo(params.owner, params.repo, token),
+      fetchGitHubIssue(params.owner, params.repo, issueNumber, token)
     ]);
   } catch (fetchError) {
     error =

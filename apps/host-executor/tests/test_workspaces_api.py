@@ -3,6 +3,7 @@
 from fastapi.testclient import TestClient
 
 from host_executor_app.api import workspaces as workspace_api
+from host_executor_app.core.config import get_settings
 from host_executor_app.main import app
 from host_executor_app.schemas.workspace import (
     WorkspaceCommandResult,
@@ -17,9 +18,17 @@ from host_executor_app.schemas.workspace import (
 )
 
 
+def _authorized_client() -> TestClient:
+    """Return a TestClient that presents the shared backend secret."""
+    return TestClient(
+        app,
+        headers={"X-TAP-Executor-Secret": get_settings().host_executor_shared_secret},
+    )
+
+
 def test_host_executor_workspace_endpoints(monkeypatch) -> None:
     """Workspace lifecycle endpoints should expose normalized payloads."""
-    client = TestClient(app)
+    client = _authorized_client()
 
     workspace = WorkspaceRead(
         id="ws-1",

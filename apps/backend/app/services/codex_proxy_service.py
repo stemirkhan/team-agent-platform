@@ -10,6 +10,10 @@ from urllib.request import Request, urlopen
 
 from app.core.config import Settings
 from app.schemas.codex import CodexSessionEventsResponse, CodexSessionRead, CodexSessionStart
+from app.services.host_executor_client import (
+    build_host_executor_headers,
+    normalize_host_executor_base_url,
+)
 
 SchemaModel = TypeVar("SchemaModel", CodexSessionRead, CodexSessionEventsResponse)
 
@@ -67,7 +71,7 @@ class CodexProxyService:
         body: dict[str, object] | None = None,
     ) -> Any:
         """Request JSON from the host executor bridge."""
-        base_url = self._normalize_base_url(self.settings.host_executor_base_url)
+        base_url = normalize_host_executor_base_url(self.settings.host_executor_base_url)
         if base_url is None:
             raise CodexProxyServiceError(
                 503,
@@ -77,10 +81,13 @@ class CodexProxyService:
         query = f"?{urlencode(params)}" if params else ""
         url = urljoin(f"{base_url}/", path) + query
         payload = None
-        headers = {"Accept": "application/json"}
+        headers = build_host_executor_headers(self.settings)
         if body is not None:
             payload = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
+            headers = build_host_executor_headers(
+                self.settings,
+                include_json_content_type=True,
+            )
 
         request = Request(url, headers=headers, data=payload, method=method)
 
@@ -135,11 +142,3 @@ class CodexProxyService:
             return payload.strip() or f"Host executor returned HTTP {error.code}."
 
         return f"Host executor returned HTTP {error.code}."
-
-    @staticmethod
-    def _normalize_base_url(value: str | None) -> str | None:
-        """Normalize optional base URL configuration."""
-        if value is None:
-            return None
-        normalized = value.strip().rstrip("/")
-        return normalized or None

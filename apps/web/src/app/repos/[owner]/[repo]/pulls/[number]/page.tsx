@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink, GitBranch, ShieldCheck } from "lucide-react";
 
 import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
+import { getRequestAccessToken } from "@/lib/auth-client.server";
 import { fetchGitHubPull, fetchGitHubPullChecks, fetchGitHubRepo } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { getRequestLocale } from "@/lib/i18n.server";
@@ -28,6 +29,7 @@ export default async function RepoPullPage({
   params: { owner: string; repo: string; number: string };
 }) {
   const locale = getRequestLocale();
+  const token = getRequestAccessToken() ?? undefined;
   const pullNumber = Number(params.number);
 
   let pull = null;
@@ -37,9 +39,9 @@ export default async function RepoPullPage({
 
   try {
     [repo, pull, checks] = await Promise.all([
-      fetchGitHubRepo(params.owner, params.repo),
-      fetchGitHubPull(params.owner, params.repo, pullNumber),
-      fetchGitHubPullChecks(params.owner, params.repo, pullNumber)
+      fetchGitHubRepo(params.owner, params.repo, token),
+      fetchGitHubPull(params.owner, params.repo, pullNumber, token),
+      fetchGitHubPullChecks(params.owner, params.repo, pullNumber, token)
     ]);
   } catch (fetchError) {
     error =

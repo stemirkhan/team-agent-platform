@@ -17,6 +17,10 @@ from app.schemas.host import (
     HostExecutionSource,
     HostToolStatus,
 )
+from app.services.host_executor_client import (
+    build_host_executor_headers,
+    normalize_host_executor_base_url,
+)
 
 
 class HostExecutionReadinessServiceError(Exception):
@@ -40,6 +44,7 @@ class HostExecutionReadinessService:
         self,
         *,
         runtime_target: str | None = None,
+        force_refresh: bool = False,
     ) -> HostExecutionReadinessResponse:
         """Build readiness for the host executor bridge only."""
         host_executor_url = self._normalize_base_url(self.settings.host_executor_base_url)
@@ -61,7 +66,8 @@ class HostExecutionReadinessService:
             )
 
         host_executor_snapshot, error_message = self._fetch_host_executor_snapshot(
-            host_executor_url
+            host_executor_url,
+            force_refresh=force_refresh,
         )
         if host_executor_snapshot is None:
             return HostExecutionReadinessResponse(
@@ -95,7 +101,7 @@ class HostExecutionReadinessService:
             host_executor=host_executor_snapshot,
         )
 
-    def get_host_diagnostics(self) -> HostDiagnosticsResponse:
+    def get_host_diagnostics(self, *, force_refresh: bool = False) -> HostDiagnosticsResponse:
         """Return a live host-executor diagnostics snapshot or raise a normalized error."""
         host_executor_url = self._normalize_base_url(self.settings.host_executor_base_url)
         if host_executor_url is None:
@@ -105,7 +111,8 @@ class HostExecutionReadinessService:
             )
 
         host_executor_snapshot, error_message = self._fetch_host_executor_snapshot(
-            host_executor_url
+            host_executor_url,
+            force_refresh=force_refresh,
         )
         if host_executor_snapshot is None:
             raise HostExecutionReadinessServiceError(
@@ -116,13 +123,18 @@ class HostExecutionReadinessService:
     def _fetch_host_executor_snapshot(
         self,
         base_url: str,
+        *,
+        force_refresh: bool = False,
     ) -> tuple[HostDiagnosticsResponse | None, str | None]:
         """Fetch diagnostics from the host executor over HTTP."""
         max_attempts = 2
         last_error: str | None = None
 
         for attempt in range(max_attempts):
-            snapshot, error_message = self._fetch_host_executor_snapshot_once(base_url)
+            snapshot, error_message = self._fetch_host_executor_snapshot_once(
+                base_url,
+                force_refresh=force_refresh,
+            )
             if snapshot is not None:
                 return snapshot, None
 
@@ -136,10 +148,17 @@ class HostExecutionReadinessService:
     def _fetch_host_executor_snapshot_once(
         self,
         base_url: str,
+        *,
+        force_refresh: bool = False,
     ) -> tuple[HostDiagnosticsResponse | None, str | None]:
         """Fetch one diagnostics snapshot attempt from the host executor."""
-        url = urljoin(f"{base_url}/", "diagnostics")
-        request = Request(url, headers={"Accept": "application/json"})
+        path = "diagnostics/refresh" if force_refresh else "diagnostics"
+        url = urljoin(f"{base_url}/", path)
+        request_kwargs: dict[str, object] = {"headers": build_host_executor_headers(self.settings)}
+        if force_refresh:
+            request_kwargs["data"] = b"{}"
+            request_kwargs["method"] = "POST"
+        request = Request(url, **request_kwargs)
 
         try:
             with urlopen(request, timeout=self.settings.host_executor_timeout_seconds) as response:
@@ -185,10 +204,7 @@ class HostExecutionReadinessService:
     @staticmethod
     def _normalize_base_url(value: str | None) -> str | None:
         """Normalize optional base URL configuration."""
-        if value is None:
-            return None
-        normalized = value.strip().rstrip("/")
-        return normalized or None
+        return normalize_host_executor_base_url(value)
 
     @staticmethod
     def _build_runtime_ready_map(snapshot: HostDiagnosticsResponse) -> dict[str, bool]:

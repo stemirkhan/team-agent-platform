@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     app_name: str = "Team Agent Platform Host Executor"
     app_env: str = "development"
     app_debug: bool = True
-    host_executor_host: str = "0.0.0.0"
+    host_executor_host: str = "127.0.0.1"
     host_executor_port: int = 8765
+    host_executor_shared_secret: str = "dev-host-executor-secret-change-me"
     workspace_root: str = "~/.team-agent-platform/workspaces"
     workspace_command_timeout_seconds: int = 1800
     cors_origins: list[str] = [

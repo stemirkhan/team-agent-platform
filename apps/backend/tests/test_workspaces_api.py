@@ -13,6 +13,20 @@ from app.schemas.workspace import (
 )
 
 
+def _auth_headers(client: TestClient) -> dict[str, str]:
+    """Register the owner user and return bearer auth headers."""
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "owner@example.com",
+            "password": "supersecure123",
+            "display_name": "Owner",
+        },
+    )
+    assert response.status_code == 201
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
 def test_workspace_proxy_endpoints_return_normalized_payloads(
     client: TestClient,
     monkeypatch,
@@ -107,15 +121,7 @@ def test_workspace_proxy_endpoints_return_normalized_payloads(
         lambda workspace_id: None,
     )
 
-    auth_headers = {"Authorization": "Bearer test-token"}
-    monkeypatch.setattr(
-        "app.api.deps.decode_access_token",
-        lambda token: "user-id-1",
-    )
-    monkeypatch.setattr(
-        "app.services.auth_service.AuthService.get_user_by_id",
-        lambda self, user_id: object(),
-    )
+    auth_headers = _auth_headers(client)
 
     list_response = client.get("/api/v1/workspaces", headers=auth_headers)
     assert list_response.status_code == 200

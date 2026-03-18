@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+REPO_FULL_NAME = __REPO_FULL_NAME__
+BASE_BRANCH = __BASE_BRANCH__
+WORKING_BRANCH = __WORKING_BRANCH__
+COMMIT_MESSAGE = __COMMIT_MESSAGE__
+PR_TITLE = __PR_TITLE__
+PR_BODY = __PR_BODY__
+
+
+def _prune_empty_directories(start: Path, *, stop_at: Path) -> None:
+    current = start.resolve()
+    while current != stop_at:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def _restore_materialized_files(repo_root: Path) -> None:
+    state_path = repo_root.parent / ".materialized-files.json"
+    if not state_path.exists():
+        return
+
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise SystemExit(f"Materialized file state is invalid: {state_path}")
+
+    for relative_path, entry in payload.items():
+        if not isinstance(relative_path, str) or not isinstance(entry, dict):
+            continue
+        target_path = (repo_root / relative_path).resolve()
+        try:
+            target_path.relative_to(repo_root.resolve())
+        except ValueError as exc:
+            raise SystemExit(
+                f"Materialized file path escapes the repo root: {relative_path}"
+            ) from exc
+
+        existed_before = bool(entry.get("existed"))
+        previous_content = entry.get("content")
+        if existed_before:
+            if not isinstance(previous_content, str):
+                raise SystemExit(f"Materialized file state is invalid for `{relative_path}`.")
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(previous_content, encoding="utf-8")
+            continue
+
+        if target_path.exists():
+            target_path.unlink(missing_ok=True)
+            _prune_empty_directories(target_path.parent, stop_at=repo_root.resolve())
+
+    state_path.unlink(missing_ok=True)
+
+
+def _run(
+    args: list[str],
+    *,
+    repo_root: Path,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        args,
+        cwd=str(repo_root),
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if check and completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        if not detail:
+            detail = f"Command failed: {' '.join(args)}"
+        raise SystemExit(detail)
+    return completed
+
+
+def main() -> int:
+    repo_root = Path(__file__).resolve().parents[1]
+    _restore_materialized_files(repo_root)
+
+    if _run(["git", "status", "--porcelain=v1"], repo_root=repo_root).stdout.strip():
+        _run(["git", "add", "-A"], repo_root=repo_root)
+        staged_diff = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            cwd=str(repo_root),
+            check=False,
+        )
+        if staged_diff.returncode == 1:
+            _run(["git", "commit", "-m", COMMIT_MESSAGE], repo_root=repo_root)
+        elif staged_diff.returncode != 0:
+            raise SystemExit("Git failed while checking staged changes.")
+
+    ahead_count = _run(
+        ["git", "rev-list", "--count", f"{BASE_BRANCH}..HEAD"],
+        repo_root=repo_root,
+    ).stdout.strip()
+    if ahead_count == "0":
+        print("No repository changes remain after cleanup. Skipping push and pull request.")
+        return 0
+
+    _run(["git", "push", "--set-upstream", "origin", WORKING_BRANCH], repo_root=repo_root)
+
+    existing_pr = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "view",
+            WORKING_BRANCH,
+            "--repo",
+            REPO_FULL_NAME,
+            "--json",
+            "number,url",
+        ],
+        cwd=str(repo_root),
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if existing_pr.returncode == 0:
+        print(existing_pr.stdout.strip() or "Draft pull request already exists.")
+        return 0
+
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", delete=False) as handle:
+        handle.write(PR_BODY)
+        body_path = Path(handle.name)
+
+    try:
+        _run(
+            [
+                "gh",
+                "pr",
+                "create",
+                "--repo",
+                REPO_FULL_NAME,
+                "--base",
+                BASE_BRANCH,
+                "--head",
+                WORKING_BRANCH,
+                "--title",
+                PR_TITLE,
+                "--body-file",
+                str(body_path),
+                "--draft",
+            ],
+            repo_root=repo_root,
+        )
+    finally:
+        body_path.unlink(missing_ok=True)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

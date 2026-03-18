@@ -9,6 +9,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -829,9 +830,9 @@ class BaseRuntimeSessionService:
         """Persist the latest public session snapshot to disk."""
         storage_dir = Path(state.storage_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
-        (storage_dir / "session.json").write_text(
+        self._atomic_write_text(
+            storage_dir / "session.json",
             json.dumps(self._to_read(state).model_dump(), ensure_ascii=True, indent=2),
-            encoding="utf-8",
         )
 
     def _persist_chunk(self, state: RuntimeSessionState, chunk: Any) -> None:
@@ -845,6 +846,30 @@ class BaseRuntimeSessionService:
     def _session_storage_dir(self, run_id: str) -> Path:
         """Return the filesystem directory used to persist one run session."""
         return self.sessions_root / run_id
+
+    @staticmethod
+    def _atomic_write_text(path: Path, content: str) -> None:
+        """Write a text file via atomic replace to avoid torn session snapshots."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=f"{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                handle.write(content)
+                temp_path = Path(handle.name)
+            os.replace(temp_path, path)
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     @staticmethod
     def _process_exists(pid: int) -> bool:

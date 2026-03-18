@@ -2,8 +2,9 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
+from app.api.deps import get_current_operator_user
 from app.core.config import get_settings
 from app.schemas.github import (
     GitHubBranchListResponse,
@@ -19,7 +20,11 @@ from app.schemas.github import (
 )
 from app.services.github_proxy_service import GitHubProxyService, GitHubProxyServiceError
 
-router = APIRouter(prefix="/github", tags=["github"])
+router = APIRouter(
+    prefix="/github",
+    tags=["github"],
+    dependencies=[Depends(get_current_operator_user)],
+)
 github_proxy_service = GitHubProxyService(get_settings())
 
 

@@ -1,10 +1,15 @@
 """Smoke tests for the host executor bridge API."""
 
+import threading
+from datetime import UTC, datetime
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from host_executor_app.api import claude as claude_api
 from host_executor_app.api import codex as codex_api
 from host_executor_app.api import github as github_api
+from host_executor_app.core.config import get_settings
 from host_executor_app.main import app
 from host_executor_app.schemas.claude import (
     ClaudeSessionEventsResponse,
@@ -35,7 +40,23 @@ from host_executor_app.schemas.github import (
     GitHubRepoListResponse,
     GitHubRepoRead,
 )
+from host_executor_app.schemas.host import (
+    HostDiagnosticsResponse,
+    HostDiagnosticsTools,
+    HostExecutorContext,
+    HostToolDiagnostics,
+    HostToolStatus,
+)
 from host_executor_app.services.host_diagnostics_service import HostDiagnosticsService
+from host_executor_app.services.runtime_session_engine import BaseRuntimeSessionService
+
+
+def _authorized_client() -> TestClient:
+    """Return a TestClient that presents the shared backend secret."""
+    return TestClient(
+        app,
+        headers={"X-TAP-Executor-Secret": get_settings().host_executor_shared_secret},
+    )
 
 
 def test_host_executor_healthz() -> None:
@@ -50,7 +71,7 @@ def test_host_executor_healthz() -> None:
 
 def test_host_executor_diagnostics_shape() -> None:
     """Diagnostics endpoint should return a normalized payload shape."""
-    client = TestClient(app)
+    client = _authorized_client()
 
     response = client.get("/diagnostics")
 
@@ -77,9 +98,141 @@ def test_host_executor_diagnostics_service_parses_tmux_two_part_version() -> Non
     assert error_message is None
 
 
+def test_host_executor_diagnostics_service_uses_short_lived_cache(monkeypatch) -> None:
+    """Repeated diagnostics requests should reuse a recent snapshot instead of re-running probes."""
+    service = HostDiagnosticsService(cache_ttl_seconds=30.0)
+    calls = {"count": 0}
+
+    def fake_build_snapshot_live() -> HostDiagnosticsResponse:
+        calls["count"] += 1
+        return HostDiagnosticsResponse(
+            generated_at=datetime.now(UTC),
+            ready=True,
+            pty_supported=True,
+            durable_transport_ready=True,
+            executor_context=HostExecutorContext(
+                user="tester",
+                home="/tmp/tester",
+                cwd="/workspace",
+                containerized=False,
+                container_runtime=None,
+            ),
+            tools=HostDiagnosticsTools(
+                git=HostToolDiagnostics(
+                    name="git",
+                    found=True,
+                    path="/usr/bin/git",
+                    version="2.43.0",
+                    minimum_version="2.39.0",
+                    version_ok=True,
+                    auth_required=False,
+                    auth_ok=None,
+                    status=HostToolStatus.READY,
+                    message="git ready",
+                ),
+                gh=HostToolDiagnostics(
+                    name="gh",
+                    found=True,
+                    path="/usr/bin/gh",
+                    version="2.86.0",
+                    minimum_version="2.80.0",
+                    version_ok=True,
+                    auth_required=True,
+                    auth_ok=True,
+                    status=HostToolStatus.READY,
+                    message="gh ready",
+                ),
+                codex=HostToolDiagnostics(
+                    name="codex",
+                    found=True,
+                    path="/usr/bin/codex",
+                    version="0.112.0",
+                    minimum_version="0.100.0",
+                    version_ok=True,
+                    auth_required=True,
+                    auth_ok=True,
+                    status=HostToolStatus.READY,
+                    message="codex ready",
+                ),
+                claude=HostToolDiagnostics(
+                    name="claude",
+                    found=True,
+                    path="/usr/bin/claude",
+                    version="2.1.71",
+                    minimum_version="2.0.0",
+                    version_ok=True,
+                    auth_required=True,
+                    auth_ok=True,
+                    status=HostToolStatus.READY,
+                    message="claude ready",
+                ),
+                tmux=HostToolDiagnostics(
+                    name="tmux",
+                    found=True,
+                    path="/usr/bin/tmux",
+                    version="3.4",
+                    minimum_version="3.2.0",
+                    version_ok=True,
+                    auth_required=False,
+                    auth_ok=None,
+                    status=HostToolStatus.READY,
+                    message="tmux ready",
+                ),
+            ),
+            warnings=[],
+        )
+
+    monkeypatch.setattr(service, "_build_snapshot_live", fake_build_snapshot_live)
+
+    first = service.build_snapshot()
+    second = service.build_snapshot()
+    third = service.build_snapshot(force_refresh=True)
+
+    assert first.ready is True
+    assert second.ready is True
+    assert third.ready is True
+    assert calls["count"] == 2
+
+
+def test_runtime_session_engine_atomic_write_text_handles_parallel_writers(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Concurrent writers should not contend on one shared temp file name."""
+    target = tmp_path / "session.json"
+    barrier = threading.Barrier(2)
+    original_write_text = Path.write_text
+
+    def delayed_write_text(self: Path, data: str, *args, **kwargs) -> int:
+        result = original_write_text(self, data, *args, **kwargs)
+        if self.parent == tmp_path and self.suffix == ".tmp":
+            barrier.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(Path, "write_text", delayed_write_text)
+
+    errors: list[Exception] = []
+
+    def writer(content: str) -> None:
+        try:
+            BaseRuntimeSessionService._atomic_write_text(target, content)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    thread_a = threading.Thread(target=writer, args=("alpha",))
+    thread_b = threading.Thread(target=writer, args=("beta",))
+    thread_a.start()
+    thread_b.start()
+    thread_a.join()
+    thread_b.join()
+
+    assert errors == []
+    assert target.read_text(encoding="utf-8") in {"alpha", "beta"}
+
+
 def test_host_executor_github_repo_endpoints(monkeypatch) -> None:
     """GitHub endpoints should proxy normalized repo and issue payloads."""
-    client = TestClient(app)
+    client = _authorized_client()
 
     repo_payload = GitHubRepoRead(
         owner="stemirkhan",
@@ -314,7 +467,7 @@ def test_host_executor_github_repo_endpoints(monkeypatch) -> None:
 
 def test_host_executor_codex_session_endpoints(monkeypatch) -> None:
     """Codex endpoints should expose normalized session payloads."""
-    client = TestClient(app)
+    client = _authorized_client()
 
     session = CodexSessionRead(
         run_id="run-1",
@@ -395,7 +548,7 @@ def test_host_executor_codex_session_endpoints(monkeypatch) -> None:
 
 def test_host_executor_claude_session_endpoints(monkeypatch) -> None:
     """Claude endpoints should expose normalized session payloads."""
-    client = TestClient(app)
+    client = _authorized_client()
 
     session = ClaudeSessionRead(
         run_id="run-claude-1",

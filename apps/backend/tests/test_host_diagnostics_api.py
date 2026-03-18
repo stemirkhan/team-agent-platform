@@ -17,6 +17,20 @@ from app.services.host_execution_service import HostExecutionReadinessService
 from app.services.host_diagnostics_service import HostDiagnosticsService
 
 
+def _auth_headers(client: TestClient) -> dict[str, str]:
+    """Register the owner user and return bearer auth headers."""
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "owner@example.com",
+            "password": "supersecure123",
+            "display_name": "Owner",
+        },
+    )
+    assert response.status_code == 201
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
 def test_host_diagnostics_endpoint_returns_snapshot(
     client: TestClient,
     monkeypatch,
@@ -99,9 +113,14 @@ def test_host_diagnostics_endpoint_returns_snapshot(
         warnings=[],
     )
 
-    monkeypatch.setattr(host.readiness_service, "get_host_diagnostics", lambda: snapshot)
+    monkeypatch.setattr(
+        host.readiness_service,
+        "get_host_diagnostics",
+        lambda *args, **kwargs: snapshot,
+    )
 
-    response = client.get("/api/v1/host/diagnostics")
+    headers = _auth_headers(client)
+    response = client.get("/api/v1/host/diagnostics", headers=headers)
 
     assert response.status_code == 200
     assert response.json()["ready"] is True
@@ -109,7 +128,7 @@ def test_host_diagnostics_endpoint_returns_snapshot(
     assert response.json()["tools"]["gh"]["status"] == "ready"
     assert response.json()["tools"]["tmux"]["status"] == "ready"
 
-    refresh_response = client.post("/api/v1/host/diagnostics/refresh")
+    refresh_response = client.post("/api/v1/host/diagnostics/refresh", headers=headers)
     assert refresh_response.status_code == 200
     assert refresh_response.json()["tools"]["codex"]["version"] == "0.108.0"
 
@@ -122,12 +141,12 @@ def test_host_diagnostics_endpoint_returns_503_when_host_executor_is_unavailable
     monkeypatch.setattr(
         host.readiness_service,
         "get_host_diagnostics",
-        lambda: (_ for _ in ()).throw(
+        lambda *args, **kwargs: (_ for _ in ()).throw(
             host.HostExecutionReadinessServiceError("Host executor is unreachable.")
         ),
     )
 
-    response = client.get("/api/v1/host/diagnostics")
+    response = client.get("/api/v1/host/diagnostics", headers=_auth_headers(client))
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Host executor is unreachable."
@@ -381,10 +400,10 @@ def test_host_readiness_uses_host_executor_snapshot(
     monkeypatch.setattr(
         host.readiness_service,
         "_fetch_host_executor_snapshot",
-        lambda base_url: (host_snapshot, None),
+        lambda base_url, **kwargs: (host_snapshot, None),
     )
 
-    response = client.get("/api/v1/host/readiness")
+    response = client.get("/api/v1/host/readiness", headers=_auth_headers(client))
 
     assert response.status_code == 200
     payload = response.json()
@@ -408,10 +427,10 @@ def test_host_readiness_reports_unreachable_host_executor(
     monkeypatch.setattr(
         host.readiness_service,
         "_fetch_host_executor_snapshot",
-        lambda base_url: (None, "Host executor is unreachable."),
+        lambda base_url, **kwargs: (None, "Host executor is unreachable."),
     )
 
-    response = client.post("/api/v1/host/readiness/refresh")
+    response = client.post("/api/v1/host/readiness/refresh", headers=_auth_headers(client))
 
     assert response.status_code == 200
     payload = response.json()
@@ -432,7 +451,7 @@ def test_host_readiness_reports_missing_host_executor_configuration(
         lambda value: None,
     )
 
-    response = client.get("/api/v1/host/readiness")
+    response = client.get("/api/v1/host/readiness", headers=_auth_headers(client))
 
     assert response.status_code == 200
     payload = response.json()
@@ -531,10 +550,13 @@ def test_host_readiness_can_be_evaluated_for_requested_runtime(
     monkeypatch.setattr(
         host.readiness_service,
         "_fetch_host_executor_snapshot",
-        lambda base_url: (host_snapshot, None),
+        lambda base_url, **kwargs: (host_snapshot, None),
     )
 
-    response = client.get("/api/v1/host/readiness?runtime_target=claude_code")
+    response = client.get(
+        "/api/v1/host/readiness?runtime_target=claude_code",
+        headers=_auth_headers(client),
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -542,6 +564,120 @@ def test_host_readiness_can_be_evaluated_for_requested_runtime(
     assert payload["effective_ready"] is True
     assert payload["runtime_ready"]["codex"] is False
     assert payload["runtime_ready"]["claude_code"] is True
+
+
+def test_host_refresh_endpoints_force_refresh(client: TestClient, monkeypatch) -> None:
+    """Refresh endpoints should bypass cached host-executor diagnostics snapshots."""
+    snapshot = HostDiagnosticsResponse(
+        generated_at=datetime.now(UTC),
+        ready=True,
+        pty_supported=True,
+        durable_transport_ready=True,
+        executor_context=HostExecutorContext(
+            user="tester",
+            home="/tmp/tester",
+            cwd="/workspace",
+            containerized=False,
+            container_runtime=None,
+        ),
+        tools=HostDiagnosticsTools(
+            git=HostToolDiagnostics(
+                name="git",
+                found=True,
+                path="/usr/bin/git",
+                version="2.43.0",
+                minimum_version="2.39.0",
+                version_ok=True,
+                auth_required=False,
+                auth_ok=None,
+                status=HostToolStatus.READY,
+                message="Git is available.",
+            ),
+            gh=HostToolDiagnostics(
+                name="gh",
+                found=True,
+                path="/usr/bin/gh",
+                version="2.86.0",
+                minimum_version="2.80.0",
+                version_ok=True,
+                auth_required=True,
+                auth_ok=True,
+                status=HostToolStatus.READY,
+                message="GitHub CLI is ready.",
+            ),
+            codex=HostToolDiagnostics(
+                name="codex",
+                found=True,
+                path="/usr/bin/codex",
+                version="0.108.0",
+                minimum_version="0.100.0",
+                version_ok=True,
+                auth_required=True,
+                auth_ok=True,
+                status=HostToolStatus.READY,
+                message="Codex CLI is ready.",
+            ),
+            claude=HostToolDiagnostics(
+                name="claude",
+                found=True,
+                path="/usr/bin/claude",
+                version="2.1.71",
+                minimum_version="2.0.0",
+                version_ok=True,
+                auth_required=True,
+                auth_ok=True,
+                status=HostToolStatus.READY,
+                message="Claude Code CLI is ready.",
+            ),
+            tmux=HostToolDiagnostics(
+                name="tmux",
+                found=True,
+                path="/usr/bin/tmux",
+                version="3.4.0",
+                minimum_version="3.2.0",
+                version_ok=True,
+                auth_required=False,
+                auth_ok=None,
+                status=HostToolStatus.READY,
+                message="tmux is ready.",
+            ),
+        ),
+        warnings=[],
+    )
+    readiness_calls: list[bool] = []
+    diagnostics_calls: list[bool] = []
+
+    monkeypatch.setattr(
+        host.readiness_service,
+        "get_host_diagnostics",
+        lambda *args, **kwargs: diagnostics_calls.append(kwargs.get("force_refresh", False))
+        or snapshot,
+    )
+    monkeypatch.setattr(
+        host.readiness_service,
+        "build_readiness",
+        lambda *args, **kwargs: readiness_calls.append(kwargs.get("force_refresh", False))
+        or {
+            "generated_at": datetime.now(UTC),
+            "execution_source": "host_executor",
+            "effective_ready": True,
+            "requested_runtime": None,
+            "runtime_ready": {"codex": True, "claude_code": True},
+            "host_executor_url": "http://host.containers.internal:8765",
+            "host_executor_reachable": True,
+            "host_executor_error": None,
+            "host_executor": snapshot,
+        },
+    )
+
+    headers = _auth_headers(client)
+    diagnostics_response = client.post("/api/v1/host/diagnostics/refresh", headers=headers)
+    readiness_response = client.post("/api/v1/host/readiness/refresh", headers=headers)
+
+    assert diagnostics_response.status_code == 200
+    assert readiness_response.status_code == 200
+    assert diagnostics_calls == [True]
+    assert readiness_calls == [True]
 
 
 def test_host_execution_readiness_service_retries_transient_timeout(monkeypatch) -> None:
@@ -627,7 +763,7 @@ def test_host_execution_readiness_service_retries_transient_timeout(monkeypatch)
     )
     attempts = {"count": 0}
 
-    def fake_fetch_once(base_url: str):
+    def fake_fetch_once(base_url: str, **kwargs):
         attempts["count"] += 1
         if attempts["count"] == 1:
             return None, "Host executor request failed: timed out."

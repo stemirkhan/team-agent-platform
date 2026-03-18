@@ -1,3 +1,5 @@
+import { getAccessToken } from "@/lib/auth-client";
+
 export type Agent = {
   id: string;
   slug: string;
@@ -587,6 +589,16 @@ function getApiBaseUrl(): string {
   );
 }
 
+function buildAuthHeaders(token?: string): HeadersInit | undefined {
+  const resolvedToken = token ?? getAccessToken() ?? undefined;
+  if (!resolvedToken) {
+    return undefined;
+  }
+  return {
+    Authorization: `Bearer ${resolvedToken}`
+  };
+}
+
 function getBackendOrigin(): string {
   return getApiBaseUrl().replace(/\/api\/v1$/, "");
 }
@@ -727,8 +739,9 @@ export async function fetchHealth(): Promise<{ status: string }> {
   return response.json() as Promise<{ status: string }>;
 }
 
-export async function fetchHostDiagnostics(): Promise<HostDiagnosticsSnapshot> {
+export async function fetchHostDiagnostics(token?: string): Promise<HostDiagnosticsSnapshot> {
   const response = await fetch(`${getApiBaseUrl()}/host/diagnostics`, {
+    headers: buildAuthHeaders(token),
     cache: "no-store"
   });
 
@@ -740,9 +753,10 @@ export async function fetchHostDiagnostics(): Promise<HostDiagnosticsSnapshot> {
   return json as HostDiagnosticsSnapshot;
 }
 
-export async function refreshHostDiagnostics(): Promise<HostDiagnosticsSnapshot> {
+export async function refreshHostDiagnostics(token?: string): Promise<HostDiagnosticsSnapshot> {
   const response = await fetch(`${getApiBaseUrl()}/host/diagnostics/refresh`, {
-    method: "POST"
+    method: "POST",
+    headers: buildAuthHeaders(token)
   });
 
   const json = await readResponsePayload(response);
@@ -754,7 +768,8 @@ export async function refreshHostDiagnostics(): Promise<HostDiagnosticsSnapshot>
 }
 
 export async function fetchHostReadiness(
-  runtimeTarget?: RuntimeTarget
+  runtimeTarget?: RuntimeTarget,
+  token?: string
 ): Promise<HostExecutionReadiness> {
   const params = new URLSearchParams();
   if (runtimeTarget) {
@@ -763,6 +778,7 @@ export async function fetchHostReadiness(
   const response = await fetch(
     `${getApiBaseUrl()}/host/readiness${params.size ? `?${params.toString()}` : ""}`,
     {
+      headers: buildAuthHeaders(token),
       cache: "no-store"
     }
   );
@@ -776,7 +792,8 @@ export async function fetchHostReadiness(
 }
 
 export async function refreshHostReadiness(
-  runtimeTarget?: RuntimeTarget
+  runtimeTarget?: RuntimeTarget,
+  token?: string
 ): Promise<HostExecutionReadiness> {
   const params = new URLSearchParams();
   if (runtimeTarget) {
@@ -785,7 +802,8 @@ export async function refreshHostReadiness(
   const response = await fetch(
     `${getApiBaseUrl()}/host/readiness/refresh${params.size ? `?${params.toString()}` : ""}`,
     {
-      method: "POST"
+      method: "POST",
+      headers: buildAuthHeaders(token)
     }
   );
 
@@ -840,6 +858,22 @@ export async function fetchRun(runId: string, token: string): Promise<Run> {
   }
 
   return json as Run;
+}
+
+export async function fetchRunReport(runId: string, token: string): Promise<RunReport> {
+  const response = await fetch(`${getApiBaseUrl()}/runs/${runId}/report`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    cache: "no-store"
+  });
+
+  const json = await readResponsePayload(response);
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to fetch run report.");
+  }
+
+  return json as RunReport;
 }
 
 export async function fetchWorkspace(workspaceId: string, token: string): Promise<Workspace> {
@@ -979,7 +1013,8 @@ export function buildRunTerminalWebSocketUrl(runId: string, token: string): stri
 }
 
 export async function fetchGitHubRepos(
-  options: FetchGitHubReposOptions = {}
+  options: FetchGitHubReposOptions = {},
+  token?: string
 ): Promise<GitHubRepoListResponse> {
   const params = new URLSearchParams();
   if (options.owner) {
@@ -992,6 +1027,7 @@ export async function fetchGitHubRepos(
 
   const query = params.size > 0 ? `?${params.toString()}` : "";
   const response = await fetch(`${getApiBaseUrl()}/github/repos${query}`, {
+    headers: buildAuthHeaders(token),
     cache: "no-store"
   });
 
@@ -1003,8 +1039,13 @@ export async function fetchGitHubRepos(
   return json as GitHubRepoListResponse;
 }
 
-export async function fetchGitHubRepo(owner: string, repo: string): Promise<GitHubRepo> {
+export async function fetchGitHubRepo(
+  owner: string,
+  repo: string,
+  token?: string
+): Promise<GitHubRepo> {
   const response = await fetch(`${getApiBaseUrl()}/github/repos/${owner}/${repo}`, {
+    headers: buildAuthHeaders(token),
     cache: "no-store"
   });
 
@@ -1019,11 +1060,13 @@ export async function fetchGitHubRepo(owner: string, repo: string): Promise<GitH
 export async function fetchGitHubRepoBranches(
   owner: string,
   repo: string,
-  limit = 30
+  limit = 30,
+  token?: string
 ): Promise<GitHubBranchListResponse> {
   const response = await fetch(
     `${getApiBaseUrl()}/github/repos/${owner}/${repo}/branches?limit=${limit}`,
     {
+      headers: buildAuthHeaders(token),
       cache: "no-store"
     }
   );
@@ -1039,7 +1082,8 @@ export async function fetchGitHubRepoBranches(
 export async function fetchGitHubRepoIssues(
   owner: string,
   repo: string,
-  options: FetchGitHubIssuesOptions = {}
+  options: FetchGitHubIssuesOptions = {},
+  token?: string
 ): Promise<GitHubIssueListResponse> {
   const params = new URLSearchParams();
   params.set("state", options.state ?? "open");
@@ -1051,6 +1095,7 @@ export async function fetchGitHubRepoIssues(
   const response = await fetch(
     `${getApiBaseUrl()}/github/repos/${owner}/${repo}/issues?${params.toString()}`,
     {
+      headers: buildAuthHeaders(token),
       cache: "no-store"
     }
   );
@@ -1066,9 +1111,11 @@ export async function fetchGitHubRepoIssues(
 export async function fetchGitHubIssue(
   owner: string,
   repo: string,
-  number: number
+  number: number,
+  token?: string
 ): Promise<GitHubIssueDetail> {
   const response = await fetch(`${getApiBaseUrl()}/github/repos/${owner}/${repo}/issues/${number}`, {
+    headers: buildAuthHeaders(token),
     cache: "no-store"
   });
 
@@ -1083,7 +1130,8 @@ export async function fetchGitHubIssue(
 export async function fetchGitHubRepoPulls(
   owner: string,
   repo: string,
-  options: FetchGitHubPullsOptions = {}
+  options: FetchGitHubPullsOptions = {},
+  token?: string
 ): Promise<GitHubPullListResponse> {
   const params = new URLSearchParams();
   params.set("state", options.state ?? "open");
@@ -1092,6 +1140,7 @@ export async function fetchGitHubRepoPulls(
   const response = await fetch(
     `${getApiBaseUrl()}/github/repos/${owner}/${repo}/pulls?${params.toString()}`,
     {
+      headers: buildAuthHeaders(token),
       cache: "no-store"
     }
   );
@@ -1107,9 +1156,11 @@ export async function fetchGitHubRepoPulls(
 export async function fetchGitHubPull(
   owner: string,
   repo: string,
-  number: number
+  number: number,
+  token?: string
 ): Promise<GitHubPull> {
   const response = await fetch(`${getApiBaseUrl()}/github/repos/${owner}/${repo}/pulls/${number}`, {
+    headers: buildAuthHeaders(token),
     cache: "no-store"
   });
 
@@ -1124,11 +1175,13 @@ export async function fetchGitHubPull(
 export async function fetchGitHubPullChecks(
   owner: string,
   repo: string,
-  number: number
+  number: number,
+  token?: string
 ): Promise<GitHubPullChecksResponse> {
   const response = await fetch(
     `${getApiBaseUrl()}/github/repos/${owner}/${repo}/pulls/${number}/checks`,
     {
+      headers: buildAuthHeaders(token),
       cache: "no-store"
     }
   );
@@ -1145,12 +1198,14 @@ export async function createGitHubIssueComment(
   owner: string,
   repo: string,
   number: number,
-  payload: GitHubIssueCommentCreatePayload
+  payload: GitHubIssueCommentCreatePayload,
+  token?: string
 ): Promise<GitHubIssueDetail> {
   const response = await fetch(`${getApiBaseUrl()}/github/repos/${owner}/${repo}/issues/${number}/comments`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...(buildAuthHeaders(token) ?? {})
     },
     body: JSON.stringify(payload)
   });
@@ -1167,12 +1222,14 @@ export async function addGitHubIssueLabels(
   owner: string,
   repo: string,
   number: number,
-  payload: GitHubIssueLabelsUpdatePayload
+  payload: GitHubIssueLabelsUpdatePayload,
+  token?: string
 ): Promise<GitHubIssueDetail> {
   const response = await fetch(`${getApiBaseUrl()}/github/repos/${owner}/${repo}/issues/${number}/labels`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...(buildAuthHeaders(token) ?? {})
     },
     body: JSON.stringify(payload)
   });
@@ -1189,12 +1246,14 @@ export async function removeGitHubIssueLabel(
   owner: string,
   repo: string,
   number: number,
-  labelName: string
+  labelName: string,
+  token?: string
 ): Promise<GitHubIssueDetail> {
   const response = await fetch(
     `${getApiBaseUrl()}/github/repos/${owner}/${repo}/issues/${number}/labels/${encodeURIComponent(labelName)}`,
     {
-      method: "DELETE"
+      method: "DELETE",
+      headers: buildAuthHeaders(token)
     }
   );
 

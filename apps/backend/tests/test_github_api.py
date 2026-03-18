@@ -22,6 +22,20 @@ from app.schemas.github import (
 )
 
 
+def _auth_headers(client: TestClient) -> dict[str, str]:
+    """Register the owner user and return bearer auth headers."""
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "owner@example.com",
+            "password": "supersecure123",
+            "display_name": "Owner",
+        },
+    )
+    assert response.status_code == 201
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
 def test_github_repo_endpoints_return_normalized_payloads(client: TestClient, monkeypatch) -> None:
     """Repo and issue endpoints should expose normalized host-executor data."""
     repo_payload = GitHubRepoRead(
@@ -188,34 +202,48 @@ def test_github_repo_endpoints_return_normalized_payloads(client: TestClient, mo
         lambda owner, repo, number: pull_checks,
     )
 
-    repo_list_response = client.get("/api/v1/github/repos?owner=stemirkhan&limit=10&q=team")
+    headers = _auth_headers(client)
+
+    repo_list_response = client.get(
+        "/api/v1/github/repos?owner=stemirkhan&limit=10&q=team",
+        headers=headers,
+    )
     assert repo_list_response.status_code == 200
     assert repo_list_response.json()["items"][0]["full_name"] == "stemirkhan/team-agent-platform"
 
-    repo_response = client.get("/api/v1/github/repos/stemirkhan/team-agent-platform")
+    repo_response = client.get(
+        "/api/v1/github/repos/stemirkhan/team-agent-platform",
+        headers=headers,
+    )
     assert repo_response.status_code == 200
     assert repo_response.json()["default_branch"] == "main"
 
     branches_response = client.get(
-        "/api/v1/github/repos/stemirkhan/team-agent-platform/branches?limit=10"
+        "/api/v1/github/repos/stemirkhan/team-agent-platform/branches?limit=10",
+        headers=headers,
     )
     assert branches_response.status_code == 200
     assert branches_response.json()["items"][0]["name"] == "main"
     assert branches_response.json()["items"][0]["is_default"] is True
 
     issues_response = client.get(
-        "/api/v1/github/repos/stemirkhan/team-agent-platform/issues?state=all&q=repo"
+        "/api/v1/github/repos/stemirkhan/team-agent-platform/issues?state=all&q=repo",
+        headers=headers,
     )
     assert issues_response.status_code == 200
     assert issues_response.json()["items"][0]["number"] == 12
 
-    issue_response = client.get("/api/v1/github/repos/stemirkhan/team-agent-platform/issues/12")
+    issue_response = client.get(
+        "/api/v1/github/repos/stemirkhan/team-agent-platform/issues/12",
+        headers=headers,
+    )
     assert issue_response.status_code == 200
     assert issue_response.json()["comments_count"] == 3
     assert issue_response.json()["comments"][0]["body"] == "First tracker comment"
 
     comment_response = client.post(
         "/api/v1/github/repos/stemirkhan/team-agent-platform/issues/12/comments",
+        headers=headers,
         json=GitHubIssueCommentCreate(body="New note from UI").model_dump(),
     )
     assert comment_response.status_code == 200
@@ -224,29 +252,36 @@ def test_github_repo_endpoints_return_normalized_payloads(client: TestClient, mo
 
     labels_response = client.post(
         "/api/v1/github/repos/stemirkhan/team-agent-platform/issues/12/labels",
+        headers=headers,
         json=GitHubIssueLabelsUpdate(labels=["needs-review"]).model_dump(),
     )
     assert labels_response.status_code == 200
     assert "needs-review" in labels_response.json()["labels"]
 
     remove_label_response = client.delete(
-        "/api/v1/github/repos/stemirkhan/team-agent-platform/issues/12/labels/mvp"
+        "/api/v1/github/repos/stemirkhan/team-agent-platform/issues/12/labels/mvp",
+        headers=headers,
     )
     assert remove_label_response.status_code == 200
     assert "mvp" not in remove_label_response.json()["labels"]
 
     pulls_response = client.get(
-        "/api/v1/github/repos/stemirkhan/team-agent-platform/pulls?state=open"
+        "/api/v1/github/repos/stemirkhan/team-agent-platform/pulls?state=open",
+        headers=headers,
     )
     assert pulls_response.status_code == 200
     assert pulls_response.json()["items"][0]["head_ref_name"] == "feat/pr-browser"
 
-    pull_response = client.get("/api/v1/github/repos/stemirkhan/team-agent-platform/pulls/24")
+    pull_response = client.get(
+        "/api/v1/github/repos/stemirkhan/team-agent-platform/pulls/24",
+        headers=headers,
+    )
     assert pull_response.status_code == 200
     assert pull_response.json()["mergeable"] == "MERGEABLE"
 
     pull_checks_response = client.get(
-        "/api/v1/github/repos/stemirkhan/team-agent-platform/pulls/24/checks"
+        "/api/v1/github/repos/stemirkhan/team-agent-platform/pulls/24/checks",
+        headers=headers,
     )
     assert pull_checks_response.status_code == 200
     assert pull_checks_response.json()["summary"]["pass_count"] == 1
@@ -264,6 +299,6 @@ def test_github_repo_endpoints_forward_proxy_errors(client: TestClient, monkeypa
         ),
     )
 
-    response = client.get("/api/v1/github/repos")
+    response = client.get("/api/v1/github/repos", headers=_auth_headers(client))
     assert response.status_code == 503
     assert response.json()["detail"] == "Host executor is unreachable."

@@ -35,10 +35,12 @@ import {
   fetchRunTerminalSession,
   fetchRun,
   fetchRunEvents,
+  fetchRunReport,
   fetchWorkspace,
   resumeRun,
   type Run,
   type RunEvent,
+  type RunReport,
   type RuntimeTarget,
   type TerminalSessionRead,
   type Workspace
@@ -515,10 +517,12 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [run, setRun] = useState<Run | null>(null);
+  const [report, setReport] = useState<RunReport | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [terminalSession, setTerminalSession] = useState<TerminalSessionRead | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [loadingRun, setLoadingRun] = useState(true);
+  const [loadingReport, setLoadingReport] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [resumingRun, setResumingRun] = useState(false);
@@ -569,28 +573,82 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     };
   }, []);
 
-  const loadRunData = useCallback(async () => {
+  const loadRunCore = useCallback(async (): Promise<Run | null> => {
     if (!token) {
-      return;
+      return null;
     }
 
-    const [runPayload, eventsPayload, sessionPayload] = await Promise.all([
-      fetchRun(runId, token),
-      fetchRunEvents(runId, token),
-      fetchRunTerminalSession(runId, token)
-    ]);
-    const workspacePayload = runPayload.workspace_id
-      ? await fetchWorkspace(runPayload.workspace_id, token).catch(() => null)
-      : null;
+    const runPayload = await fetchRun(runId, token);
     setRun(runPayload);
-    setWorkspace(workspacePayload);
-    setTerminalSession(sessionPayload);
-    setEvents(eventsPayload.items);
+    return runPayload;
   }, [runId, token]);
+
+  const loadRunSupplementary = useCallback(
+    async (runPayload: Run | null, options?: { raiseErrors?: boolean }) => {
+      if (!token || !runPayload) {
+        setWorkspace(null);
+        setTerminalSession(null);
+        setEvents([]);
+        return;
+      }
+
+      const [eventsResult, sessionResult, workspaceResult] = await Promise.allSettled([
+        fetchRunEvents(runPayload.id, token),
+        fetchRunTerminalSession(runPayload.id, token),
+        runPayload.workspace_id ? fetchWorkspace(runPayload.workspace_id, token) : Promise.resolve(null)
+      ]);
+
+      if (eventsResult.status === "fulfilled") {
+        setEvents(eventsResult.value.items);
+      } else if (options?.raiseErrors) {
+        throw eventsResult.reason;
+      }
+
+      if (sessionResult.status === "fulfilled") {
+        setTerminalSession(sessionResult.value);
+      } else if (options?.raiseErrors) {
+        throw sessionResult.reason;
+      }
+
+      if (workspaceResult.status === "fulfilled") {
+        setWorkspace(workspaceResult.value);
+      } else if (options?.raiseErrors) {
+        throw workspaceResult.reason;
+      }
+    },
+    [token]
+  );
+
+  const loadRunReport = useCallback(
+    async (nextRunId?: string) => {
+      if (!token) {
+        setLoadingReport(false);
+        setReport(null);
+        return;
+      }
+
+      const resolvedRunId = nextRunId ?? run?.id;
+      if (!resolvedRunId) {
+        setLoadingReport(false);
+        setReport(null);
+        return;
+      }
+
+      setLoadingReport(true);
+      try {
+        const reportPayload = await fetchRunReport(resolvedRunId, token);
+        setReport(reportPayload);
+      } finally {
+        setLoadingReport(false);
+      }
+    },
+    [run?.id, token]
+  );
 
   useEffect(() => {
     if (!token) {
       setRun(null);
+      setReport(null);
       setWorkspace(null);
       setTerminalSession(null);
       setEvents([]);
@@ -603,10 +661,13 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
 
     async function load() {
       try {
-        await loadRunData();
-        if (!cancelled) {
-          setErrorMessage(null);
+        const runPayload = await loadRunCore();
+        if (cancelled) {
+          return;
         }
+        setErrorMessage(null);
+        setLoadingRun(false);
+        void loadRunSupplementary(runPayload).catch(() => undefined);
       } catch (error) {
         if (!cancelled) {
           setErrorMessage(
@@ -614,9 +675,6 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
               ? error.message
               : t(locale, { ru: "Не удалось загрузить run.", en: "Failed to load run." })
           );
-        }
-      } finally {
-        if (!cancelled) {
           setLoadingRun(false);
         }
       }
@@ -627,7 +685,45 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [loadRunData, locale, token]);
+  }, [loadRunCore, loadRunSupplementary, locale, token]);
+
+  useEffect(() => {
+    if (activeTab !== "report" || !token) {
+      setLoadingReport(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingReport(true);
+
+    fetchRunReport(runId, token)
+      .then((reportPayload) => {
+        if (!cancelled) {
+          setReport(reportPayload);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setErrorMessage(
+            error instanceof Error
+              ? error.message
+              : t(
+                  locale,
+                  { ru: "Не удалось загрузить отчет run.", en: "Failed to load the run report." }
+                )
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingReport(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, locale, runId, token]);
 
   useEffect(() => {
     if (!token || !run || terminalStatuses.has(run.status)) {
@@ -635,13 +731,23 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     }
 
     const timer = setInterval(() => {
-      void loadRunData().catch(() => undefined);
+      void loadRunCore()
+        .then((runPayload) => {
+          if (!runPayload) {
+            return;
+          }
+          void loadRunSupplementary(runPayload).catch(() => undefined);
+          if (activeTab === "report") {
+            void loadRunReport(runPayload.id).catch(() => undefined);
+          }
+        })
+        .catch(() => undefined);
     }, 2000);
 
     return () => {
       clearInterval(timer);
     };
-  }, [loadRunData, run, token]);
+  }, [activeTab, loadRunCore, loadRunReport, loadRunSupplementary, run, token]);
 
   useEffect(() => {
     if (!run?.started_at || terminalStatuses.has(run.status)) {
@@ -708,8 +814,10 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     try {
       const nextRun = await cancelRun(run.id, token);
       setRun(nextRun);
-      const refreshedEvents = await fetchRunEvents(run.id, token);
-      setEvents(refreshedEvents.items);
+      await loadRunSupplementary(nextRun, { raiseErrors: true });
+      if (activeTab === "report") {
+        await loadRunReport(nextRun.id);
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -724,7 +832,11 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
   async function onRefresh() {
     try {
       setErrorMessage(null);
-      await loadRunData();
+      const runPayload = await loadRunCore();
+      await loadRunSupplementary(runPayload, { raiseErrors: true });
+      if (activeTab === "report") {
+        await loadRunReport(runPayload?.id);
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -745,7 +857,10 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
     try {
       const nextRun = await resumeRun(run.id, token);
       setRun(nextRun);
-      await loadRunData();
+      await loadRunSupplementary(nextRun, { raiseErrors: true });
+      if (activeTab === "report") {
+        await loadRunReport(nextRun.id);
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -1461,7 +1576,12 @@ export function RunDetailsPanel({ locale, runId }: RunDetailsPanelProps) {
           {activeTab === "overview" ? renderOverview() : null}
           {activeTab === "activity" ? renderActivity() : null}
           {activeTab === "report" ? (
-            <RunReportPanel locale={locale} report={run.run_report} runtimeTarget={run.runtime_target} />
+            <RunReportPanel
+              locale={locale}
+              loading={loadingReport}
+              report={report}
+              runtimeTarget={run.runtime_target}
+            />
           ) : null}
           {activeTab === "terminal" ? (
             <div className="space-y-4">

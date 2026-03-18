@@ -91,6 +91,16 @@ class RunRepository:
 
     def update(self, run: Run, *, fields: dict[str, object]) -> Run:
         """Persist run field changes."""
+        return self.update_with_events(run, fields=fields, events=None)
+
+    def update_with_events(
+        self,
+        run: Run,
+        *,
+        fields: dict[str, object],
+        events: list[tuple[str, dict[str, object] | None]] | None,
+    ) -> Run:
+        """Persist run field changes and optional events in one commit."""
         if "updated_at" not in fields:
             fields["updated_at"] = datetime.now(UTC)
 
@@ -98,6 +108,7 @@ class RunRepository:
             setattr(run, field, value)
 
         self.session.add(run)
+        self._add_events(run.id, events)
         self.session.commit()
         self.session.refresh(run)
         return run
@@ -110,6 +121,22 @@ class RunRepository:
         fields: dict[str, object],
     ) -> Run | None:
         """Persist run changes only when the current status still matches an expected value."""
+        return self.update_if_status_in_with_events(
+            run_id,
+            statuses=statuses,
+            fields=fields,
+            events=None,
+        )
+
+    def update_if_status_in_with_events(
+        self,
+        run_id: UUID,
+        *,
+        statuses: list[str] | tuple[str, ...],
+        fields: dict[str, object],
+        events: list[tuple[str, dict[str, object] | None]] | None,
+    ) -> Run | None:
+        """Persist run changes and optional events when the current state still matches."""
         if not statuses:
             return None
 
@@ -122,10 +149,11 @@ class RunRepository:
             .where(Run.status.in_(tuple(statuses)))
             .values(**fields)
         )
-        self.session.commit()
-
         if (result.rowcount or 0) == 0:
+            self.session.rollback()
             return None
+        self._add_events(run_id, events)
+        self.session.commit()
         return self.get_by_id(run_id)
 
     def create_event(
@@ -154,3 +182,37 @@ class RunRepository:
             .order_by(RunEvent.created_at.asc(), RunEvent.id.asc())
         )
         return list(self.session.scalars(query).all())
+
+    def list_by_statuses(
+        self,
+        *,
+        statuses: list[str] | tuple[str, ...],
+        limit: int,
+    ) -> list[Run]:
+        """Return recent runs that still require lifecycle reconciliation."""
+        if not statuses or limit <= 0:
+            return []
+        query = (
+            select(Run)
+            .where(Run.status.in_(tuple(statuses)))
+            .order_by(Run.updated_at.asc(), Run.created_at.asc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(query).all())
+
+    def _add_events(
+        self,
+        run_id: UUID,
+        events: list[tuple[str, dict[str, object] | None]] | None,
+    ) -> None:
+        """Stage run events on the current transaction when provided."""
+        if not events:
+            return
+        for event_type, payload_json in events:
+            self.session.add(
+                RunEvent(
+                    run_id=run_id,
+                    event_type=event_type,
+                    payload_json=payload_json,
+                )
+            )

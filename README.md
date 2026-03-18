@@ -121,6 +121,8 @@ cp .env.example .env
 tmux new-session -d -s tap-host-executor 'cd /absolute/path/to/this/repo && HOST_EXECUTOR_RELOAD=0 ./scripts/dev/run-host-executor.sh'
 ```
 
+Use `./scripts/dev/up.sh --build` only when Dockerfiles or dependency manifests changed.
+
 Then open:
 
 - frontend: `http://localhost:3000`
@@ -154,6 +156,12 @@ cp .env.example .env
 
 ```bash
 ./scripts/dev/up.sh
+```
+
+If you changed Dockerfiles or dependency manifests, rebuild explicitly:
+
+```bash
+./scripts/dev/up.sh --build
 ```
 
 3. Start the host executor in a separate terminal:

@@ -15,6 +15,7 @@ export type AuthTokenResponse = {
 };
 
 const ACCESS_TOKEN_KEY = "team_agent_platform_access_token";
+export const ACCESS_TOKEN_COOKIE_NAME = "team_agent_platform_access_token";
 
 function getApiBaseUrl(): string {
   return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -60,10 +61,12 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string): void {
   window.localStorage.setItem(ACCESS_TOKEN_KEY, token);
+  document.cookie = `${ACCESS_TOKEN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; SameSite=Lax`;
 }
 
 export function clearAccessToken(): void {
   window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+  document.cookie = `${ACCESS_TOKEN_COOKIE_NAME}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
 }
 
 export async function registerWithPassword(payload: {

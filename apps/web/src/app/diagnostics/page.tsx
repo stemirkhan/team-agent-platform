@@ -2,17 +2,19 @@ import { Activity } from "lucide-react";
 
 import { HostDiagnosticsPanel } from "@/components/diagnostics/host-diagnostics-panel";
 import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
+import { getRequestAccessToken } from "@/lib/auth-client.server";
 import { fetchHostReadiness } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { getRequestLocale } from "@/lib/i18n.server";
 
 export default async function DiagnosticsPage() {
   const locale = getRequestLocale();
+  const token = getRequestAccessToken() ?? undefined;
   let initialSnapshot = null;
   let initialError: string | null = null;
 
   try {
-    initialSnapshot = await fetchHostReadiness();
+    initialSnapshot = await fetchHostReadiness(undefined, token);
   } catch (error) {
     initialError =
       error instanceof Error

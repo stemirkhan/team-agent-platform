@@ -53,8 +53,9 @@ In short:
 
 - `Frontend` and `Backend` form the control plane.
 - `Host Executor` runs in the host user context and has access to local `git`, `gh`, `codex`, and `claude`.
-- `Backend` orchestrates the run lifecycle, persists state in `PostgreSQL`, and serves status, history, and terminal data to the UI.
+- `Backend` owns run lifecycle reconciliation, persists state in `PostgreSQL`, and serves status, history, and terminal data to the UI.
 - `Host Executor` prepares workspaces, starts runtime sessions, and performs git/GitHub operations.
+- `Host Executor` should stay bound to loopback by default and only accept backend calls authenticated by a shared secret header.
 - GitHub remains the external source for repositories, issues, and draft PRs.
 
 ## Run Lifecycle
@@ -91,6 +92,7 @@ In short:
 - a run is initiated from the UI, but orchestrated by the backend;
 - the host executor prepares the workspace and starts the selected runtime;
 - terminal output and run events flow back through the backend and into the UI;
+- active run lifecycle is advanced by a backend-owned background reconciler, not by `GET /runs*` reads;
 - on success, the runtime must finish commit, push, and draft PR creation inside the prepared workspace;
 - for Codex runs, that contract implies a `danger-full-access` root sandbox in the normal run
   flow so the runtime can complete `.git` writes and GitHub delivery itself;
@@ -106,7 +108,7 @@ The platform is now multi-runtime in practice:
 
 The current runtime boundary is:
 
-- one shared run pipeline in the backend for workspace preparation, runtime execution, cleanup, git, and PR finalization
+- one shared run pipeline in the backend for workspace preparation, runtime execution, lifecycle reconciliation, and delivery-state validation
 - one backend runtime adapter registry for bundle materialization, session start/resume/cancel/get-events, terminal normalization, and execution-trace extraction
 - one shared host session engine for PTY or `tmux` lifecycle, recovery bookkeeping, and chunk persistence
 - runtime-specific host modules for command building, session-id semantics, and output parsing

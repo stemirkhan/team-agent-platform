@@ -15,6 +15,7 @@ import {
   fetchGitHubRepoIssues,
   fetchGitHubRepoPulls
 } from "@/lib/api";
+import { getRequestAccessToken } from "@/lib/auth-client.server";
 import { t } from "@/lib/i18n";
 import { getRequestLocale } from "@/lib/i18n.server";
 
@@ -56,6 +57,7 @@ export default async function RepoDetailsPage({
   searchParams?: { issueState?: string | string[]; pullState?: string | string[] };
 }) {
   const locale = getRequestLocale();
+  const token = getRequestAccessToken() ?? undefined;
   const issueState = normalizeIssueState(searchParams?.issueState);
   const pullState = normalizePullState(searchParams?.pullState);
 
@@ -67,7 +69,7 @@ export default async function RepoDetailsPage({
   let pullsError: string | null = null;
 
   try {
-    repo = await fetchGitHubRepo(params.owner, params.repo);
+    repo = await fetchGitHubRepo(params.owner, params.repo, token);
   } catch (error) {
     repoError =
       error instanceof Error
@@ -83,11 +85,11 @@ export default async function RepoDetailsPage({
       fetchGitHubRepoIssues(params.owner, params.repo, {
         state: issueState,
         limit: 50
-      }),
+      }, token),
       fetchGitHubRepoPulls(params.owner, params.repo, {
         state: pullState,
         limit: 50
-      })
+      }, token)
     ]);
 
     if (issuesResult.status === "fulfilled") {

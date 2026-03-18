@@ -8,6 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.schemas.claude import ClaudeSessionEventsResponse, ClaudeSessionRead, ClaudeTerminalChunk
 from app.schemas.codex import CodexSessionEventsResponse, CodexSessionRead, CodexTerminalChunk
 from app.schemas.github import GitHubIssueDetailRead, GitHubRepoRead
@@ -19,6 +20,7 @@ from app.services.export_service import ExportService
 from app.services.github_proxy_service import GitHubProxyService
 from app.services.host_execution_service import HostExecutionReadinessService
 from app.services.run_service import RunService
+from app.services.run_service_factory import build_run_service
 from app.services.runtime_adapters import ClaudeRuntimeAdapter, CodexRuntimeAdapter
 from app.services.workspace_proxy_service import WorkspaceProxyService, WorkspaceProxyServiceError
 
@@ -132,6 +134,17 @@ def _workspace() -> WorkspaceRead:
         updated_at="2026-03-08T10:00:00Z",
     )
 
+
+def _reconcile_active_runs(db_session_factory) -> None:
+    """Run one explicit backend reconciliation pass for active runs in the test database."""
+    db = db_session_factory()
+    try:
+        service = build_run_service(db, get_settings())
+        for run in service.list_reconcilable_runs(limit=100):
+            service.reconcile_run_entity(run)
+    finally:
+        db.close()
+
 def test_create_run_prepares_workspace_and_records_status_events(
     client: TestClient,
     monkeypatch,
@@ -202,6 +215,20 @@ def test_create_run_prepares_workspace_and_records_status_events(
                 "has_changes": True,
                 "changed_files": [file.path for file in payload.files],
             }
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_workspace",
+        lambda self, workspace_id: _workspace().model_copy(
+            update={"status": "prepared", "has_changes": False, "changed_files": []}
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_workspace",
+        lambda self, workspace_id: _workspace().model_copy(
+            update={"status": "prepared", "has_changes": False, "changed_files": []}
         ),
     )
     monkeypatch.setattr(
@@ -457,6 +484,13 @@ def test_create_run_starts_claude_runtime_and_exposes_terminal_contract(
                 "has_changes": True,
                 "changed_files": [file.path for file in payload.files],
             }
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_workspace",
+        lambda self, workspace_id: _workspace().model_copy(
+            update={"status": "prepared", "has_changes": False, "changed_files": []}
         ),
     )
     monkeypatch.setattr(
@@ -876,9 +910,10 @@ def test_list_runs_supports_repository_filter(
 
 def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
     client: TestClient,
+    db_session_factory,
     monkeypatch,
 ) -> None:
-    """Run detail should reconcile host session completion and support cancel."""
+    """Backend reconciliation should complete the run before subsequent read and cancel calls."""
     headers = _auth_headers(
         client,
         email="runner-sync@example.com",
@@ -1051,6 +1086,7 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
     assert create_response.status_code == 201
     run_id = create_response.json()["id"]
 
+    _reconcile_active_runs(db_session_factory)
     get_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert get_response.status_code == 200
     assert get_response.json()["status"] == "completed"
@@ -1059,7 +1095,11 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
         get_response.json()["pr_url"]
         == "https://github.com/stemirkhan/team-agent-platform/pull/42"
     )
-    report = get_response.json()["run_report"]
+    assert get_response.json()["run_report"] is None
+
+    report_response = client.get(f"/api/v1/runs/{run_id}/report", headers=headers)
+    assert report_response.status_code == 200
+    report = report_response.json()
     assert report is not None
     phases = {item["key"]: item for item in report["phases"]}
     assert phases["preparation"]["status"] == "completed"
@@ -1098,9 +1138,10 @@ def test_get_run_syncs_terminal_completion_and_cancel_endpoint(
 
 def test_run_detail_event_and_terminal_reads_do_not_sync_runtime_session(
     client: TestClient,
+    db_session_factory,
     monkeypatch,
 ) -> None:
-    """Only the primary run read should sync runtime state; events and terminal reads should stay side-effect free."""
+    """All read endpoints should stay side-effect free; reconciliation happens explicitly."""
     headers = _auth_headers(
         client,
         email="runner-readonly@example.com",
@@ -1149,6 +1190,13 @@ def test_run_detail_event_and_terminal_reads_do_not_sync_runtime_session(
                 "has_changes": True,
                 "changed_files": [file.path for file in payload.files],
             }
+        ),
+    )
+    monkeypatch.setattr(
+        WorkspaceProxyService,
+        "get_workspace",
+        lambda self, workspace_id: _workspace().model_copy(
+            update={"status": "prepared", "has_changes": False, "changed_files": []}
         ),
     )
     monkeypatch.setattr(
@@ -1263,7 +1311,15 @@ def test_run_detail_event_and_terminal_reads_do_not_sync_runtime_session(
 
     get_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert get_response.status_code == 200
+    assert get_response.json()["status"] == "running"
+    assert sync_calls == []
+
+    _reconcile_active_runs(db_session_factory)
     assert sync_calls == [run_id]
+
+    reconciled_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
+    assert reconciled_response.status_code == 200
+    assert reconciled_response.json()["status"] == "completed"
 
 
 def test_build_codex_terminal_audit_payload_ignores_non_structured_mentions() -> None:
@@ -1414,6 +1470,7 @@ def test_build_claude_terminal_audit_payload_confirms_subagent_launches() -> Non
 
 def test_get_run_completes_without_commit_when_only_materialized_files_changed(
     client: TestClient,
+    db_session_factory,
     monkeypatch,
 ) -> None:
     """Completed Codex sessions should skip commit/push/PR when cleanup leaves no repo changes."""
@@ -1577,6 +1634,7 @@ def test_get_run_completes_without_commit_when_only_materialized_files_changed(
     assert create_response.status_code == 201
     run_id = create_response.json()["id"]
 
+    _reconcile_active_runs(db_session_factory)
     get_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert get_response.status_code == 200
     assert get_response.json()["status"] == "completed"
@@ -1597,6 +1655,7 @@ def test_get_run_completes_without_commit_when_only_materialized_files_changed(
 
 def test_get_run_completes_from_runtime_managed_pull_request_without_backend_scm_calls(
     client: TestClient,
+    db_session_factory,
     monkeypatch,
 ) -> None:
     """Completed sessions should recover a PR that runtime finalized directly in the workspace."""
@@ -1764,6 +1823,7 @@ def test_get_run_completes_from_runtime_managed_pull_request_without_backend_scm
     assert create_response.status_code == 201
     run_id = create_response.json()["id"]
 
+    _reconcile_active_runs(db_session_factory)
     get_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert get_response.status_code == 200
     assert get_response.json()["status"] == "completed"
@@ -1781,6 +1841,7 @@ def test_get_run_completes_from_runtime_managed_pull_request_without_backend_scm
 
 def test_get_run_fails_when_runtime_leaves_unfinalized_repo_changes(
     client: TestClient,
+    db_session_factory,
     monkeypatch,
 ) -> None:
     """Completed runtime sessions must fail when SCM was not finalized inside the workspace."""
@@ -1909,6 +1970,7 @@ def test_get_run_fails_when_runtime_leaves_unfinalized_repo_changes(
     assert create_response.status_code == 201
     run_id = create_response.json()["id"]
 
+    _reconcile_active_runs(db_session_factory)
     get_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert get_response.status_code == 200
     assert get_response.json()["status"] == "failed"
@@ -1917,6 +1979,7 @@ def test_get_run_fails_when_runtime_leaves_unfinalized_repo_changes(
 
 def test_get_run_completes_when_workspace_was_already_finalized_by_runtime(
     client: TestClient,
+    db_session_factory,
     monkeypatch,
 ) -> None:
     """A completed run should finish cleanly when runtime already delivered the draft PR."""
@@ -2077,6 +2140,7 @@ def test_get_run_completes_when_workspace_was_already_finalized_by_runtime(
     assert create_response.status_code == 201
     run_id = create_response.json()["id"]
 
+    _reconcile_active_runs(db_session_factory)
     get_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert get_response.status_code == 200
     assert get_response.json()["status"] == "completed"
@@ -2099,6 +2163,7 @@ def test_get_run_completes_when_workspace_was_already_finalized_by_runtime(
 
 def test_resume_run_recovers_interrupted_codex_session(
     client: TestClient,
+    db_session_factory,
     monkeypatch,
 ) -> None:
     """Interrupted runs should be resumable from the same run id."""
@@ -2235,13 +2300,17 @@ def test_resume_run_recovers_interrupted_codex_session(
     run_id = create_response.json()["id"]
 
     session_state["status"] = "interrupted"
+    _reconcile_active_runs(db_session_factory)
     interrupted_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert interrupted_response.status_code == 200
     assert interrupted_response.json()["status"] == "interrupted"
     assert interrupted_response.json()["codex_session_id"] == "019cdddb-4df9-7100-ae82-b8b061ad6cbb"
     assert interrupted_response.json()["resume_attempt_count"] == 0
+    assert interrupted_response.json()["run_report"] is None
+    interrupted_report_response = client.get(f"/api/v1/runs/{run_id}/report", headers=headers)
+    assert interrupted_report_response.status_code == 200
     interrupted_phases = {
-        item["key"]: item for item in interrupted_response.json()["run_report"]["phases"]
+        item["key"]: item for item in interrupted_report_response.json()["phases"]
     }
     assert interrupted_phases["runtime"]["status"] == "interrupted"
 
@@ -2251,11 +2320,15 @@ def test_resume_run_recovers_interrupted_codex_session(
     assert resume_response.json()["resume_attempt_count"] == 1
 
     session_state["status"] = "running"
+    _reconcile_active_runs(db_session_factory)
     resumed_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert resumed_response.status_code == 200
     assert resumed_response.json()["status"] == "running"
     assert resumed_response.json()["resume_attempt_count"] == 1
-    resumed_phases = {item["key"]: item for item in resumed_response.json()["run_report"]["phases"]}
+    assert resumed_response.json()["run_report"] is None
+    resumed_report_response = client.get(f"/api/v1/runs/{run_id}/report", headers=headers)
+    assert resumed_report_response.status_code == 200
+    resumed_phases = {item["key"]: item for item in resumed_report_response.json()["phases"]}
     assert resumed_phases["runtime"]["status"] == "running"
 
     events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
@@ -2274,6 +2347,7 @@ def test_resume_run_recovers_interrupted_codex_session(
 
 def test_resume_run_recovers_interrupted_claude_session(
     client: TestClient,
+    db_session_factory,
     monkeypatch,
 ) -> None:
     """Interrupted Claude runs should be resumable from the same run id."""
@@ -2424,12 +2498,16 @@ def test_resume_run_recovers_interrupted_claude_session(
     run_id = create_response.json()["id"]
 
     session_state["status"] = "interrupted"
+    _reconcile_active_runs(db_session_factory)
     interrupted_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert interrupted_response.status_code == 200
     assert interrupted_response.json()["status"] == "interrupted"
     assert interrupted_response.json()["resume_attempt_count"] == 0
+    assert interrupted_response.json()["run_report"] is None
+    interrupted_report_response = client.get(f"/api/v1/runs/{run_id}/report", headers=headers)
+    assert interrupted_report_response.status_code == 200
     interrupted_phases = {
-        item["key"]: item for item in interrupted_response.json()["run_report"]["phases"]
+        item["key"]: item for item in interrupted_report_response.json()["phases"]
     }
     assert interrupted_phases["runtime"]["status"] == "interrupted"
 
@@ -2439,11 +2517,15 @@ def test_resume_run_recovers_interrupted_claude_session(
     assert resume_response.json()["resume_attempt_count"] == 1
 
     session_state["status"] = "running"
+    _reconcile_active_runs(db_session_factory)
     resumed_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert resumed_response.status_code == 200
     assert resumed_response.json()["status"] == "running"
     assert resumed_response.json()["resume_attempt_count"] == 1
-    resumed_phases = {item["key"]: item for item in resumed_response.json()["run_report"]["phases"]}
+    assert resumed_response.json()["run_report"] is None
+    resumed_report_response = client.get(f"/api/v1/runs/{run_id}/report", headers=headers)
+    assert resumed_report_response.status_code == 200
+    resumed_phases = {item["key"]: item for item in resumed_report_response.json()["phases"]}
     assert resumed_phases["runtime"]["status"] == "running"
 
     events_response = client.get(f"/api/v1/runs/{run_id}/events", headers=headers)
@@ -2462,6 +2544,7 @@ def test_resume_run_recovers_interrupted_claude_session(
 
 def test_get_run_auto_recovers_codex_session_after_host_restart(
     client: TestClient,
+    db_session_factory,
     monkeypatch,
 ) -> None:
     """Automatic recovery should surface resuming and completed events without manual resume."""
@@ -2595,12 +2678,14 @@ def test_get_run_auto_recovers_codex_session_after_host_restart(
     run_id = create_response.json()["id"]
 
     session_state["status"] = "resuming"
+    _reconcile_active_runs(db_session_factory)
     resuming_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert resuming_response.status_code == 200
     assert resuming_response.json()["status"] == "resuming"
     assert resuming_response.json()["resume_attempt_count"] == 1
 
     session_state["status"] = "running"
+    _reconcile_active_runs(db_session_factory)
     resumed_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert resumed_response.status_code == 200
     assert resumed_response.json()["status"] == "running"
@@ -2619,6 +2704,7 @@ def test_get_run_auto_recovers_codex_session_after_host_restart(
 
 def test_get_run_fails_when_codex_session_state_is_lost(
     client: TestClient,
+    db_session_factory,
     monkeypatch,
 ) -> None:
     """A lost host-side Codex session must not leave the run stuck forever."""
@@ -2710,6 +2796,7 @@ def test_get_run_fails_when_codex_session_state_is_lost(
     assert create_response.status_code == 201
     run_id = create_response.json()["id"]
 
+    _reconcile_active_runs(db_session_factory)
     get_response = client.get(f"/api/v1/runs/{run_id}", headers=headers)
     assert get_response.status_code == 200
     assert get_response.json()["status"] == "failed"

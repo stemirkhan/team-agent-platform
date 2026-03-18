@@ -6,11 +6,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
 
-from app.api.deps import get_auth_service, get_current_user, get_run_service
+from app.api.deps import get_auth_service, get_current_operator_user, get_run_service
 from app.core.security import decode_access_token
 from app.models.run import RunStatus
 from app.models.user import User
-from app.schemas.run import RunCreate, RunEventListResponse, RunListResponse, RunRead
+from app.schemas.run import RunCreate, RunEventListResponse, RunListResponse, RunRead, RunReportRead
 from app.schemas.terminal import TerminalSessionEventsResponse, TerminalSessionRead
 from app.services.auth_service import AuthService
 from app.services.run_service import RunService
@@ -24,7 +24,7 @@ def list_runs(
     offset: int = Query(default=0, ge=0),
     status_filter: RunStatus | None = Query(default=None, alias="status"),
     repo_filter: str | None = Query(default=None, alias="repo", min_length=1, max_length=511),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_operator_user),
     service: RunService = Depends(get_run_service),
 ) -> RunListResponse:
     """Return runs owned by the current user."""
@@ -40,7 +40,7 @@ def list_runs(
 @router.post("", response_model=RunRead, status_code=status.HTTP_201_CREATED)
 def create_run(
     payload: RunCreate,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_operator_user),
     service: RunService = Depends(get_run_service),
 ) -> RunRead:
     """Create one run and prepare its workspace plus runtime bundle."""
@@ -50,17 +50,27 @@ def create_run(
 @router.get("/{run_id}", response_model=RunRead)
 def get_run(
     run_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_operator_user),
     service: RunService = Depends(get_run_service),
 ) -> RunRead:
     """Return one run owned by the current user."""
     return service.get_run(run_id, user)
 
 
+@router.get("/{run_id}/report", response_model=RunReportRead)
+def get_run_report(
+    run_id: UUID,
+    user: User = Depends(get_current_operator_user),
+    service: RunService = Depends(get_run_service),
+) -> RunReportRead:
+    """Return one structured run report for the current user."""
+    return service.get_run_report(run_id, user)
+
+
 @router.get("/{run_id}/events", response_model=RunEventListResponse)
 def list_run_events(
     run_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_operator_user),
     service: RunService = Depends(get_run_service),
 ) -> RunEventListResponse:
     """Return ordered events for one run owned by the current user."""
@@ -70,7 +80,7 @@ def list_run_events(
 @router.post("/{run_id}/cancel", response_model=RunRead)
 def cancel_run(
     run_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_operator_user),
     service: RunService = Depends(get_run_service),
 ) -> RunRead:
     """Cancel one running host-side runtime session."""
@@ -80,7 +90,7 @@ def cancel_run(
 @router.post("/{run_id}/resume", response_model=RunRead)
 def resume_run(
     run_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_operator_user),
     service: RunService = Depends(get_run_service),
 ) -> RunRead:
     """Resume one interrupted host-side runtime session."""
@@ -90,7 +100,7 @@ def resume_run(
 @router.get("/{run_id}/terminal/session", response_model=TerminalSessionRead)
 def get_run_terminal_session(
     run_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_operator_user),
     service: RunService = Depends(get_run_service),
 ) -> TerminalSessionRead:
     """Return current terminal session metadata for one run."""
@@ -101,7 +111,7 @@ def get_run_terminal_session(
 def get_run_terminal_events(
     run_id: UUID,
     offset: int = Query(default=0, ge=0),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_operator_user),
     service: RunService = Depends(get_run_service),
 ) -> TerminalSessionEventsResponse:
     """Return incremental terminal output for one run."""
@@ -122,8 +132,10 @@ async def stream_run_terminal(
         await websocket.close(code=4401, reason="Unauthorized")
         return
 
-    user = auth_service.get_user_by_id(user_id)
-    if user is None:
+    try:
+        user = auth_service.get_user_by_id(user_id)
+        user = auth_service.ensure_operator(user)
+    except Exception:
         await websocket.close(code=4401, reason="Unauthorized")
         return
 

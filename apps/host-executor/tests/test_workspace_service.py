@@ -154,6 +154,57 @@ def test_cleanup_materialized_files_tolerates_missing_generated_file(tmp_path, m
     assert not (repo_dir / "TASK.md").exists()
 
 
+def test_prepare_workspace_uses_prefetched_repo_metadata(tmp_path, monkeypatch) -> None:
+    """Fresh run preparation should not perform a second GitHub repo lookup."""
+    monkeypatch.setattr(
+        workspace_service_module,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=str(tmp_path)),
+    )
+    service = WorkspaceService()
+
+    monkeypatch.setattr(
+        service.github_tracker,
+        "get_repo",
+        lambda owner, repo: (_ for _ in ()).throw(AssertionError("unexpected GitHub lookup")),
+    )
+    monkeypatch.setattr(
+        service,
+        "_run_gh",
+        lambda args, *, label, cwd=None: SimpleNamespace(stdout=""),
+    )
+    monkeypatch.setattr(
+        service,
+        "_run_git",
+        lambda args, *, cwd, label: SimpleNamespace(stdout=""),
+    )
+    monkeypatch.setattr(
+        service,
+        "_refresh_workspace",
+        lambda metadata, *, include_remote_state=True: metadata.model_copy(
+            update={
+                "current_branch": metadata.working_branch,
+                "has_changes": False,
+                "changed_files": [],
+            }
+        ),
+    )
+
+    prepared = service.prepare_workspace(
+        workspace_service_module.WorkspacePrepare(
+            owner="stemirkhan",
+            repo="team-agent-platform",
+            repo_full_name="stemirkhan/team-agent-platform",
+            repo_url="https://github.com/stemirkhan/team-agent-platform",
+            default_branch="main",
+        )
+    )
+
+    assert prepared.repo_full_name == "stemirkhan/team-agent-platform"
+    assert prepared.remote_url == "https://github.com/stemirkhan/team-agent-platform.git"
+    assert prepared.current_branch == prepared.working_branch
+
+
 def test_get_workspace_inferrs_runtime_managed_commit_state(tmp_path, monkeypatch) -> None:
     """Refreshing workspace state should detect a direct runtime git commit."""
     monkeypatch.setattr(

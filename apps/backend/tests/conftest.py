@@ -1,6 +1,7 @@
 """Shared pytest fixtures for backend API tests."""
 
 from collections.abc import Generator
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,14 +9,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+os.environ.setdefault("ALLOW_OPEN_REGISTRATION", "true")
+os.environ.setdefault("RUN_RECONCILER_ENABLED", "false")
+
 from app.core.db import get_db
 from app.main import app
 from app.models.base import Base
 
 
 @pytest.fixture
-def client() -> Generator[TestClient, None, None]:
-    """Provide API client with isolated in-memory SQLite DB."""
+def db_session_factory() -> Generator[sessionmaker[Session], None, None]:
+    """Provide an isolated in-memory session factory for one test."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -25,8 +29,17 @@ def client() -> Generator[TestClient, None, None]:
 
     Base.metadata.create_all(bind=engine)
 
+    yield session_local
+
+    Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture
+def client(db_session_factory: sessionmaker[Session]) -> Generator[TestClient, None, None]:
+    """Provide API client with isolated in-memory SQLite DB."""
+
     def override_get_db() -> Generator[Session, None, None]:
-        db = session_local()
+        db = db_session_factory()
         try:
             yield db
         finally:
@@ -38,4 +51,3 @@ def client() -> Generator[TestClient, None, None]:
         yield api_client
 
     app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=engine)

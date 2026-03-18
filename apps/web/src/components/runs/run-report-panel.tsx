@@ -16,6 +16,7 @@ type RunReportPanelProps = {
   locale: Locale;
   report: RunReport | null;
   runtimeTarget: RuntimeTarget;
+  loading?: boolean;
 };
 
 function phaseTitle(locale: Locale, key: RunReportPhase["key"], runtimeTarget: RuntimeTarget): string {
@@ -155,14 +156,19 @@ function renderGitMeta(locale: Locale, phase: RunReportPhase) {
   );
 }
 
-export function RunReportPanel({ locale, report, runtimeTarget }: RunReportPanelProps) {
+export function RunReportPanel({ locale, report, runtimeTarget, loading = false }: RunReportPanelProps) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20">
       <h2 className="mb-4 text-xl font-black text-slate-900 dark:text-slate-50">
         {t(locale, { ru: "Отчет запуска", en: "Run report" })}
       </h2>
 
-      {!report || report.phases.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t(locale, { ru: "Собираем отчет по фазам...", en: "Building the phase report..." })}
+        </div>
+      ) : !report || report.phases.length === 0 ? (
         <p className="text-sm text-slate-500 dark:text-slate-400">
           {t(locale, {
             ru: "Структурированный отчет пока недоступен для этого запуска.",

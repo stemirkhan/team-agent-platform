@@ -3,6 +3,7 @@ import { ArrowLeft, PlaySquare } from "lucide-react";
 
 import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
 import { RunLaunchForm } from "@/components/runs/run-launch-form";
+import { getRequestAccessToken } from "@/lib/auth-client.server";
 import { fetchGitHubRepos, fetchHostReadiness, fetchTeams } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { getRequestLocale } from "@/lib/i18n.server";
@@ -22,11 +23,12 @@ export default async function NewRunPage({
   };
 }) {
   const locale = getRequestLocale();
+  const token = getRequestAccessToken() ?? undefined;
 
   const [teamsResult, reposResult, readinessResult] = await Promise.allSettled([
     fetchTeams(),
-    fetchGitHubRepos({ limit: 20 }),
-    fetchHostReadiness()
+    fetchGitHubRepos({ limit: 20 }, token),
+    fetchHostReadiness(undefined, token)
   ]);
 
   const teams = teamsResult.status === "fulfilled" ? teamsResult.value.items : [];

@@ -50,6 +50,9 @@ class WorkspacePrepare(BaseModel):
     repo: str = Field(min_length=1, max_length=255)
     base_branch: str | None = Field(default=None, min_length=1, max_length=255)
     working_branch: str | None = Field(default=None, min_length=1, max_length=255)
+    repo_full_name: str | None = Field(default=None, min_length=1, max_length=511)
+    repo_url: str | None = Field(default=None, min_length=1, max_length=2000)
+    default_branch: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class WorkspaceCommit(BaseModel):

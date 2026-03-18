@@ -61,26 +61,38 @@ class WorkspaceService:
 
     def prepare_workspace(self, payload: WorkspacePrepare) -> WorkspaceRead:
         """Clone a repository, checkout base, and create a working branch."""
-        try:
-            repo = self.github_tracker.get_repo(payload.owner, payload.repo)
-        except GitHubTrackerServiceError as exc:
-            raise WorkspaceServiceError(exc.status_code, exc.detail) from exc
+        repo_owner = payload.owner
+        repo_name = payload.repo
+        repo_full_name = payload.repo_full_name
+        repo_url = payload.repo_url
+        default_branch = payload.default_branch
+
+        if not repo_full_name or not repo_url:
+            try:
+                repo = self.github_tracker.get_repo(payload.owner, payload.repo)
+            except GitHubTrackerServiceError as exc:
+                raise WorkspaceServiceError(exc.status_code, exc.detail) from exc
+            repo_owner = repo.owner
+            repo_name = repo.name
+            repo_full_name = repo.full_name
+            repo_url = repo.url
+            default_branch = repo.default_branch
 
         workspace_id = uuid.uuid4().hex
         workspace_dir = self.workspace_root / workspace_id
         repo_dir = workspace_dir / "repo"
         workspace_dir.mkdir(parents=True, exist_ok=False)
 
-        remote_url = self._build_remote_url(repo.url)
-        base_branch = payload.base_branch or repo.default_branch or "main"
-        working_branch = payload.working_branch or self._generate_working_branch(repo.name)
+        remote_url = self._build_remote_url(repo_url)
+        base_branch = payload.base_branch or default_branch or "main"
+        working_branch = payload.working_branch or self._generate_working_branch(repo_name)
         timestamp = _utc_now()
 
         metadata = WorkspaceRead(
             id=workspace_id,
-            repo_owner=repo.owner,
-            repo_name=repo.name,
-            repo_full_name=repo.full_name,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            repo_full_name=repo_full_name,
             remote_url=remote_url,
             workspace_path=str(workspace_dir),
             repo_path=str(repo_dir),
@@ -96,7 +108,7 @@ class WorkspaceService:
                 [
                     "repo",
                     "clone",
-                    repo.full_name,
+                    repo_full_name,
                     str(repo_dir),
                     "--",
                     "--depth=1",
@@ -111,7 +123,7 @@ class WorkspaceService:
                 cwd=repo_dir,
                 label="create working branch",
             )
-            refreshed = self._refresh_workspace(metadata)
+            refreshed = self._refresh_workspace(metadata, include_remote_state=False)
         except Exception:
             shutil.rmtree(workspace_dir, ignore_errors=True)
             raise
@@ -249,7 +261,7 @@ class WorkspaceService:
             target_path.write_text(file.content, encoding="utf-8")
 
         self._save_materialized_state(metadata, materialized_state)
-        refreshed = self._refresh_workspace(metadata)
+        refreshed = self._refresh_workspace(metadata, include_remote_state=False)
         self._save_workspace(refreshed)
         return refreshed
 
@@ -262,7 +274,7 @@ class WorkspaceService:
 
         materialized_state = self._load_materialized_state(metadata)
         if not materialized_state:
-            refreshed = self._refresh_workspace(metadata)
+            refreshed = self._refresh_workspace(metadata, include_remote_state=False)
             self._save_workspace(refreshed)
             return refreshed
 
@@ -289,7 +301,7 @@ class WorkspaceService:
                 self._prune_empty_directories(target_path.parent, stop_at=repo_dir.resolve())
 
         self._delete_materialized_state(metadata)
-        refreshed = self._refresh_workspace(metadata)
+        refreshed = self._refresh_workspace(metadata, include_remote_state=False)
         self._save_workspace(refreshed)
         return refreshed
 
@@ -359,7 +371,12 @@ class WorkspaceService:
         if workspace_dir.exists():
             shutil.rmtree(workspace_dir, ignore_errors=True)
 
-    def _refresh_workspace(self, metadata: WorkspaceRead) -> WorkspaceRead:
+    def _refresh_workspace(
+        self,
+        metadata: WorkspaceRead,
+        *,
+        include_remote_state: bool = True,
+    ) -> WorkspaceRead:
         """Recompute git state for an existing workspace."""
         repo_dir = Path(metadata.repo_path)
         if not repo_dir.exists():
@@ -389,16 +406,18 @@ class WorkspaceService:
             cwd=repo_dir,
         )
         normalized_upstream_branch = upstream_branch.strip() or None if upstream_branch else None
-        remote_branch_head = self._try_read_remote_branch_head(
-            repo_dir=repo_dir,
-            working_branch=metadata.working_branch,
-        )
-        remote_branch_matches_head = bool(
-            remote_branch_head and last_commit_sha and remote_branch_head == last_commit_sha
-        )
         expected_upstream_branch = f"origin/{metadata.working_branch}"
-        if normalized_upstream_branch is None and remote_branch_matches_head:
-            normalized_upstream_branch = expected_upstream_branch
+        remote_branch_matches_head = False
+        if include_remote_state:
+            remote_branch_head = self._try_read_remote_branch_head(
+                repo_dir=repo_dir,
+                working_branch=metadata.working_branch,
+            )
+            remote_branch_matches_head = bool(
+                remote_branch_head and last_commit_sha and remote_branch_head == last_commit_sha
+            )
+            if normalized_upstream_branch is None and remote_branch_matches_head:
+                normalized_upstream_branch = expected_upstream_branch
 
         status_output = self._run_git(
             ["status", "--porcelain=v1"],
@@ -418,7 +437,7 @@ class WorkspaceService:
             and metadata.pull_request_url is not None
         )
         pull = None
-        if (
+        if include_remote_state and (
             normalized_upstream_branch == expected_upstream_branch
             or remote_branch_matches_head
             or persisted_push

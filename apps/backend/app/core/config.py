@@ -20,9 +20,14 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://team_agent_platform:team_agent_platform@localhost:5432/team_agent_platform"
     redis_url: str = "redis://localhost:6379/0"
     host_executor_base_url: str | None = None
-    host_executor_timeout_seconds: float = 2.5
+    host_executor_shared_secret: str = "dev-host-executor-secret-change-me"
+    host_executor_timeout_seconds: float = 6.0
     host_executor_api_timeout_seconds: float = 15.0
     host_executor_workspace_command_timeout_seconds: float = 1800.0
+    allow_open_registration: bool = False
+    run_reconciler_enabled: bool = True
+    run_reconciler_interval_seconds: float = 2.0
+    run_reconciler_batch_size: int = 50
     jwt_secret_key: str = "dev-secret-key-change-me-at-least-32-chars"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60 * 24

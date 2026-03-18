@@ -3,6 +3,7 @@ import { ExternalLink, FolderGit2, GitBranch } from "lucide-react";
 
 import { RepoFiltersForm } from "@/components/repos/repo-filters-form";
 import { ExecutionPageContainer } from "@/components/layout/execution-page-container";
+import { getRequestAccessToken } from "@/lib/auth-client.server";
 import { fetchGitHubRepos } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { getRequestLocale } from "@/lib/i18n.server";
@@ -20,6 +21,7 @@ export default async function ReposPage({
   searchParams?: { owner?: string | string[]; q?: string | string[] };
 }) {
   const locale = getRequestLocale();
+  const token = getRequestAccessToken() ?? undefined;
   const owner = readSearchValue(searchParams?.owner);
   const query = readSearchValue(searchParams?.q);
 
@@ -31,7 +33,7 @@ export default async function ReposPage({
       owner: owner || undefined,
       q: query || undefined,
       limit: 50
-    });
+    }, token);
   } catch (fetchError) {
     error =
       fetchError instanceof Error

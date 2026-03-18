@@ -2,8 +2,10 @@
 
 from fastapi import HTTPException, status
 
+from app.core.config import Settings
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
+from app.models.user import UserRole
 from app.repositories.user import UserRepository
 from app.schemas.auth import AuthLoginRequest, AuthRegisterRequest
 from app.schemas.user import UserCreateInternal
@@ -12,11 +14,19 @@ from app.schemas.user import UserCreateInternal
 class AuthService:
     """Application-level auth service."""
 
-    def __init__(self, user_repository: UserRepository) -> None:
+    def __init__(self, user_repository: UserRepository, settings: Settings) -> None:
         self.user_repository = user_repository
+        self.settings = settings
 
     def register(self, payload: AuthRegisterRequest) -> tuple[User, str]:
         """Create account and issue JWT token."""
+        existing_user_count = self.user_repository.count_users()
+        if existing_user_count > 0 and not self.settings.allow_open_registration:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Self-registration is closed after the owner account is created.",
+            )
+
         normalized_email = payload.email.strip().lower()
         if self.user_repository.get_by_email(normalized_email):
             raise HTTPException(
@@ -29,6 +39,7 @@ class AuthService:
                 email=normalized_email,
                 password_hash=hash_password(payload.password),
                 display_name=payload.display_name.strip(),
+                role=UserRole.ADMIN if existing_user_count == 0 else UserRole.USER,
             )
         )
 
@@ -61,5 +72,24 @@ class AuthService:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication credentials.",
+            )
+        return user
+
+    def get_owner_user(self) -> User:
+        """Return the effective platform owner or fail when auth bootstrap is incomplete."""
+        owner = self.user_repository.get_owner()
+        if owner is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Owner account is not initialized yet.",
+            )
+        return owner
+
+    def ensure_operator(self, user: User) -> User:
+        """Ensure the current user is allowed to access host-backed operations."""
+        if user.role != UserRole.ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only platform admins can use host-backed operations.",
             )
         return user
