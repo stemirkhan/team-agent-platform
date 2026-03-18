@@ -21,6 +21,8 @@ export function RepoFiltersForm({ locale, owner: initialOwner, query: initialQue
   const [isPending, startTransition] = useTransition();
   const [owner, setOwner] = useState(initialOwner);
   const [query, setQuery] = useState(initialQuery);
+  const [isDebouncing, setIsDebouncing] = useState(false);
+  const debounceTimeoutRef = useRef<number | null>(null);
   const latestAppliedRef = useRef(`${initialOwner}\n${initialQuery}`);
 
   useEffect(() => {
@@ -68,17 +70,50 @@ export function RepoFiltersForm({ locale, owner: initialOwner, query: initialQue
   );
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
+    const nextOwner = owner.trim();
+    const nextQuery = query.trim();
+    const nextParams = new URLSearchParams(searchParams.toString());
+
+    if (nextOwner.length > 0) {
+      nextParams.set("owner", nextOwner);
+    } else {
+      nextParams.delete("owner");
+    }
+
+    if (nextQuery.length > 0) {
+      nextParams.set("q", nextQuery);
+    } else {
+      nextParams.delete("q");
+    }
+
+    const hasPendingFilterChange = nextParams.toString() !== searchParams.toString();
+    if (!hasPendingFilterChange) {
+      setIsDebouncing(false);
+      return;
+    }
+
+    setIsDebouncing(true);
+    debounceTimeoutRef.current = window.setTimeout(() => {
+      debounceTimeoutRef.current = null;
+      setIsDebouncing(false);
       applyFilters(owner, query);
     }, FILTER_SUBMIT_DEBOUNCE_MS);
 
     return () => {
-      window.clearTimeout(timeoutId);
+      if (debounceTimeoutRef.current !== null) {
+        window.clearTimeout(debounceTimeoutRef.current);
+        debounceTimeoutRef.current = null;
+      }
     };
-  }, [applyFilters, owner, query]);
+  }, [applyFilters, owner, query, searchParams]);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (debounceTimeoutRef.current !== null) {
+      window.clearTimeout(debounceTimeoutRef.current);
+      debounceTimeoutRef.current = null;
+    }
+    setIsDebouncing(false);
     applyFilters(owner, query);
   }
 
@@ -116,8 +151,13 @@ export function RepoFiltersForm({ locale, owner: initialOwner, query: initialQue
       <p aria-live="polite" className="mt-3 text-xs text-slate-500 dark:text-slate-400">
         {isPending
           ? t(locale, { ru: "Обновляем список репозиториев...", en: "Updating repositories..." })
+          : isDebouncing
+            ? t(locale, { ru: "Скоро применим фильтры...", en: "Applying filters shortly..." })
           : t(locale, { ru: "Фильтры применяются автоматически.", en: "Filters are applied automatically." })}
       </p>
+      <button className="sr-only" type="submit">
+        {t(locale, { ru: "Применить фильтры", en: "Apply filters" })}
+      </button>
     </form>
   );
 }
