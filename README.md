@@ -131,6 +131,13 @@ Then open:
 - runs: `http://localhost:3000/runs`
 - repositories: `http://localhost:3000/repos`
 
+On a clean install, opening the frontend for the first time now redirects to `/setup`.
+That first-run screen lets you:
+
+- create the first admin account;
+- choose whether self-registration stays open after setup;
+- decide whether to seed the starter `Fullstack Delivery Squad` team and its base agents.
+
 To stop everything:
 
 ```bash
@@ -178,6 +185,8 @@ If you changed Dockerfiles or dependency manifests, rebuild explicitly:
 - diagnostics: `http://localhost:3000/diagnostics`
 - runs: `http://localhost:3000/runs`
 - repositories: `http://localhost:3000/repos`
+
+If no admin account exists yet, the root UI will redirect to `/setup` for first-run initialization.
 
 5. Stop the control plane:
 
@@ -243,6 +252,14 @@ npm install
 npm run lint
 npm run build
 ```
+
+## Demo Seeding
+
+Demo data is not created during normal startup.
+
+- clean install: no starter team is added automatically unless selected in the `/setup` UI;
+- `./scripts/dev/seed-demo.sh`: seeds a demo user and a few demo agents;
+- `./scripts/dev/reset-demo-data.sh`: resets catalog data and seeds the full demo catalog, including `Fullstack Delivery Squad`.
 
 ## Documentation
 

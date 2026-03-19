@@ -10,10 +10,12 @@ from app.core.security import decode_access_token
 from app.repositories.agent import AgentRepository
 from app.repositories.agent_version import AgentVersionRepository
 from app.repositories.export_job import ExportJobRepository
+from app.repositories.platform_settings import PlatformSettingsRepository
 from app.repositories.team import TeamRepository
 from app.repositories.user import UserRepository
 from app.services.agent_service import AgentService
 from app.services.auth_service import AuthService
+from app.services.bootstrap_service import BootstrapService
 from app.services.export_service import ExportService
 from app.services.run_service import RunService
 from app.services.run_service_factory import build_run_service
@@ -59,7 +61,25 @@ def get_run_service(db: Session = Depends(get_db)) -> RunService:
 def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     """Build AuthService with request-scoped DB session."""
     user_repository = UserRepository(db)
-    return AuthService(user_repository, get_settings())
+    platform_settings_repository = PlatformSettingsRepository(db)
+    return AuthService(user_repository, platform_settings_repository, get_settings())
+
+
+def get_bootstrap_service(db: Session = Depends(get_db)) -> BootstrapService:
+    """Build BootstrapService with request-scoped DB session."""
+    user_repository = UserRepository(db)
+    platform_settings_repository = PlatformSettingsRepository(db)
+    agent_repository = AgentRepository(db)
+    agent_version_repository = AgentVersionRepository(db)
+    team_repository = TeamRepository(db)
+    return BootstrapService(
+        user_repository=user_repository,
+        platform_settings_repository=platform_settings_repository,
+        agent_repository=agent_repository,
+        agent_version_repository=agent_version_repository,
+        team_repository=team_repository,
+        settings=get_settings(),
+    )
 
 
 def get_current_user(

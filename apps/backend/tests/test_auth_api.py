@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from app.core.config import get_settings
 from app.services.auth_service import AuthService
 from app.models.user import UserRole
+from app.repositories.platform_settings import PlatformSettingsRepository
 from app.repositories.user import UserRepository
 from app.schemas.user import UserCreateInternal
 
@@ -109,6 +110,102 @@ def test_registration_closes_after_owner_when_open_registration_is_disabled(
         get_settings.cache_clear()
 
 
+def test_bootstrap_status_and_setup_can_seed_starter_team(client: TestClient) -> None:
+    """First-run bootstrap should create the admin session and optional starter catalog."""
+    initial_status = client.get("/api/v1/auth/bootstrap")
+    assert initial_status.status_code == 200
+    assert initial_status.json() == {
+        "setup_required": True,
+        "allow_open_registration": True,
+    }
+
+    bootstrap_response = client.post(
+        "/api/v1/auth/bootstrap",
+        json={
+            "email": "owner@example.com",
+            "password": "supersecure123",
+            "display_name": "Owner",
+            "allow_open_registration": False,
+            "seed_starter_team": True,
+        },
+    )
+    assert bootstrap_response.status_code == 201
+    payload = bootstrap_response.json()
+    assert payload["user"]["role"] == "admin"
+    assert payload["bootstrap_status"] == {
+        "setup_required": False,
+        "allow_open_registration": False,
+    }
+    assert payload["seeded_team_slug"] == "fullstack-delivery-squad"
+
+    catalog_response = client.get("/api/v1/agents")
+    assert catalog_response.status_code == 200
+    assert catalog_response.json()["total"] == 3
+
+    team_response = client.get("/api/v1/teams/fullstack-delivery-squad")
+    assert team_response.status_code == 200
+    assert team_response.json()["status"] == "published"
+    assert [item["role_name"] for item in team_response.json()["items"]] == [
+        "orchestrator",
+        "backend-engineer",
+        "frontend-engineer",
+    ]
+
+    second_register = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "closed@example.com",
+            "password": "supersecure123",
+            "display_name": "Closed Registration User",
+        },
+    )
+    assert second_register.status_code == 403
+    assert (
+        second_register.json()["detail"]
+        == "Self-registration is closed after the owner account is created."
+    )
+
+    repeated_bootstrap = client.post(
+        "/api/v1/auth/bootstrap",
+        json={
+            "email": "second-owner@example.com",
+            "password": "supersecure123",
+            "display_name": "Second Owner",
+            "allow_open_registration": True,
+            "seed_starter_team": False,
+        },
+    )
+    assert repeated_bootstrap.status_code == 409
+    assert repeated_bootstrap.json()["detail"] == "Platform setup is already completed."
+
+
+def test_bootstrap_can_leave_open_registration_enabled(client: TestClient) -> None:
+    """Bootstrap should respect the selected self-registration policy."""
+    bootstrap_response = client.post(
+        "/api/v1/auth/bootstrap",
+        json={
+            "email": "owner@example.com",
+            "password": "supersecure123",
+            "display_name": "Owner",
+            "allow_open_registration": True,
+            "seed_starter_team": False,
+        },
+    )
+    assert bootstrap_response.status_code == 201
+    assert bootstrap_response.json()["seeded_team_slug"] is None
+
+    register_response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "member@example.com",
+            "password": "supersecure123",
+            "display_name": "Member",
+        },
+    )
+    assert register_response.status_code == 201
+    assert register_response.json()["user"]["role"] == "user"
+
+
 def test_owner_resolution_requires_explicit_admin(db_session_factory) -> None:
     """Owner lookup should not silently fall back to the oldest non-admin user."""
     db = db_session_factory()
@@ -158,7 +255,7 @@ def test_operator_access_requires_explicit_admin_role(db_session_factory) -> Non
             )
         )
 
-        service = AuthService(repository, get_settings())
+        service = AuthService(repository, PlatformSettingsRepository(db), get_settings())
 
         assert service.get_owner_user().id == first_admin.id
         assert service.ensure_operator(second_admin).id == second_admin.id

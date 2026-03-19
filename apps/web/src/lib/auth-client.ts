@@ -14,6 +14,16 @@ export type AuthTokenResponse = {
   user: AuthUser;
 };
 
+export type BootstrapStatus = {
+  setup_required: boolean;
+  allow_open_registration: boolean;
+};
+
+export type BootstrapSetupResponse = AuthTokenResponse & {
+  bootstrap_status: BootstrapStatus;
+  seeded_team_slug: string | null;
+};
+
 const ACCESS_TOKEN_KEY = "team_agent_platform_access_token";
 export const ACCESS_TOKEN_COOKIE_NAME = "team_agent_platform_access_token";
 
@@ -89,6 +99,50 @@ export async function registerWithPassword(payload: {
   }
 
   return json as AuthTokenResponse;
+}
+
+export async function fetchBootstrapStatus(options?: {
+  fallbackMessage?: string;
+}): Promise<BootstrapStatus> {
+  const response = await fetch(`${getApiBaseUrl()}/auth/bootstrap`, {
+    cache: "no-store"
+  });
+
+  const json = await readResponsePayload(response);
+
+  if (!response.ok) {
+    throw new Error(
+      extractErrorMessage(json) ?? options?.fallbackMessage ?? "Failed to fetch bootstrap status."
+    );
+  }
+
+  return json as BootstrapStatus;
+}
+
+export async function bootstrapPlatform(payload: {
+  email: string;
+  password: string;
+  display_name: string;
+  allow_open_registration: boolean;
+  seed_starter_team: boolean;
+}, options?: {
+  fallbackMessage?: string;
+}): Promise<BootstrapSetupResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/auth/bootstrap`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  const json = await readResponsePayload(response);
+
+  if (!response.ok) {
+    throw new Error(
+      extractErrorMessage(json) ?? options?.fallbackMessage ?? "Platform bootstrap failed."
+    );
+  }
+
+  return json as BootstrapSetupResponse;
 }
 
 export async function loginWithPassword(payload: {

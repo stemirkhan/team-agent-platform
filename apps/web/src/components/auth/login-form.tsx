@@ -11,9 +11,10 @@ import { t, type Locale } from "@/lib/i18n";
 
 type LoginFormProps = {
   locale: Locale;
+  allowOpenRegistration: boolean;
 };
 
-export function LoginForm({ locale }: LoginFormProps) {
+export function LoginForm({ locale, allowOpenRegistration }: LoginFormProps) {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
@@ -102,12 +103,21 @@ export function LoginForm({ locale }: LoginFormProps) {
         </Button>
       </form>
 
-      <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
-        {t(locale, { ru: "Еще нет аккаунта?", en: "No account yet?" })}{" "}
-        <Link className="font-semibold text-brand-700 hover:text-brand-900 dark:text-slate-200 dark:hover:text-white" href="/auth/register">
-          {t(locale, { ru: "Регистрация", en: "Register" })}
-        </Link>
-      </p>
+      {allowOpenRegistration ? (
+        <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
+          {t(locale, { ru: "Еще нет аккаунта?", en: "No account yet?" })}{" "}
+          <Link className="font-semibold text-brand-700 hover:text-brand-900 dark:text-slate-200 dark:hover:text-white" href="/auth/register">
+            {t(locale, { ru: "Регистрация", en: "Register" })}
+          </Link>
+        </p>
+      ) : (
+        <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
+          {t(locale, {
+            ru: "Self-registration сейчас закрыта. Используйте учетные данные администратора.",
+            en: "Self-registration is currently closed. Use admin-provided credentials.",
+          })}
+        </p>
+      )}
     </section>
   );
 }
