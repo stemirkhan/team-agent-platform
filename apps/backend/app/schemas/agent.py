@@ -57,6 +57,7 @@ class AgentRead(AgentBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    author_id: UUID | None = None
     author_name: str
     status: AgentStatus
     verification_status: VerificationStatus

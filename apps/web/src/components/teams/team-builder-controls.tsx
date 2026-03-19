@@ -53,6 +53,27 @@ function parseOptionalIndex(value: string): number | undefined {
   return Math.max(0, Math.trunc(parsed));
 }
 
+function formatConfigJson(value: Record<string, unknown> | null | undefined): string {
+  if (!value || Object.keys(value).length === 0) {
+    return "";
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function parseConfigJson(value: string): Record<string, unknown> | undefined {
+  const normalized = value.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const parsed = JSON.parse(normalized) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Configuration JSON must be an object.");
+  }
+
+  return parsed as Record<string, unknown>;
+}
+
 export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) {
   const router = useRouter();
 
@@ -74,6 +95,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
   const [roleName, setRoleName] = useState("");
   const [isRequired, setIsRequired] = useState(true);
   const [orderIndex, setOrderIndex] = useState("");
+  const [configJsonInput, setConfigJsonInput] = useState("");
 
   const [savingSettings, setSavingSettings] = useState(false);
   const [submittingItem, setSubmittingItem] = useState(false);
@@ -86,6 +108,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
   const [editingRoleName, setEditingRoleName] = useState("");
   const [editingOrderIndex, setEditingOrderIndex] = useState("");
   const [editingIsRequired, setEditingIsRequired] = useState(true);
+  const [editingConfigJsonInput, setEditingConfigJsonInput] = useState("");
   const [savingItem, setSavingItem] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -97,6 +120,8 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
     setSettingsDescription(team.description ?? "");
     setSettingsStartupPrompt(team.startup_prompt ?? "");
     setEditingItemId(null);
+    setConfigJsonInput("");
+    setEditingConfigJsonInput("");
   }, [team]);
 
   useEffect(() => {
@@ -218,6 +243,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
     setRoleName("");
     setOrderIndex("");
     setIsRequired(true);
+    setConfigJsonInput("");
   }
 
   async function onSaveSettings(event: React.FormEvent<HTMLFormElement>) {
@@ -262,6 +288,19 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
       return;
     }
 
+    let parsedConfigJson: Record<string, unknown> | undefined;
+    try {
+      parsedConfigJson = parseConfigJson(configJsonInput);
+    } catch {
+      setErrorMessage(
+        t(locale, {
+          ru: "Config JSON должен быть валидным JSON-объектом.",
+          en: "Config JSON must be a valid JSON object."
+        })
+      );
+      return;
+    }
+
     setSubmittingItem(true);
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -273,6 +312,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
           agent_slug: selectedAgentSlug,
           role_name: roleName.trim(),
           order_index: parseOptionalIndex(orderIndex),
+          config_json: parsedConfigJson,
           is_required: isRequired
         },
         token
@@ -314,6 +354,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
     setEditingRoleName(item.role_name);
     setEditingOrderIndex(String(item.order_index));
     setEditingIsRequired(item.is_required);
+    setEditingConfigJsonInput(formatConfigJson(item.config_json));
     setErrorMessage(null);
     setSuccessMessage(null);
   }
@@ -324,6 +365,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
     setEditingRoleName("");
     setEditingOrderIndex("");
     setEditingIsRequired(true);
+    setEditingConfigJsonInput("");
   }
 
   async function onSaveItem(itemId: string) {
@@ -333,6 +375,21 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
     }
     if (!editingAgentSlug) {
       setErrorMessage(t(locale, { ru: "Выберите агента для элемента команды.", en: "Select an agent for the team item." }));
+      return;
+    }
+
+    let parsedConfigJson: Record<string, unknown> | null | undefined;
+    try {
+      parsedConfigJson = editingConfigJsonInput.trim()
+        ? parseConfigJson(editingConfigJsonInput) ?? null
+        : null;
+    } catch {
+      setErrorMessage(
+        t(locale, {
+          ru: "Config JSON должен быть валидным JSON-объектом.",
+          en: "Config JSON must be a valid JSON object."
+        })
+      );
       return;
     }
 
@@ -348,6 +405,7 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
           agent_slug: editingAgentSlug,
           role_name: editingRoleName.trim(),
           order_index: parseOptionalIndex(editingOrderIndex),
+          config_json: parsedConfigJson,
           is_required: editingIsRequired
         },
         token
@@ -634,6 +692,24 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
                     </label>
 
                     <div className="md:col-span-2">
+                      <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        {t(locale, { ru: "Config JSON", en: "Config JSON" })}
+                        <textarea
+                          className="mt-1 min-h-32 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                          onChange={(event) => setEditingConfigJsonInput(event.target.value)}
+                          placeholder={'{\n  "strict": true\n}'}
+                          value={editingConfigJsonInput}
+                        />
+                        <p className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
+                          {t(locale, {
+                            ru: "Оставьте поле пустым, чтобы убрать конфиг у роли.",
+                            en: "Leave this empty to clear the role config."
+                          })}
+                        </p>
+                      </label>
+                    </div>
+
+                    <div className="md:col-span-2">
                       <Button
                         disabled={savingItem}
                         onClick={() => void onSaveItem(item.id)}
@@ -647,9 +723,21 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
                     </div>
                   </div>
                 ) : (
-                  <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
-                    {item.agent_short_description}
-                  </p>
+                  <div className="mt-3 space-y-3">
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                      {item.agent_short_description}
+                    </p>
+                    {item.config_json ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
+                          {t(locale, { ru: "Role config", en: "Role config" })}
+                        </p>
+                        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-6 text-slate-700 dark:text-slate-200">
+                          {JSON.stringify(item.config_json, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
+                  </div>
                 )}
               </article>
             );
@@ -901,6 +989,22 @@ export function TeamBuilderControls({ team, locale }: TeamBuilderControlsProps) 
                   type="checkbox"
                 />
                 {t(locale, { ru: "Обязательная роль", en: "Required role" })}
+              </label>
+
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                {t(locale, { ru: "Config JSON", en: "Config JSON" })}
+                <textarea
+                  className="mt-1 min-h-32 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  onChange={(event) => setConfigJsonInput(event.target.value)}
+                  placeholder={'{\n  "strict": true\n}'}
+                  value={configJsonInput}
+                />
+                <p className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
+                  {t(locale, {
+                    ru: "Опциональный JSON-объект с настройками роли внутри команды.",
+                    en: "Optional JSON object with role-specific settings inside the team."
+                  })}
+                </p>
               </label>
 
               <Button

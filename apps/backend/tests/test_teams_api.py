@@ -73,6 +73,7 @@ def test_manage_draft_team_items_without_version_selection(client: TestClient) -
         headers=headers,
         slug="api-auditor",
         title="API Auditor",
+        publish_agent=False,
     )
     reviewer_update = client.patch(
         "/api/v1/agents/api-auditor",
@@ -86,6 +87,8 @@ def test_manage_draft_team_items_without_version_selection(client: TestClient) -
         },
     )
     assert reviewer_update.status_code == 200
+    reviewer_publish = client.post("/api/v1/agents/api-auditor/publish", headers=headers)
+    assert reviewer_publish.status_code == 200
 
     architect_slug = _configure_agent(
         client,

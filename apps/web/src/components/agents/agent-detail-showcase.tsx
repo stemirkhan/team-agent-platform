@@ -22,8 +22,13 @@ import {
   type Agent,
   type AgentMarkdownFile,
   type AgentSkill,
+  type AgentUpdatePayload,
   type RuntimeTarget,
-  updateAgent
+  createAgentDraftRevision,
+  fetchAgentDraft,
+  publishAgentDraft,
+  updateAgent,
+  updateAgentDraft
 } from "@/lib/api";
 import {
   formatAuthLoading,
@@ -167,6 +172,15 @@ function normalizeRuntimeTargets(targets: RuntimeTarget[] | null | undefined): R
   return targets?.length ? targets : ["codex", "claude_code"];
 }
 
+function normalizeCompatibilityMatrix(
+  matrix: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+  if (!matrix || typeof matrix !== "object") {
+    return { codex: true, claude_code: true };
+  }
+  return { ...matrix };
+}
+
 function buildSkillAssetPath(runtimeTarget: RuntimeTarget, agentSlug: string, skillSlug: string): string {
   const normalizedSlug = skillSlug || "new-skill";
   return runtimeTarget === "claude_code"
@@ -206,32 +220,120 @@ function buildAgentBundlePaths(
 export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps) {
   const router = useRouter();
   const draftCounterRef = useRef(0);
-  const exportTargets = useMemo(() => normalizeRuntimeTargets(agent.export_targets), [agent.export_targets]);
+  const [agentSnapshot, setAgentSnapshot] = useState(agent);
 
   const [activeTab, setActiveTab] = useState<AgentPageTabId>("overview");
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  const [previewRuntime, setPreviewRuntime] = useState<RuntimeTarget>(exportTargets[0] ?? "codex");
 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  const [draftRevisionLoading, setDraftRevisionLoading] = useState(false);
+  const [isDraftRevisionView, setIsDraftRevisionView] = useState(false);
+  const [savingOverview, setSavingOverview] = useState(false);
+  const [overviewErrorMessage, setOverviewErrorMessage] = useState<string | null>(null);
+  const [overviewSuccessMessage, setOverviewSuccessMessage] = useState<string | null>(null);
   const [submittingAssets, setSubmittingAssets] = useState(false);
   const [assetErrorMessage, setAssetErrorMessage] = useState<string | null>(null);
   const [assetSuccessMessage, setAssetSuccessMessage] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState(agentSnapshot.title);
+  const [shortDescriptionDraft, setShortDescriptionDraft] = useState(agentSnapshot.short_description);
+  const [fullDescriptionDraft, setFullDescriptionDraft] = useState(agentSnapshot.full_description ?? "");
+  const [categoryDraft, setCategoryDraft] = useState(agentSnapshot.category ?? "");
+  const [installInstructionsDraft, setInstallInstructionsDraft] = useState(
+    agentSnapshot.install_instructions ?? ""
+  );
+  const [sourceArchiveUrlDraft, setSourceArchiveUrlDraft] = useState(agentSnapshot.source_archive_url ?? "");
+  const [baseInstructions, setBaseInstructions] = useState(
+    () =>
+      readNestedString(
+        agentSnapshot.manifest_json && typeof agentSnapshot.manifest_json === "object"
+          ? agentSnapshot.manifest_json
+          : null,
+        "instructions"
+      ) ??
+      agentSnapshot.install_instructions ??
+      agentSnapshot.short_description
+  );
+  const [codexInstructions, setCodexInstructions] = useState(
+    () =>
+      readNestedString(
+        agentSnapshot.manifest_json && typeof agentSnapshot.manifest_json === "object"
+          ? agentSnapshot.manifest_json
+          : null,
+        "codex",
+        "developer_instructions"
+      ) ??
+      readNestedString(
+        agentSnapshot.manifest_json && typeof agentSnapshot.manifest_json === "object"
+          ? agentSnapshot.manifest_json
+          : null,
+        "instructions"
+      ) ??
+      agentSnapshot.install_instructions ??
+      agentSnapshot.short_description
+  );
+  const [claudeInstructions, setClaudeInstructions] = useState(
+    () =>
+      readNestedString(
+        agentSnapshot.manifest_json && typeof agentSnapshot.manifest_json === "object"
+          ? agentSnapshot.manifest_json
+          : null,
+        "claude",
+        "developer_instructions"
+      ) ??
+      readNestedString(
+        agentSnapshot.manifest_json && typeof agentSnapshot.manifest_json === "object"
+          ? agentSnapshot.manifest_json
+          : null,
+        "instructions"
+      ) ??
+      agentSnapshot.install_instructions ??
+      agentSnapshot.short_description
+  );
+  const [codexOverrideEnabled, setCodexOverrideEnabled] = useState(
+    () =>
+      readNestedString(
+        agentSnapshot.manifest_json && typeof agentSnapshot.manifest_json === "object"
+          ? agentSnapshot.manifest_json
+          : null,
+        "codex",
+        "developer_instructions"
+      ) !== null
+  );
+  const [claudeOverrideEnabled, setClaudeOverrideEnabled] = useState(
+    () =>
+      readNestedString(
+        agentSnapshot.manifest_json && typeof agentSnapshot.manifest_json === "object"
+          ? agentSnapshot.manifest_json
+          : null,
+        "claude",
+        "developer_instructions"
+      ) !== null
+  );
+  const [exportTargets, setExportTargets] = useState<RuntimeTarget[]>(
+    () => normalizeRuntimeTargets(agentSnapshot.export_targets)
+  );
+  const [compatibilityMatrixDraft, setCompatibilityMatrixDraft] = useState<Record<string, unknown>>(
+    () => normalizeCompatibilityMatrix(agentSnapshot.compatibility_matrix)
+  );
+  const [previewRuntime, setPreviewRuntime] = useState<RuntimeTarget>(
+    normalizeRuntimeTargets(agentSnapshot.export_targets)[0] ?? "codex"
+  );
 
   const [skills, setSkills] = useState<EditableSkill[]>(() =>
-    agent.skills.map((skill, index) => createEditableSkill(skill, index))
+    agentSnapshot.skills.map((skill, index) => createEditableSkill(skill, index))
   );
   const [markdownFiles, setMarkdownFiles] = useState<EditableMarkdownFile[]>(() =>
-    agent.markdown_files.map((file, index) => createEditableMarkdownFile(file, index))
+    agentSnapshot.markdown_files.map((file, index) => createEditableMarkdownFile(file, index))
   );
 
   const manifest = useMemo(
     () =>
-      agent.manifest_json && typeof agent.manifest_json === "object"
-        ? agent.manifest_json
+      agentSnapshot.manifest_json && typeof agentSnapshot.manifest_json === "object"
+        ? agentSnapshot.manifest_json
         : null,
-    [agent.manifest_json]
+    [agentSnapshot.manifest_json]
   );
   const manifestCodex = useMemo(
     () => (manifest && typeof manifest.codex === "object" ? (manifest.codex as Record<string, unknown>) : null),
@@ -241,37 +343,62 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
     () => (manifest && typeof manifest.claude === "object" ? (manifest.claude as Record<string, unknown>) : null),
     [manifest]
   );
-  const baseInstructions = useMemo(
-    () =>
-      readNestedString(manifest, "instructions") ??
-      agent.install_instructions ??
-      agent.short_description,
-    [agent.install_instructions, agent.short_description, manifest]
+  const canManageAgent = Boolean(
+    user && agentSnapshot.author_id && user.id === agentSnapshot.author_id
   );
-  const codexInstructions = useMemo(
-    () =>
-      readNestedString(manifest, "codex", "developer_instructions") ??
-      baseInstructions,
-    [baseInstructions, manifest]
-  );
-  const claudeInstructions = useMemo(
-    () =>
-      readNestedString(manifest, "claude", "developer_instructions") ??
-      baseInstructions,
-    [baseInstructions, manifest]
-  );
-  const activeRuntimeInstructions = previewRuntime === "claude_code" ? claudeInstructions : codexInstructions;
-  const runtimeHasExplicitOverride = useMemo(() => {
-    return previewRuntime === "claude_code"
-      ? readNestedString(manifest, "claude", "developer_instructions") !== null
-      : readNestedString(manifest, "codex", "developer_instructions") !== null;
-  }, [manifest, previewRuntime]);
+  const canEditAgentDraft = canManageAgent && agentSnapshot.status === "draft";
+  const activeRuntimeInstructions = previewRuntime === "claude_code"
+    ? claudeOverrideEnabled
+      ? claudeInstructions
+      : baseInstructions
+    : codexOverrideEnabled
+      ? codexInstructions
+      : baseInstructions;
+  const runtimeHasExplicitOverride = previewRuntime === "claude_code"
+    ? claudeOverrideEnabled
+    : codexOverrideEnabled;
 
   useEffect(() => {
-    setSkills(agent.skills.map((skill, index) => createEditableSkill(skill, index)));
-    setMarkdownFiles(agent.markdown_files.map((file, index) => createEditableMarkdownFile(file, index)));
-    setAssetErrorMessage(null);
+    setAgentSnapshot(agent);
+    setIsDraftRevisionView(false);
   }, [agent]);
+
+  useEffect(() => {
+    const nextBaseInstructions =
+      readNestedString(manifest, "instructions") ??
+      agentSnapshot.install_instructions ??
+      agentSnapshot.short_description;
+
+    setTitleDraft(agentSnapshot.title);
+    setShortDescriptionDraft(agentSnapshot.short_description);
+    setFullDescriptionDraft(agentSnapshot.full_description ?? "");
+    setCategoryDraft(agentSnapshot.category ?? "");
+    setInstallInstructionsDraft(agentSnapshot.install_instructions ?? nextBaseInstructions);
+    setSourceArchiveUrlDraft(agentSnapshot.source_archive_url ?? "");
+    setBaseInstructions(nextBaseInstructions);
+    setCodexInstructions(
+      readNestedString(manifest, "codex", "developer_instructions") ?? nextBaseInstructions
+    );
+    setClaudeInstructions(
+      readNestedString(manifest, "claude", "developer_instructions") ?? nextBaseInstructions
+    );
+    setCodexOverrideEnabled(
+      readNestedString(manifest, "codex", "developer_instructions") !== null
+    );
+    setClaudeOverrideEnabled(
+      readNestedString(manifest, "claude", "developer_instructions") !== null
+    );
+    setExportTargets(normalizeRuntimeTargets(agentSnapshot.export_targets));
+    setCompatibilityMatrixDraft(normalizeCompatibilityMatrix(agentSnapshot.compatibility_matrix));
+    setSkills(agentSnapshot.skills.map((skill, index) => createEditableSkill(skill, index)));
+    setMarkdownFiles(
+      agentSnapshot.markdown_files.map((file, index) => createEditableMarkdownFile(file, index))
+    );
+    setOverviewErrorMessage(null);
+    setOverviewSuccessMessage(null);
+    setAssetErrorMessage(null);
+    setAssetSuccessMessage(null);
+  }, [agentSnapshot, manifest]);
 
   useEffect(() => {
     if (!exportTargets.includes(previewRuntime)) {
@@ -314,17 +441,271 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
     };
   }, []);
 
+  useEffect(() => {
+    if (loadingAuth || !user || !canManageAgent || agent.status !== "published" || isDraftRevisionView) {
+      return;
+    }
+
+    const token = getAccessToken();
+    if (!token) {
+      return;
+    }
+    const accessToken = token;
+
+    let cancelled = false;
+    setDraftRevisionLoading(true);
+
+    async function loadDraftRevision() {
+      try {
+        const draftAgent = await fetchAgentDraft(agentSnapshot.slug, accessToken);
+        if (!cancelled) {
+          setAgentSnapshot(draftAgent);
+          setIsDraftRevisionView(true);
+        }
+      } catch (error) {
+        if (!cancelled && error instanceof Error && error.message !== "Draft revision not found.") {
+          setOverviewErrorMessage(error.message);
+        }
+      } finally {
+        if (!cancelled) {
+          setDraftRevisionLoading(false);
+        }
+      }
+    }
+
+    void loadDraftRevision();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agent.status, agentSnapshot.slug, canManageAgent, isDraftRevisionView, loadingAuth, user]);
+
+  function applyServerAgent(nextAgent: Agent, options?: { draftRevisionView?: boolean }) {
+    setAgentSnapshot(nextAgent);
+    setIsDraftRevisionView(options?.draftRevisionView ?? false);
+  }
+
   function nextDraftId(prefix: "skill" | "markdown"): string {
     draftCounterRef.current += 1;
     return `${prefix}-draft-${draftCounterRef.current}`;
   }
 
+  function toggleRuntimeTarget(runtime: RuntimeTarget, enabled: boolean) {
+    setExportTargets((current) => {
+      const next = enabled
+        ? Array.from(new Set([...current, runtime]))
+        : current.filter((item) => item !== runtime);
+      return next;
+    });
+    setCompatibilityMatrixDraft((current) => ({
+      ...current,
+      [runtime]: enabled
+    }));
+  }
+
+  function buildCompatibilityMatrixPayload(): Record<string, unknown> {
+    return {
+      ...compatibilityMatrixDraft,
+      codex: exportTargets.includes("codex"),
+      claude_code: exportTargets.includes("claude_code")
+    };
+  }
+
+  function buildAgentUpdatePayload(): AgentUpdatePayload {
+    const normalizedTitle = titleDraft.trim();
+    const normalizedShortDescription = shortDescriptionDraft.trim();
+    const normalizedFullDescription = fullDescriptionDraft.trim();
+    const normalizedBaseInstructions = baseInstructions.trim();
+
+    const nextCodexManifest: Record<string, unknown> = {
+      ...(manifestCodex ?? {}),
+      description: normalizedShortDescription
+    };
+    if (codexOverrideEnabled) {
+      nextCodexManifest.developer_instructions =
+        codexInstructions.trim() || normalizedBaseInstructions;
+    } else {
+      delete nextCodexManifest.developer_instructions;
+    }
+
+    const nextClaudeManifest: Record<string, unknown> = {
+      ...(manifestClaude ?? {}),
+      description: normalizedShortDescription
+    };
+    if (claudeOverrideEnabled) {
+      nextClaudeManifest.developer_instructions =
+        claudeInstructions.trim() || normalizedBaseInstructions;
+    } else {
+      delete nextClaudeManifest.developer_instructions;
+    }
+
+    return {
+      title: normalizedTitle,
+      short_description: normalizedShortDescription,
+      full_description: normalizedFullDescription || null,
+      category: categoryDraft.trim() || null,
+      manifest_json: {
+        ...(manifest ?? {}),
+        title: normalizedTitle,
+        description: normalizedFullDescription || normalizedShortDescription,
+        instructions: normalizedBaseInstructions,
+        codex: nextCodexManifest,
+        claude: nextClaudeManifest
+      },
+      source_archive_url: sourceArchiveUrlDraft.trim() || null,
+      compatibility_matrix: buildCompatibilityMatrixPayload(),
+      export_targets: exportTargets,
+      install_instructions: installInstructionsDraft.trim() || null,
+      skills: skills
+        .map(({ clientId: _clientId, ...skill }) => skill)
+        .filter((item) => item.slug.trim() || item.content.trim()),
+      markdown_files: markdownFiles
+        .map(({ clientId: _clientId, ...file }) => file)
+        .filter((item) => item.path.trim() || item.content.trim())
+    };
+  }
+
+  function validateAgentDraft(): string | null {
+    if (titleDraft.trim().length < 2) {
+      return t(locale, {
+        ru: "Название агента должно содержать минимум 2 символа.",
+        en: "Agent title must contain at least 2 characters."
+      });
+    }
+    if (shortDescriptionDraft.trim().length < 10) {
+      return t(locale, {
+        ru: "Короткое описание агента должно содержать минимум 10 символов.",
+        en: "Agent short description must contain at least 10 characters."
+      });
+    }
+    if (baseInstructions.trim().length === 0) {
+      return t(locale, {
+        ru: "Базовые инструкции агента не могут быть пустыми.",
+        en: "Base agent instructions cannot be empty."
+      });
+    }
+    if (exportTargets.length === 0) {
+      return t(locale, {
+        ru: "Нужно оставить хотя бы один runtime target.",
+        en: "At least one runtime target must remain enabled."
+      });
+    }
+    return null;
+  }
+
+  async function onCreateDraftRevision() {
+    const token = getAccessToken();
+    if (!token) {
+      router.push("/auth/login");
+      return;
+    }
+
+    setDraftRevisionLoading(true);
+    setOverviewErrorMessage(null);
+    setOverviewSuccessMessage(null);
+
+    try {
+      const draftAgent = await createAgentDraftRevision(agentSnapshot.slug, token);
+      applyServerAgent(draftAgent, { draftRevisionView: true });
+      setOverviewSuccessMessage(
+        t(locale, {
+          ru: "Draft revision создан. Теперь изменения идут в черновик, а не в live-профиль.",
+          en: "Draft revision created. Changes now go into the draft instead of the live profile."
+        })
+      );
+    } catch (error) {
+      setOverviewErrorMessage(
+        error instanceof Error
+          ? error.message
+          : t(locale, { ru: "Не удалось создать draft revision.", en: "Failed to create draft revision." })
+      );
+    } finally {
+      setDraftRevisionLoading(false);
+    }
+  }
+
+  async function onPublishDraftRevision() {
+    const token = getAccessToken();
+    if (!token) {
+      router.push("/auth/login");
+      return;
+    }
+
+    setDraftRevisionLoading(true);
+    setOverviewErrorMessage(null);
+    setOverviewSuccessMessage(null);
+
+    try {
+      const publishedAgent = await publishAgentDraft(agentSnapshot.slug, token);
+      applyServerAgent(publishedAgent, { draftRevisionView: false });
+      setOverviewSuccessMessage(
+        t(locale, {
+          ru: "Draft revision опубликован в live-профиль агента.",
+          en: "Draft revision published into the live agent profile."
+        })
+      );
+      router.refresh();
+    } catch (error) {
+      setOverviewErrorMessage(
+        error instanceof Error
+          ? error.message
+          : t(locale, { ru: "Не удалось опубликовать draft revision.", en: "Failed to publish draft revision." })
+      );
+    } finally {
+      setDraftRevisionLoading(false);
+    }
+  }
+
+  async function saveOverview() {
+    const token = getAccessToken();
+    if (!token) {
+      router.push("/auth/login");
+      return;
+    }
+
+    const validationError = validateAgentDraft();
+    if (validationError) {
+      setOverviewErrorMessage(validationError);
+      setOverviewSuccessMessage(null);
+      return;
+    }
+
+    setSavingOverview(true);
+    setOverviewErrorMessage(null);
+    setOverviewSuccessMessage(null);
+
+    try {
+      const nextAgent = isDraftRevisionView
+        ? await updateAgentDraft(agentSnapshot.slug, buildAgentUpdatePayload(), token)
+        : await updateAgent(agentSnapshot.slug, buildAgentUpdatePayload(), token);
+      applyServerAgent(nextAgent, { draftRevisionView: isDraftRevisionView });
+      setOverviewSuccessMessage(
+        t(locale, {
+          ru: isDraftRevisionView
+            ? "Draft revision агента обновлен."
+            : "Профиль агента обновлен.",
+          en: isDraftRevisionView
+            ? "Agent draft revision updated."
+            : "Agent profile updated."
+        })
+      );
+    } catch (error) {
+      setOverviewErrorMessage(
+        error instanceof Error
+          ? error.message
+          : t(locale, { ru: "Не удалось обновить профиль агента.", en: "Failed to update agent profile." })
+      );
+    } finally {
+      setSavingOverview(false);
+    }
+  }
+
   const treeLines = useMemo(
     () =>
       buildTreeLines(
-        buildAgentBundlePaths(previewRuntime, agent.slug, markdownFiles, skills).filter(Boolean)
+        buildAgentBundlePaths(previewRuntime, agentSnapshot.slug, markdownFiles, skills).filter(Boolean)
       ),
-    [agent.slug, markdownFiles, previewRuntime, skills]
+    [agentSnapshot.slug, markdownFiles, previewRuntime, skills]
   );
   const assets = useMemo<ExplorerAsset[]>(
     () =>
@@ -337,7 +718,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
             t(locale, { ru: "Новый markdown", en: "New markdown" }),
           path:
             (previewRuntime === "claude_code" && file.path
-              ? `agents/${agent.slug}/${file.path}`
+              ? `agents/${agentSnapshot.slug}/${file.path}`
               : file.path) || t(locale, { ru: "без пути", en: "no path" }),
           description: null,
           content: file.content
@@ -346,12 +727,12 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
           id: skill.clientId,
           kind: "skill" as const,
           label: skill.slug || t(locale, { ru: "Новый skill", en: "New skill" }),
-          path: buildSkillAssetPath(previewRuntime, agent.slug, skill.slug),
+          path: buildSkillAssetPath(previewRuntime, agentSnapshot.slug, skill.slug),
           description: skill.description ?? null,
           content: skill.content
         }))
       ].sort((left, right) => left.path.localeCompare(right.path)),
-    [agent.slug, locale, markdownFiles, previewRuntime, skills]
+    [agentSnapshot.slug, locale, markdownFiles, previewRuntime, skills]
   );
   const visibleAssets = useMemo(
     () =>
@@ -391,6 +772,10 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
   }
 
   function removeAsset(asset: ExplorerAsset) {
+    if (!canEditAgentDraft) {
+      return;
+    }
+
     setAssetSuccessMessage(null);
     setAssetErrorMessage(null);
 
@@ -403,6 +788,10 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
   }
 
   function addSkill() {
+    if (!canEditAgentDraft) {
+      return;
+    }
+
     const clientId = nextDraftId("skill");
     setSkills((current) => [
       ...current,
@@ -420,6 +809,10 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
   }
 
   function addMarkdownFile() {
+    if (!canEditAgentDraft) {
+      return;
+    }
+
     const clientId = nextDraftId("markdown");
     setMarkdownFiles((current) => [
       ...current,
@@ -442,50 +835,44 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
       return;
     }
 
+    if (!canEditAgentDraft) {
+      setAssetErrorMessage(
+        t(locale, {
+          ru: "Файлы и skills можно менять только в draft-агенте или в draft revision опубликованного агента.",
+          en: "Files and skills can only be edited in a draft agent or in a published agent's draft revision."
+        })
+      );
+      setAssetSuccessMessage(null);
+      return;
+    }
+
+    const validationError = validateAgentDraft();
+    if (validationError) {
+      setAssetErrorMessage(validationError);
+      setAssetSuccessMessage(null);
+      return;
+    }
+
     setSubmittingAssets(true);
     setAssetErrorMessage(null);
     setAssetSuccessMessage(null);
 
     try {
-      await updateAgent(
-        agent.slug,
-        {
-          manifest_json: {
-            ...(manifest ?? {}),
-            title: agent.title,
-            description: agent.full_description ?? agent.short_description,
-            instructions: baseInstructions.trim(),
-            codex: {
-              ...(manifestCodex ?? {}),
-              description: agent.short_description,
-              developer_instructions: codexInstructions.trim()
-            },
-            claude: {
-              ...(manifestClaude ?? {}),
-              description: agent.short_description,
-              developer_instructions: claudeInstructions.trim()
-            }
-          },
-          export_targets: exportTargets,
-          compatibility_matrix: agent.compatibility_matrix ?? { codex: true, claude_code: true },
-          install_instructions: baseInstructions.trim(),
-          skills: skills
-            .map(({ clientId: _clientId, ...skill }) => skill)
-            .filter((item) => item.slug.trim() || item.content.trim()),
-          markdown_files: markdownFiles
-            .map(({ clientId: _clientId, ...file }) => file)
-            .filter((item) => item.path.trim() || item.content.trim())
-        },
-        token
-      );
+      const nextAgent = isDraftRevisionView
+        ? await updateAgentDraft(agentSnapshot.slug, buildAgentUpdatePayload(), token)
+        : await updateAgent(agentSnapshot.slug, buildAgentUpdatePayload(), token);
+      applyServerAgent(nextAgent, { draftRevisionView: isDraftRevisionView });
 
       setAssetSuccessMessage(
         t(locale, {
-          ru: "Файлы и skills обновлены. Перезагружаю страницу.",
-          en: "Files and skills were updated. Refreshing page."
+          ru: isDraftRevisionView
+            ? "Файлы и skills draft revision обновлены."
+            : "Файлы и skills обновлены.",
+          en: isDraftRevisionView
+            ? "Draft revision files and skills were updated."
+            : "Files and skills were updated."
         })
       );
-      router.refresh();
     } catch (error) {
       setAssetErrorMessage(
         error instanceof Error
@@ -583,7 +970,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
       <ul className="mt-4 space-y-3 text-sm text-slate-700 dark:text-slate-200">
         <li className="flex items-center justify-between gap-3">
           <span>{t(locale, { ru: "Runtime entrypoint", en: "Runtime entrypoint" })}</span>
-          <code className="text-xs">{buildRuntimeEntryPath(previewRuntime, agent.slug)}</code>
+          <code className="text-xs">{buildRuntimeEntryPath(previewRuntime, agentSnapshot.slug)}</code>
         </li>
         <li className="flex items-center justify-between gap-3">
           <span>{t(locale, { ru: "Markdown assets", en: "Markdown assets" })}</span>
@@ -604,6 +991,276 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
   const renderOverview = () => (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-6">
+        {canManageAgent && agentSnapshot.status === "draft" ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ScrollText className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    {t(locale, { ru: "Редактор профиля", en: "Profile editor" })}
+                  </h2>
+                </div>
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+                  {isDraftRevisionView
+                    ? t(locale, {
+                        ru: "Вы редактируете draft revision опубликованного агента. Live-профиль останется неизменным до отдельной публикации этого draft.",
+                        en: "You are editing a draft revision of a published agent. The live profile will stay unchanged until this draft is published separately."
+                      })
+                    : agentSnapshot.status === "draft"
+                    ? t(locale, {
+                        ru: "Обновите metadata, runtime instructions и delivery settings для текущего draft-агента.",
+                        en: "Update metadata, runtime instructions, and delivery settings for the current draft agent."
+                      })
+                    : t(locale, {
+                        ru: "Сейчас изменения применяются прямо к текущему профилю агента. Отдельные revision-потоки для published-агентов появятся позже.",
+                        en: "Changes currently update the live agent profile directly. Dedicated revision flows for published agents will come later."
+                      })}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {isDraftRevisionView ? (
+                  <Button
+                    disabled={draftRevisionLoading}
+                    onClick={() => void onPublishDraftRevision()}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    {draftRevisionLoading
+                      ? t(locale, { ru: "Публикация...", en: "Publishing..." })
+                      : t(locale, { ru: "Опубликовать draft", en: "Publish draft" })}
+                  </Button>
+                ) : null}
+                <Button disabled={savingOverview} onClick={() => void saveOverview()} type="button">
+                  <Save className="mr-2 h-4 w-4" />
+                  {savingOverview
+                    ? t(locale, { ru: "Сохранение...", en: "Saving..." })
+                    : t(locale, {
+                        ru: isDraftRevisionView ? "Сохранить draft" : "Сохранить профиль",
+                        en: isDraftRevisionView ? "Save draft" : "Save profile"
+                      })}
+                </Button>
+              </div>
+            </div>
+
+            {overviewErrorMessage ? (
+              <p className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+                {overviewErrorMessage}
+              </p>
+            ) : null}
+
+            {overviewSuccessMessage ? (
+              <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+                {overviewSuccessMessage}
+              </p>
+            ) : null}
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                {t(locale, { ru: "Название", en: "Title" })}
+                <input
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  minLength={2}
+                  onChange={(event) => setTitleDraft(event.target.value)}
+                  value={titleDraft}
+                />
+              </label>
+
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                {t(locale, { ru: "Категория", en: "Category" })}
+                <input
+                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  onChange={(event) => setCategoryDraft(event.target.value)}
+                  placeholder={t(locale, { ru: "backend, frontend, orchestrator...", en: "backend, frontend, orchestrator..." })}
+                  value={categoryDraft}
+                />
+              </label>
+
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 lg:col-span-2">
+                {t(locale, { ru: "Короткое описание", en: "Short description" })}
+                <textarea
+                  className="mt-1 min-h-24 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  onChange={(event) => setShortDescriptionDraft(event.target.value)}
+                  value={shortDescriptionDraft}
+                />
+              </label>
+
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 lg:col-span-2">
+                {t(locale, { ru: "Полное описание роли", en: "Full role summary" })}
+                <textarea
+                  className="mt-1 min-h-36 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  onChange={(event) => setFullDescriptionDraft(event.target.value)}
+                  value={fullDescriptionDraft}
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 grid gap-4 xl:grid-cols-2">
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                {t(locale, { ru: "Базовые инструкции", en: "Base instructions" })}
+                <textarea
+                  className="mt-1 min-h-56 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  onChange={(event) => setBaseInstructions(event.target.value)}
+                  value={baseInstructions}
+                />
+              </label>
+
+              <div className="space-y-4">
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  {t(locale, { ru: "Install instructions", en: "Install instructions" })}
+                  <textarea
+                    className="mt-1 min-h-28 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                    onChange={(event) => setInstallInstructionsDraft(event.target.value)}
+                    value={installInstructionsDraft}
+                  />
+                </label>
+
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  {t(locale, { ru: "Source archive URL", en: "Source archive URL" })}
+                  <input
+                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                    onChange={(event) => setSourceArchiveUrlDraft(event.target.value)}
+                    placeholder="https://example.com/agent-source.zip"
+                    value={sourceArchiveUrlDraft}
+                  />
+                </label>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-slate-300">
+                  {t(locale, {
+                    ru: "Поддержка runtime сейчас задаётся через enabled targets. Compatibility matrix будет синхронизирована с ними при сохранении.",
+                    en: "Runtime support is currently controlled through enabled targets. The compatibility matrix will be synchronized with them on save."
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50/80 p-5 dark:border-zinc-800 dark:bg-zinc-900/60">
+              <div className="flex items-center gap-2">
+                <Package2 className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                  {t(locale, { ru: "Runtime targets", en: "Runtime targets" })}
+                </h3>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {(["codex", "claude_code"] as RuntimeTarget[]).map((runtime) => {
+                  const enabled = exportTargets.includes(runtime);
+                  return (
+                    <label
+                      className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950"
+                      key={runtime}
+                    >
+                      <input
+                        checked={enabled}
+                        className="mt-1"
+                        onChange={(event) => toggleRuntimeTarget(runtime, event.target.checked)}
+                        type="checkbox"
+                      />
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          {runtimeLabel(locale, runtime)}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                          {enabled
+                            ? t(locale, { ru: "Bundle будет materialize для этого runtime.", en: "Bundle will be materialized for this runtime." })
+                            : t(locale, { ru: "Runtime отключен для export и delivery.", en: "Runtime is disabled for export and delivery." })}
+                        </p>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 xl:grid-cols-2">
+              <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5 dark:border-zinc-800 dark:bg-zinc-900/70">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  <input
+                    checked={codexOverrideEnabled}
+                    onChange={(event) => setCodexOverrideEnabled(event.target.checked)}
+                    type="checkbox"
+                  />
+                  {t(locale, { ru: "Отдельный Codex override", en: "Custom Codex override" })}
+                </label>
+                <textarea
+                  className="mt-4 min-h-44 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  disabled={!codexOverrideEnabled}
+                  onChange={(event) => setCodexInstructions(event.target.value)}
+                  placeholder={t(locale, {
+                    ru: "Если override выключен, Codex унаследует базовые инструкции.",
+                    en: "If override is disabled, Codex inherits the base instructions."
+                  })}
+                  value={codexInstructions}
+                />
+              </div>
+
+              <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5 dark:border-zinc-800 dark:bg-zinc-900/70">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  <input
+                    checked={claudeOverrideEnabled}
+                    onChange={(event) => setClaudeOverrideEnabled(event.target.checked)}
+                    type="checkbox"
+                  />
+                  {t(locale, { ru: "Отдельный Claude Code override", en: "Custom Claude Code override" })}
+                </label>
+                <textarea
+                  className="mt-4 min-h-44 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  disabled={!claudeOverrideEnabled}
+                  onChange={(event) => setClaudeInstructions(event.target.value)}
+                  placeholder={t(locale, {
+                    ru: "Если override выключен, Claude Code унаследует базовые инструкции.",
+                    en: "If override is disabled, Claude Code inherits the base instructions."
+                  })}
+                  value={claudeInstructions}
+                />
+              </div>
+            </div>
+          </div>
+        ) : canManageAgent && agentSnapshot.status === "published" ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ScrollText className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+                    {t(locale, { ru: "Draft revision", en: "Draft revision" })}
+                  </h2>
+                </div>
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+                  {t(locale, {
+                    ru: "Опубликованный агент теперь редактируется через отдельный draft revision. Создайте черновик, чтобы менять metadata, instructions, files и delivery settings без изменения live-профиля.",
+                    en: "Published agents are now edited through a separate draft revision. Create a draft to change metadata, instructions, files, and delivery settings without touching the live profile."
+                  })}
+                </p>
+              </div>
+
+              <Button
+                disabled={draftRevisionLoading}
+                onClick={() => void onCreateDraftRevision()}
+                type="button"
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                {draftRevisionLoading
+                  ? t(locale, { ru: "Подготовка...", en: "Preparing..." })
+                  : t(locale, { ru: "Создать draft revision", en: "Create draft revision" })}
+              </Button>
+            </div>
+
+            {overviewErrorMessage ? (
+              <p className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+                {overviewErrorMessage}
+              </p>
+            ) : null}
+
+            {overviewSuccessMessage ? (
+              <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+                {overviewSuccessMessage}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex items-center gap-2">
             <ScrollText className="h-4 w-4 text-slate-500 dark:text-slate-400" />
@@ -612,7 +1269,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
             </h2>
           </div>
           <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
-            {agent.full_description ??
+            {fullDescriptionDraft.trim() ||
               t(locale, {
                 ru: "Полное описание пока не добавлено.",
                 en: "No full description has been added yet."
@@ -629,7 +1286,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
               </h2>
             </div>
             <pre className="mt-4 overflow-x-auto whitespace-pre-wrap rounded-2xl bg-slate-950 px-4 py-4 text-sm leading-6 text-slate-100">
-              {baseInstructions}
+              {baseInstructions.trim()}
             </pre>
           </div>
 
@@ -666,7 +1323,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                 : t(locale, { ru: "Наследует базовые инструкции", en: "Inherits general instructions" })}
             </p>
             <pre className="mt-4 overflow-x-auto whitespace-pre-wrap rounded-2xl bg-slate-950 px-4 py-4 text-sm leading-6 text-slate-100">
-              {activeRuntimeInstructions}
+              {activeRuntimeInstructions.trim() || baseInstructions.trim()}
             </pre>
           </div>
         </div>
@@ -701,7 +1358,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                         {skill.slug || t(locale, { ru: "Новый skill", en: "New skill" })}
                       </code>
                       <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
-                        {buildSkillAssetPath(previewRuntime, agent.slug, skill.slug || "new-skill")}
+                        {buildSkillAssetPath(previewRuntime, agentSnapshot.slug, skill.slug || "new-skill")}
                       </p>
                     </div>
                     <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -732,22 +1389,22 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
           <dl className="mt-4 space-y-3 text-sm">
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Автор", en: "Author" })}</dt>
-              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">{agent.author_name}</dd>
+              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">{agentSnapshot.author_name}</dd>
             </div>
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Slug", en: "Slug" })}</dt>
-              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">{agent.slug}</dd>
+              <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">{agentSnapshot.slug}</dd>
             </div>
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Категория", en: "Category" })}</dt>
               <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">
-                {agent.category ?? formatGeneralCategory(locale)}
+                {categoryDraft.trim() || formatGeneralCategory(locale)}
               </dd>
             </div>
             <div className="flex items-start justify-between gap-4">
               <dt className="text-slate-500 dark:text-slate-400">{t(locale, { ru: "Статус", en: "Status" })}</dt>
               <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">
-                {formatStatus(locale, agent.status)}
+                {formatStatus(locale, agentSnapshot.status)}
               </dd>
             </div>
             <div className="flex items-start justify-between gap-4">
@@ -755,7 +1412,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                 {t(locale, { ru: "Верификация", en: "Verification" })}
               </dt>
               <dd className="text-right font-semibold text-slate-900 dark:text-slate-100">
-                {formatVerificationStatus(locale, agent.verification_status)}
+                {formatVerificationStatus(locale, agentSnapshot.verification_status)}
               </dd>
             </div>
           </dl>
@@ -803,11 +1460,23 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button disabled={!user || submittingAssets} onClick={addMarkdownFile} size="sm" type="button" variant="secondary">
+            <Button
+              disabled={!canEditAgentDraft || submittingAssets}
+              onClick={addMarkdownFile}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
               <Plus className="mr-2 h-4 w-4" />
               {t(locale, { ru: "Markdown", en: "Markdown" })}
             </Button>
-            <Button disabled={!user || submittingAssets} onClick={addSkill} size="sm" type="button" variant="secondary">
+            <Button
+              disabled={!canEditAgentDraft || submittingAssets}
+              onClick={addSkill}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
               <Plus className="mr-2 h-4 w-4" />
               {t(locale, { ru: "Skill", en: "Skill" })}
             </Button>
@@ -862,6 +1531,35 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                 en: "Login to add and edit files directly in the explorer."
               })}
             </p>
+          ) : !canManageAgent ? (
+            <p className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-slate-300">
+              {t(locale, {
+                ru: "Только автор агента может менять файлы и skills этого профиля.",
+                en: "Only the agent author can modify this profile's files and skills."
+              })}
+            </p>
+          ) : agentSnapshot.status === "published" ? (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-slate-300">
+              <p>
+                {t(locale, {
+                  ru: "Для опубликованного агента сначала нужен draft revision. Только в нем можно менять файлы и skills без изменения live-профиля.",
+                  en: "Published agents need a draft revision first. Files and skills can only be edited there without touching the live profile."
+                })}
+              </p>
+              <Button
+                className="mt-3"
+                disabled={draftRevisionLoading}
+                onClick={() => void onCreateDraftRevision()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                {draftRevisionLoading
+                  ? t(locale, { ru: "Подготовка...", en: "Preparing..." })
+                  : t(locale, { ru: "Создать draft revision", en: "Create draft revision" })}
+              </Button>
+            </div>
           ) : null}
         </div>
 
@@ -880,7 +1578,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
           <div className="flex flex-wrap gap-2">
             {selectedAsset ? (
               <Button
-                disabled={!user || submittingAssets}
+                disabled={!canEditAgentDraft || submittingAssets}
                 onClick={() => removeAsset(selectedAsset)}
                 size="sm"
                 type="button"
@@ -890,7 +1588,12 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                 {t(locale, { ru: "Удалить", en: "Remove" })}
               </Button>
             ) : null}
-            <Button disabled={!user || submittingAssets} onClick={() => void saveAssets()} size="sm" type="button">
+            <Button
+              disabled={!canEditAgentDraft || submittingAssets}
+              onClick={() => void saveAssets()}
+              size="sm"
+              type="button"
+            >
               <Save className="mr-2 h-4 w-4" />
               {submittingAssets
                 ? t(locale, { ru: "Сохраняем...", en: "Saving..." })
@@ -924,7 +1627,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
               {t(locale, { ru: "Путь файла", en: "File path" })}
               <input
                 className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                disabled={!user || submittingAssets}
+                disabled={!canEditAgentDraft || submittingAssets}
                 onChange={(event) => updateMarkdownFile(selectedAsset.id, { path: event.target.value })}
                 placeholder="docs/agent-playbook.md"
                 value={markdownFiles.find((file) => file.clientId === selectedAsset.id)?.path ?? ""}
@@ -935,7 +1638,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
               Markdown
               <textarea
                 className="mt-1 min-h-[420px] w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm font-mono dark:border-zinc-700 dark:bg-zinc-900"
-                disabled={!user || submittingAssets}
+                disabled={!canEditAgentDraft || submittingAssets}
                 onChange={(event) => updateMarkdownFile(selectedAsset.id, { content: event.target.value })}
                 value={markdownFiles.find((file) => file.clientId === selectedAsset.id)?.content ?? ""}
               />
@@ -948,7 +1651,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                 Slug
                 <input
                   className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                  disabled={!user || submittingAssets}
+                  disabled={!canEditAgentDraft || submittingAssets}
                   onChange={(event) => updateSkill(selectedAsset.id, { slug: event.target.value })}
                   placeholder="delivery-checkpoint"
                   value={skills.find((skill) => skill.clientId === selectedAsset.id)?.slug ?? ""}
@@ -959,7 +1662,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                 {t(locale, { ru: "Описание", en: "Description" })}
                 <input
                   className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                  disabled={!user || submittingAssets}
+                  disabled={!canEditAgentDraft || submittingAssets}
                   onChange={(event) => updateSkill(selectedAsset.id, { description: event.target.value })}
                   value={skills.find((skill) => skill.clientId === selectedAsset.id)?.description ?? ""}
                 />
@@ -970,7 +1673,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
               <code className="text-xs font-semibold text-brand-700 dark:text-brand-300">
                 {buildSkillAssetPath(
                   previewRuntime,
-                  agent.slug,
+                  agentSnapshot.slug,
                   skills.find((skill) => skill.clientId === selectedAsset.id)?.slug || "new-skill"
                 )}
               </code>
@@ -980,7 +1683,7 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
               SKILL.md
               <textarea
                 className="mt-1 min-h-[420px] w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm font-mono dark:border-zinc-700 dark:bg-zinc-900"
-                disabled={!user || submittingAssets}
+                disabled={!canEditAgentDraft || submittingAssets}
                 onChange={(event) => updateSkill(selectedAsset.id, { content: event.target.value })}
                 value={skills.find((skill) => skill.clientId === selectedAsset.id)?.content ?? ""}
               />
@@ -1027,15 +1730,15 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
               <div className="flex flex-wrap gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-950/90 dark:text-slate-200 dark:ring-zinc-700">
                   <ShieldCheck className="h-3.5 w-3.5" />
-                  {formatStatus(locale, agent.status)}
+                  {formatStatus(locale, agentSnapshot.status)}
                 </span>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-950/90 dark:text-slate-200 dark:ring-zinc-700">
                   <Sparkles className="h-3.5 w-3.5" />
-                  {formatVerificationStatus(locale, agent.verification_status)}
+                  {formatVerificationStatus(locale, agentSnapshot.verification_status)}
                 </span>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-zinc-950/90 dark:text-slate-200 dark:ring-zinc-700">
                   <Bot className="h-3.5 w-3.5" />
-                  {agent.category ?? formatGeneralCategory(locale)}
+                  {categoryDraft.trim() || formatGeneralCategory(locale)}
                 </span>
               </div>
 
@@ -1044,10 +1747,10 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                   {t(locale, { ru: "Agent profile", en: "Agent profile" })}
                 </p>
                 <h1 className="text-3xl font-black tracking-tight text-slate-950 dark:text-slate-50">
-                  {agent.title}
+                  {titleDraft}
                 </h1>
                 <p className="max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-                  {agent.short_description}
+                  {shortDescriptionDraft}
                 </p>
               </div>
 
@@ -1056,13 +1759,13 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
                     {t(locale, { ru: "Автор", en: "Author" })}
                   </p>
-                  <p className="font-semibold text-slate-900 dark:text-slate-100">{agent.author_name}</p>
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">{agentSnapshot.author_name}</p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
                     {t(locale, { ru: "Slug", en: "Slug" })}
                   </p>
-                  <p className="font-semibold text-slate-900 dark:text-slate-100">{agent.slug}</p>
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">{agentSnapshot.slug}</p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
@@ -1138,8 +1841,8 @@ export function AgentDetailShowcase({ agent, locale }: AgentDetailShowcaseProps)
             <ExportControls
               entityType="agent"
               locale={locale}
-              slug={agent.slug}
-              status={agent.status}
+              slug={agentSnapshot.slug}
+              status={agentSnapshot.status}
               supportedRuntimes={exportTargets}
             />
           ) : null}

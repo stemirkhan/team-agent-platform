@@ -43,6 +43,10 @@ class Agent(Base):
     short_description: Mapped[str] = mapped_column(String(500), nullable=False)
     full_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    draft_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    draft_short_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    draft_full_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    draft_category: Mapped[str | None] = mapped_column(String(120), nullable=True)
     author_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -63,6 +67,10 @@ class Agent(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+    draft_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     versions: Mapped[list["AgentVersion"]] = relationship(
         back_populates="agent",
@@ -80,6 +88,18 @@ class Agent(Base):
             key=lambda version: (version.is_latest, version.published_at),
             reverse=True,
         )[0]
+
+    @property
+    def draft_version(self) -> "AgentVersion | None":
+        """Return the pending draft profile row when one exists."""
+        if not self.versions:
+            return None
+        return next((version for version in self.versions if version.version == "draft"), None)
+
+    @property
+    def has_draft_revision(self) -> bool:
+        """Return true when the agent has a pending draft revision."""
+        return self.draft_title is not None or self.draft_version is not None
 
     @property
     def manifest_json(self) -> dict[str, Any] | None:

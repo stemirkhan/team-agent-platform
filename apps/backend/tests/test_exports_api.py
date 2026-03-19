@@ -34,9 +34,15 @@ def _configure_agent_profile(
     skills: list[dict[str, object]] | None = None,
     markdown_files: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    """Configure the current hidden agent profile for Codex export tests."""
-    response = client.patch(
-        f"/api/v1/agents/{slug}",
+    """Configure a published agent profile through the draft revision flow."""
+    create_draft_response = client.post(
+        f"/api/v1/agents/{slug}/draft",
+        headers=headers,
+    )
+    assert create_draft_response.status_code == 200
+
+    update_response = client.patch(
+        f"/api/v1/agents/{slug}/draft",
         headers=headers,
         json={
             "manifest_json": manifest_json
@@ -60,8 +66,14 @@ def _configure_agent_profile(
             "markdown_files": markdown_files,
         },
     )
-    assert response.status_code == 200
-    return response.json()
+    assert update_response.status_code == 200
+
+    publish_response = client.post(
+        f"/api/v1/agents/{slug}/draft/publish",
+        headers=headers,
+    )
+    assert publish_response.status_code == 200
+    return publish_response.json()
 
 
 def test_export_published_agent_and_get_job(client: TestClient) -> None:

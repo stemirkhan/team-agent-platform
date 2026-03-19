@@ -49,6 +49,26 @@ def get_agent(slug: str, service: AgentService = Depends(get_agent_service)) -> 
     return service.get_agent(slug)
 
 
+@router.get("/{slug}/draft", response_model=AgentRead)
+def get_agent_draft(
+    slug: str,
+    user: User = Depends(get_current_user),
+    service: AgentService = Depends(get_agent_service),
+) -> AgentRead:
+    """Return the pending draft revision for one published agent."""
+    return service.get_draft_agent(slug, user)
+
+
+@router.post("/{slug}/draft", response_model=AgentRead)
+def create_agent_draft(
+    slug: str,
+    user: User = Depends(get_current_user),
+    service: AgentService = Depends(get_agent_service),
+) -> AgentRead:
+    """Create one editable draft revision from the live published agent."""
+    return service.create_draft_revision(slug, user)
+
+
 @router.patch("/{slug}", response_model=AgentRead)
 def update_agent(
     slug: str,
@@ -60,6 +80,17 @@ def update_agent(
     return service.update_agent(slug, payload, user)
 
 
+@router.patch("/{slug}/draft", response_model=AgentRead)
+def update_agent_draft(
+    slug: str,
+    payload: AgentUpdate,
+    user: User = Depends(get_current_user),
+    service: AgentService = Depends(get_agent_service),
+) -> AgentRead:
+    """Update metadata and profile fields for one pending draft revision."""
+    return service.update_draft_agent(slug, payload, user)
+
+
 @router.post("/{slug}/publish", response_model=AgentRead)
 def publish_agent(
     slug: str,
@@ -68,3 +99,13 @@ def publish_agent(
 ) -> AgentRead:
     """Transition agent to published state."""
     return service.publish_agent(slug, user)
+
+
+@router.post("/{slug}/draft/publish", response_model=AgentRead)
+def publish_agent_draft(
+    slug: str,
+    user: User = Depends(get_current_user),
+    service: AgentService = Depends(get_agent_service),
+) -> AgentRead:
+    """Promote one pending draft revision into the live published agent."""
+    return service.publish_draft_revision(slug, user)

@@ -2,6 +2,7 @@ import { getAccessToken } from "@/lib/auth-client";
 
 export type Agent = {
   id: string;
+  author_id: string | null;
   slug: string;
   title: string;
   short_description: string;
@@ -683,6 +684,22 @@ export async function fetchAgent(slug: string): Promise<Agent> {
   return response.json() as Promise<Agent>;
 }
 
+export async function fetchAgentDraft(slug: string, token: string): Promise<Agent> {
+  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/draft`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    cache: "no-store"
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to fetch agent draft.");
+  }
+
+  return json as Agent;
+}
+
 export async function fetchTeams(): Promise<TeamListResponse> {
   const response = await fetch(`${getApiBaseUrl()}/teams`, { cache: "no-store" });
 
@@ -1300,6 +1317,60 @@ export async function updateAgent(
   const json = (await response.json()) as unknown;
   if (!response.ok) {
     throw new Error(extractErrorMessage(json) ?? "Failed to update agent.");
+  }
+
+  return json as Agent;
+}
+
+export async function createAgentDraftRevision(slug: string, token: string): Promise<Agent> {
+  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/draft`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to create agent draft revision.");
+  }
+
+  return json as Agent;
+}
+
+export async function updateAgentDraft(
+  slug: string,
+  payload: AgentUpdatePayload,
+  token: string
+): Promise<Agent> {
+  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/draft`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to update agent draft.");
+  }
+
+  return json as Agent;
+}
+
+export async function publishAgentDraft(slug: string, token: string): Promise<Agent> {
+  const response = await fetch(`${getApiBaseUrl()}/agents/${slug}/draft/publish`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  const json = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(json) ?? "Failed to publish agent draft.");
   }
 
   return json as Agent;

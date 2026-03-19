@@ -40,6 +40,7 @@ def test_create_publish_and_list_agent(client: TestClient) -> None:
     create_response = client.post("/api/v1/agents", json=payload, headers=headers)
     assert create_response.status_code == 201
     assert create_response.json()["status"] == "draft"
+    assert create_response.json()["author_id"] is not None
     assert create_response.json()["author_name"] == "Author One"
 
     empty_catalog_response = client.get("/api/v1/agents")
@@ -57,6 +58,7 @@ def test_create_publish_and_list_agent(client: TestClient) -> None:
     details_response = client.get("/api/v1/agents/fastapi-reviewer")
     assert details_response.status_code == 200
     assert details_response.json()["slug"] == "fastapi-reviewer"
+    assert details_response.json()["author_id"] is not None
 
 
 def test_agent_create_requires_authentication(client: TestClient) -> None:
@@ -164,3 +166,138 @@ def test_update_agent_profile_returns_skills_and_markdown_files(client: TestClie
             "content": "# Project instructions\n\nFollow repository rules.",
         }
     ]
+
+
+def test_published_agent_requires_draft_revision_before_editing(client: TestClient) -> None:
+    """Published agents should reject direct live edits without a draft revision."""
+    headers = _auth_headers(
+        client,
+        email="published-owner@example.com",
+        display_name="Published Owner",
+    )
+
+    create_response = client.post(
+        "/api/v1/agents",
+        headers=headers,
+        json={
+            "slug": "published-agent",
+            "title": "Published Agent",
+            "short_description": "Published agent used to verify revision-only edits.",
+            "category": "backend",
+        },
+    )
+    assert create_response.status_code == 201
+
+    publish_response = client.post("/api/v1/agents/published-agent/publish", headers=headers)
+    assert publish_response.status_code == 200
+
+    update_response = client.patch(
+        "/api/v1/agents/published-agent",
+        headers=headers,
+        json={"title": "Mutated Live Agent"},
+    )
+    assert update_response.status_code == 400
+    assert (
+        update_response.json()["detail"]
+        == "Published agents require a draft revision before editing."
+    )
+
+
+def test_create_update_and_publish_agent_draft_revision(client: TestClient) -> None:
+    """Published agents should support isolated draft revisions before live publish."""
+    headers = _auth_headers(
+        client,
+        email="draft-revision-owner@example.com",
+        display_name="Draft Revision Owner",
+    )
+
+    create_response = client.post(
+        "/api/v1/agents",
+        headers=headers,
+        json={
+            "slug": "revision-agent",
+            "title": "Revision Agent",
+            "short_description": "Published agent used to verify isolated draft revisions.",
+            "full_description": "Live summary for the published agent.",
+            "category": "backend",
+        },
+    )
+    assert create_response.status_code == 201
+
+    initial_profile_response = client.patch(
+        "/api/v1/agents/revision-agent",
+        headers=headers,
+        json={
+            "manifest_json": {
+                "instructions": "Inspect the live repository.",
+            },
+            "install_instructions": "Install the live bundle.",
+            "export_targets": ["codex"],
+        },
+    )
+    assert initial_profile_response.status_code == 200
+
+    publish_response = client.post("/api/v1/agents/revision-agent/publish", headers=headers)
+    assert publish_response.status_code == 200
+    assert publish_response.json()["status"] == "published"
+
+    create_draft_response = client.post(
+        "/api/v1/agents/revision-agent/draft",
+        headers=headers,
+    )
+    assert create_draft_response.status_code == 200
+    assert create_draft_response.json()["status"] == "draft"
+    assert create_draft_response.json()["title"] == "Revision Agent"
+    assert create_draft_response.json()["manifest_json"]["instructions"] == "Inspect the live repository."
+
+    update_draft_response = client.patch(
+        "/api/v1/agents/revision-agent/draft",
+        headers=headers,
+        json={
+            "title": "Revision Agent v2",
+            "short_description": "Draft revision short description for the published agent.",
+            "full_description": "Draft revision full description.",
+            "category": "orchestrator",
+            "manifest_json": {
+                "instructions": "Inspect the draft repository.",
+            },
+            "install_instructions": "Install the draft bundle.",
+            "export_targets": ["codex", "claude_code"],
+        },
+    )
+    assert update_draft_response.status_code == 200
+    assert update_draft_response.json()["status"] == "draft"
+    assert update_draft_response.json()["title"] == "Revision Agent v2"
+    assert (
+        update_draft_response.json()["manifest_json"]["instructions"]
+        == "Inspect the draft repository."
+    )
+
+    live_details_response = client.get("/api/v1/agents/revision-agent")
+    assert live_details_response.status_code == 200
+    assert live_details_response.json()["status"] == "published"
+    assert live_details_response.json()["title"] == "Revision Agent"
+    assert (
+        live_details_response.json()["manifest_json"]["instructions"]
+        == "Inspect the live repository."
+    )
+
+    publish_draft_response = client.post(
+        "/api/v1/agents/revision-agent/draft/publish",
+        headers=headers,
+    )
+    assert publish_draft_response.status_code == 200
+    assert publish_draft_response.json()["status"] == "published"
+    assert publish_draft_response.json()["title"] == "Revision Agent v2"
+    assert publish_draft_response.json()["category"] == "orchestrator"
+    assert (
+        publish_draft_response.json()["manifest_json"]["instructions"]
+        == "Inspect the draft repository."
+    )
+
+    missing_draft_response = client.get(
+        "/api/v1/agents/revision-agent/draft",
+        headers=headers,
+    )
+    assert missing_draft_response.status_code == 404
+    assert missing_draft_response.json()["detail"] == "Draft revision not found."
